@@ -38,6 +38,7 @@ public class AnkleBalanceModule
         ActiveBone? thighL,
         ActiveBone? thighR,
         Vector3 centerOfMass,
+        Vector3 centerOfMassVelocity,
         float strength,
         float delta)
     {
@@ -48,7 +49,7 @@ public class AnkleBalanceModule
 
         Vector3 supportCenter = (footL.GlobalPosition + footR.GlobalPosition) * 0.5f;
         Vector3 comError = centerOfMass - supportCenter;
-        Vector3 comVelocity = pelvis.LinearVelocity;
+        Vector3 comVelocity = centerOfMassVelocity;
 
         // Charge the anti-windup-clamped integrator; opposite-sign errors discharge it naturally.
         // The raw integral is clamped so its offset contribution never exceeds MaxIntegralOffset radians.

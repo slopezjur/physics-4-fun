@@ -14,7 +14,8 @@ Physics4Fun.Ragdoll/
 ├── Modules/
 │   ├── DynamicSteppingModule.cs         # Instantaneous Capture Point (ICP) & 2-bone IK
 │   ├── WeightTransferModule.cs          # Asymmetric weight shifting & impedance scaling
-│   ├── AnkleBalanceModule.cs            # Ankle ground reaction strategy & planar foot alignment
+│   ├── AnkleBalanceModule.cs            # Ankle ground reaction strategy (PI) & planar foot alignment
+│   ├── HipStrategyModule.cs             # Medium-tier hip strategy: posture, CoM arrest, CoM height
 │   └── Reflexes/
 │       ├── ArmReflexModule.cs           # Counter-momentum torques & parachute fall bracing
 │       ├── VestibularGazeModule.cs      # VOR horizon leveling & gaze tracking
@@ -60,9 +61,10 @@ The stability guarantee holds only if $I_{\text{eff}}$ is the bone's **real** in
 ### Pillar 2: 100% Grounded Biomechanics & Ankle Strategy
 All standing forces and vertical support operate purely through internal knee and hip PD motors reacting against physical ground collision normal forces (zero artificial world forces / zero floating springs):
 * **Floor Planar Alignment:** Foot orientations dynamically align with terrain normal via local joint feed-forward offsets.
-* **Ankle Strategy:** Foot PD motors generate restorative ground reaction moments proportional to the horizontal Center of Mass (CoM) error relative to the base of support, with damping matched for a near-critically-damped response.
+* **Ankle Strategy (small perturbations):** Foot PD motors generate restorative ground reaction moments proportional to the horizontal Center of Mass (CoM) error relative to the base of support, with a clamped integral channel for DC position hold and damping matched for a near-critically-damped response.
+* **Hip Strategy (medium perturbations):** When the ankle channel saturates but the ICP has not escaped, hip/torso feed-forward offsets pull the body mass back over the support polygon (sagittal CoM arrest), right the pelvis/torso attitude against the planted feet, and regulate pelvis height through symmetric knee extension.
 * **Double Support:** $50/50$ nominal weight sharing with dual-foot ground reaction coupling, plus a lateral weight-shift loop that presses harder on the leg the CoM leans toward, tracking the CoP under the CoM and stiffening the loaded leg.
-* **Single Support:** Stance leg carries full load with stiffened impedance ($120\%$), while the swing leg unweights with compliant impedance ($75\%$).
+* **Single Support:** Stance leg carries ~95% of the target weight share with stiffened impedance ($120\%$) and an active lateral lean shifts the CoM over the stance foot so the swing leg truly unweights; swings commit — only real foot contact late in the arc counts as touchdown.
 
 ### Pillar 3: Protected Balance Region (Pelvis Stabilization)
 The pelvis is the skeletal root and has no parent actuator, yet it absorbs every reaction torque from the spine and thigh motors. A dedicated stabilizer computes the pelvis attitude error ($\text{pelvisUp} \times \text{worldUp}$) and applies a corrective PD torque directly to the pelvis, distributing the equal-and-opposite reaction across the grounded feet. The stabilizer scales with the global balance strength fades, fully disengaging during flailing, knockout, and deep-tilt regimes so the body falls naturally once balance is lost.

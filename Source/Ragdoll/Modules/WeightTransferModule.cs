@@ -31,17 +31,17 @@ public class WeightTransferModule
 
         if (stepPhase == StepPhase.LeftSwing)
         {
-            // Left leg in swing -> Right leg takes 80% stance load, Left has 20% compliant swing support
+            // Left leg in swing -> Right leg takes ~95% stance load so the swing foot truly unweights
             float s = Mathf.Clamp(stepProgress, 0.0f, 1.0f);
-            float swingWeight = 0.20f + 0.10f * (1.0f - Mathf.Sin(Mathf.Pi * s));
+            float swingWeight = 0.05f + 0.05f * (1.0f - Mathf.Sin(Mathf.Pi * s));
             targetShareL = swingWeight;
             targetShareR = 1.0f - swingWeight;
         }
         else if (stepPhase == StepPhase.RightSwing)
         {
-            // Right leg in swing -> Left leg takes 80% stance load, Right has 20% compliant swing support
+            // Right leg in swing -> Left leg takes ~95% stance load so the swing foot truly unweights
             float s = Mathf.Clamp(stepProgress, 0.0f, 1.0f);
-            float swingWeight = 0.20f + 0.10f * (1.0f - Mathf.Sin(Mathf.Pi * s));
+            float swingWeight = 0.05f + 0.05f * (1.0f - Mathf.Sin(Mathf.Pi * s));
             targetShareR = swingWeight;
             targetShareL = 1.0f - swingWeight;
         }

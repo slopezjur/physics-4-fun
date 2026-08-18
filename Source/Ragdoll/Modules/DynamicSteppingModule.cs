@@ -169,7 +169,9 @@ public class DynamicSteppingModule
             {
                 Vector3 localUp = pelvis.GlobalTransform.Basis.Inverse() * Vector3.Up;
                 float stancePitch = Mathf.Clamp(Mathf.Atan2(localUp.Z, localUp.Y) * 0.8f, -0.30f, 0.30f);
-                float stanceRoll = Mathf.Clamp(Mathf.Atan2(-localUp.X, localUp.Y) * 0.8f + (isLeft ? -0.05f : 0.05f), -0.25f, 0.25f);
+                // Strong lateral lean onto the stance side: actively shifts the CoM over the stance
+                // foot so the swing leg unweights and can actually leave the ground.
+                float stanceRoll = Mathf.Clamp(Mathf.Atan2(-localUp.X, localUp.Y) * 0.8f + (isLeft ? -0.12f : 0.12f), -0.25f, 0.25f);
 
                 stanceShin.FeedForwardTargetOffset = Quaternion.Identity;
                 // Same corrective convention as BalanceController's hip posture: +pitch brakes the fall
@@ -178,9 +180,11 @@ public class DynamicSteppingModule
             }
 
             ActiveBone swingFoot = isLeft ? footL : footR;
-            float swingFootHeight = swingFoot.GlobalPosition.Y - (isLeft ? groundPointL.Y : groundPointR.Y);
             bool isGroundedSwing = isLeft ? isGroundedL : isGroundedR;
-            bool touchdown = (isGroundedSwing || swingFootHeight < 0.04f) && s > 0.45f;
+            // Commit to the swing: only real foot contact late in the arc (descending) counts as
+            // touchdown. Aborting on early contact/height thrashed the step machine — the swing
+            // foot was still loaded from stance, so every step aborted at s~0.45 without relocating.
+            bool touchdown = isGroundedSwing && s > 0.60f;
 
             if (s >= 1.0f || touchdown)
             {

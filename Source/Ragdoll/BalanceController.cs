@@ -61,6 +61,7 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
     private readonly DynamicSteppingModule _stepping = new();
     private readonly WeightTransferModule _weightTransfer = new();
     private readonly AnkleBalanceModule _ankleBalance = new();
+    private readonly HipStrategyModule _hipStrategy = new();
     private readonly ArmReflexModule _armReflex = new();
     private readonly VestibularGazeModule _gazeReflex = new();
     private readonly HitReactionReflexModule _hitReaction = new();
@@ -381,6 +382,7 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
             _stepping.Reset();
             _weightTransfer.Reset();
             _ankleBalance.Reset();
+            _hipStrategy.Reset();
             return;
         }
 
@@ -396,6 +398,7 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
             PelvisStabilizerTorque = Vector3.Zero;
             _stepping.Reset();
             _ankleBalance.Reset();
+            _hipStrategy.Reset();
             return;
         }
 
@@ -458,41 +461,30 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
         // 4. Pure Internal Joint Biomechanics (Zero Floating Forces)
         LastSuspensionForce = 0.0f;
 
-        // 5. Upright Torso Posture Alignment via Internal Joint PD Offsets
+        // 5. Hip Strategy (posture righting, sagittal CoM arrest, CoM height) via internal joint PD offsets
         bool hasGroundContact = IsGroundedL || IsGroundedR;
         if (activeStrength > 0.01f && hasGroundContact && CurrentStepPhase == StepPhase.DoubleSupport)
         {
-            Vector3 localUp = _pelvis.GlobalTransform.Basis.Inverse() * Vector3.Up;
-            float pitchError = Mathf.Clamp(Mathf.Atan2(localUp.Z, localUp.Y) * 0.8f, -0.40f, 0.40f);
-            float rollError = Mathf.Clamp(Mathf.Atan2(-localUp.X, localUp.Y) * 0.8f, -0.30f, 0.30f);
-
-            // Hip flexion (+pitchError) rotates the thigh backward against the planted foot; the reaction
-            // torque brakes the fall of the unactuated pelvis (the previous -pitchError sign was regenerative)
-            Quaternion hipPosture = Quaternion.FromEuler(new Vector3(pitchError * activeStrength, 0.0f, rollError * activeStrength));
-
-            if (_thighL != null && GodotObject.IsInstanceValid(_thighL))
-            {
-                _thighL.FeedForwardTargetOffset = hipPosture;
-            }
-            if (_thighR != null && GodotObject.IsInstanceValid(_thighR))
-            {
-                _thighR.FeedForwardTargetOffset = hipPosture;
-            }
-
-            if (_spine != null && GodotObject.IsInstanceValid(_spine))
-            {
-                Vector3 spineLocalUp = _spine.GlobalTransform.Basis.Inverse() * Vector3.Up;
-                float spinePitch = Mathf.Clamp(Mathf.Atan2(spineLocalUp.Z, spineLocalUp.Y) * 0.5f, -0.30f, 0.30f);
-                float spineRoll = Mathf.Clamp(Mathf.Atan2(-spineLocalUp.X, spineLocalUp.Y) * 0.5f, -0.20f, 0.20f);
-                // Same corrective convention as the hip: +error tips the target backward, righting the torso
-                _spine.FeedForwardTargetOffset = Quaternion.FromEuler(new Vector3(spinePitch * activeStrength, 0.0f, spineRoll * activeStrength));
-            }
+            float groundY = (_groundPointL.Y + _groundPointR.Y) * 0.5f;
+            _hipStrategy.Apply(
+                _pelvis,
+                _spine,
+                _thighL,
+                _thighR,
+                _shinL,
+                _shinR,
+                _footL,
+                _footR,
+                CenterOfMass,
+                CenterOfMassVelocity,
+                groundY,
+                activeStrength);
         }
 
         // 6. Ankle Ground Reaction Strategy (Double Support Only)
         if (CurrentStepPhase == StepPhase.DoubleSupport && (state == RagdollState.Balanced || state == RagdollState.Stumbling) && hasGroundContact)
         {
-            _ankleBalance.ApplyBalance(_pelvis, _footL, _footR, _thighL, _thighR, CenterOfMass, activeStrength, delta);
+            _ankleBalance.ApplyBalance(_pelvis, _footL, _footR, _thighL, _thighR, CenterOfMass, CenterOfMassVelocity, activeStrength, delta);
         }
     }
 
