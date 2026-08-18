@@ -408,7 +408,11 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
         BalanceStrengthNow = activeStrength;
 
         // Pelvis Protected Balance Region: direct attitude stabilization of the unactuated root
-        ApplyPelvisStabilization(activeStrength);
+        // Only active during upright balance phases. Disabled during recovery to prevent artificial floating/dragging on the floor.
+        if (state == RagdollState.Balanced || state == RagdollState.Stumbling)
+        {
+            ApplyPelvisStabilization(activeStrength);
+        }
 
         // 2. Dynamic Stepping Module (Capture Point)
         if (state == RagdollState.Balanced || state == RagdollState.Stumbling)

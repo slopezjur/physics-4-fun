@@ -216,14 +216,41 @@ public class RagdollTelemetryRecorder
         try
         {
             string globalPath = ProjectSettings.GlobalizePath($"res://{relativePath}");
-            string? dir = Path.GetDirectoryName(globalPath);
-            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+            string? baseDir = Path.GetDirectoryName(globalPath);
+            if (!string.IsNullOrEmpty(baseDir) && !Directory.Exists(baseDir))
             {
-                Directory.CreateDirectory(dir);
+                Directory.CreateDirectory(baseDir);
             }
 
-            File.WriteAllLines(globalPath, _csvRows);
-            GD.Print($"[RagdollTelemetryRecorder] SUCCESSFULLY saved {_csvRows.Count - 1} frames to: {globalPath}");
+            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            string baseName = Path.GetFileNameWithoutExtension(globalPath);
+            string dumpName = $"{baseName}_{timestamp}";
+            
+            // Create a subfolder for this specific dump
+            string dumpDir = Path.Combine(baseDir ?? "", dumpName);
+            Directory.CreateDirectory(dumpDir);
+
+            // Save the csv inside the new subfolder
+            string newFileName = $"{dumpName}.csv";
+            string finalPath = Path.Combine(dumpDir, newFileName);
+
+            File.WriteAllLines(finalPath, _csvRows);
+            GD.Print($"[RagdollTelemetryRecorder] SUCCESSFULLY saved {_csvRows.Count - 1} frames to: {finalPath}");
+
+            // Keep only the last 3 dump subfolders
+            if (!string.IsNullOrEmpty(baseDir))
+            {
+                var dirs = new DirectoryInfo(baseDir).GetDirectories($"{baseName}_*");
+                if (dirs.Length > 3)
+                {
+                    Array.Sort(dirs, (a, b) => a.CreationTime.CompareTo(b.CreationTime));
+                    for (int i = 0; i < dirs.Length - 3; i++)
+                    {
+                        dirs[i].Delete(true);
+                        GD.Print($"[RagdollTelemetryRecorder] Deleted old telemetry folder: {dirs[i].Name}");
+                    }
+                }
+            }
         }
         catch (Exception ex)
         {

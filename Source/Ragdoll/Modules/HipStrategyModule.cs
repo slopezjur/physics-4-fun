@@ -77,7 +77,20 @@ public class HipStrategyModule
             (comLocal.Z * ComArrestGain) + (velLocal.Z * ComArrestDamping),
             -MaxComArrestOffset, MaxComArrestOffset);
 
-        Quaternion hipOffset = Quaternion.FromEuler(new Vector3((pitchError + arrestPitch) * strength, 0.0f, rollError * strength));
+        // 3. CoM height: flex knees (-X) when the pelvis rides low.
+        // We clamp this to be strictly <= 0.0f to prevent knee hyperextension when riding high.
+        if (_restPelvisHeight < 0.0f)
+        {
+            _restPelvisHeight = pelvis.GlobalPosition.Y - groundY;
+        }
+        float heightError = _restPelvisHeight - (pelvis.GlobalPosition.Y - groundY);
+        float heightOffset = Mathf.Clamp(heightError * HeightGain, -MaxHeightOffset, 0.0f) * strength;
+        
+        // 4. Hip Pitch Calculation: Apply balance correction + squat compensation
+        // If the knee bends by `heightOffset` (negative), the hip must bend by `-heightOffset` (positive) to keep the torso upright.
+        float finalHipPitch = (pitchError + arrestPitch) * strength - heightOffset;
+        Quaternion hipOffset = Quaternion.FromEuler(new Vector3(finalHipPitch, 0.0f, rollError * strength));
+
         if (thighL != null && GodotObject.IsInstanceValid(thighL))
         {
             thighL.FeedForwardTargetOffset = hipOffset;
@@ -97,15 +110,6 @@ public class HipStrategyModule
             spine.FeedForwardTargetOffset = Quaternion.FromEuler(new Vector3((spinePitch + arrestPitch * SpineArrestScale) * strength, 0.0f, spineRoll * strength));
         }
 
-        // 3. CoM height: extend (+X, anatomical knee extension) when the pelvis rides low,
-        // flex when it rides high. Symmetric on both knees; owns the shin offsets in
-        // double support, where no other module writes them.
-        if (_restPelvisHeight < 0.0f)
-        {
-            _restPelvisHeight = pelvis.GlobalPosition.Y - groundY;
-        }
-        float heightError = _restPelvisHeight - (pelvis.GlobalPosition.Y - groundY);
-        float heightOffset = Mathf.Clamp(heightError * HeightGain, -MaxHeightOffset, MaxHeightOffset) * strength;
         Quaternion kneeOffset = Quaternion.FromEuler(new Vector3(heightOffset, 0.0f, 0.0f));
         if (shinL != null && GodotObject.IsInstanceValid(shinL))
         {

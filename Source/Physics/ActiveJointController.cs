@@ -37,7 +37,7 @@ public partial class ActiveJointController : RigidBody3D
     public override void _Process(double delta)
     {
         // Keyboard controls to test disturbance and target angle variation
-        if (Input.IsActionJustPressed("ui_accept") || Input.IsKeyPressed(Key.F))
+        if (Input.IsActionJustPressed("ui_accept"))
         {
             // Apply horizontal lateral kick at top of the body
             Vector3 randomDir = new Vector3(

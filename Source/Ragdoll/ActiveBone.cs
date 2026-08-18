@@ -39,6 +39,8 @@ public partial class ActiveBone : RigidBody3D
     /// <summary>Smallest inverse-inertia tensor entry treated as valid; below this the body is effectively static.</summary>
     private const float MinValidInverseInertia = 1e-6f;
 
+    public float ApparentInertiaMultiplier { get; set; } = 1.0f;
+
     public float MuscleStrength { get; set; } = 1.0f;
     public Quaternion TargetLocalRotation { get; set; } = Quaternion.Identity;
     
@@ -141,24 +143,34 @@ public partial class ActiveBone : RigidBody3D
     }
 
     private bool _pendingReset = false;
-    private bool _realInertiaCaptured = false;
+    private float _baseCapturedInertia = -1.0f;
 
     public override void _IntegrateForces(PhysicsDirectBodyState3D state)
     {
         base._IntegrateForces(state);
 
         // Feed the SPD denominator the bone's REAL free inertia about its CoM (torques are applied
-        // about the CoM, not the joint pivot). The flat 0.35 export overestimates small bones ~5x,
-        // which voids the implicit stability guarantee and produces a per-tick limit cycle.
-        if (!_realInertiaCaptured)
+        // about the CoM, not the joint pivot).
+        if (_baseCapturedInertia < 0.0f)
         {
-            _realInertiaCaptured = true;
             Basis invInertia = state.GetInverseInertiaTensor();
             float maxInv = Mathf.Max(Mathf.Abs(invInertia.X.X), Mathf.Max(Mathf.Abs(invInertia.Y.Y), Mathf.Abs(invInertia.Z.Z)));
             if (maxInv > MinValidInverseInertia)
             {
-                _pid.EffectiveInertia = Mathf.Max(MinCapturedInertia, 1.0f / maxInv);
+                _baseCapturedInertia = Mathf.Max(MinCapturedInertia, 1.0f / maxInv);
             }
+            else
+            {
+                _baseCapturedInertia = EffectiveInertia;
+            }
+        }
+
+        // Dynamically scale apparent inertia when grounded. Light limbs (like arms) coupled 
+        // to the ground bear the weight of the entire body. Scaling the inertia prevents the 
+        // Tan-Liu-Turk SPD denominator from crippling the torque output during push-ups.
+        if (_baseCapturedInertia > 0.0f)
+        {
+            _pid.EffectiveInertia = _baseCapturedInertia * ApparentInertiaMultiplier;
         }
 
         if (_pendingReset)

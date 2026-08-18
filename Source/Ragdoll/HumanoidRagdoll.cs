@@ -197,16 +197,34 @@ public partial class HumanoidRagdoll : Node3D
     {
         int stateKey = (int)CurrentState;
         float stiffness = StateStiffnessMap.TryGetValue(stateKey, out float value) ? value : 1.0f;
+        float inertiaMultiplier = 1.0f;
 
         if (CurrentState == RagdollState.Recovering && Balance != null)
         {
             // Smoothly ramp up muscle stiffness from 0.60 (assisted get-up) to 1.0 (squat/stand extension)
             stiffness = Mathf.Lerp(0.60f, 1.0f, Balance.RecoveryProgressNormalized);
+            
+            // Boost apparent inertia significantly. When pushing up, light limbs (arms) couple to 
+            // the mass of the entire 80kg torso. A 100x multiplier accurately reflects this ABI 
+            // (Articulated Body Inertia) and prevents the SPD denominator from crushing the torque.
+            inertiaMultiplier = 100.0f;
         }
 
         foreach (var bone in _allBones)
         {
-            bone.MuscleStrength = stiffness;
+            float finalStiffness = stiffness;
+            
+            // The arms need to act as primary weight-bearing limbs during a push-up.
+            // Boost their baseline strength by 10x (120 -> 1200) to match the legs.
+            if (CurrentState == RagdollState.Recovering && 
+                (bone.BoneName.StartsWith("UpperArm") || bone.BoneName.StartsWith("Forearm") || bone.BoneName == "Chest" || bone.BoneName == "Spine"))
+            {
+                // The chest and spine also need to hold the torso straight against gravity.
+                finalStiffness *= 10.0f; 
+            }
+
+            bone.MuscleStrength = finalStiffness;
+            bone.ApparentInertiaMultiplier = inertiaMultiplier;
         }
     }
 

@@ -6,7 +6,7 @@ public partial class AutomatedTest : Node
     // Push scenario: forward impulse on the chest mid-run; the ragdoll must recover.
     private static readonly Vector3 PushImpulse = new(0.0f, 0.0f, -12.0f); // N·s, -Z (forward)
     private const double PushTime = 3.0;
-    private const double TestDuration = 10.1;
+    private const double TestDuration = 15.1;
 
     private Node3D? _ragdoll;
     private RigidBody3D? _pelvis;

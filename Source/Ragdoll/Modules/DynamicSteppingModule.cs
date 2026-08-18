@@ -87,7 +87,10 @@ public class DynamicSteppingModule
             if (!isSettleGraceActive && _doubleSupportDuration >= 0.04f && (isSeriouslyPerturbed || isIcpEscaped))
             {
                 _doubleSupportDuration = 0.0f;
-                bool swingLeft = Mathf.Abs(localIcp.X) > 0.04f ? (localIcp.X > 0.0f) : !_lastSwingWasLeft;
+                // If falling predominantly forward/backward, we MUST alternate legs to run/walk without tripping.
+                // Only override the alternating walk cycle if the fall is strongly lateral.
+                bool isLateralFall = Mathf.Abs(localIcp.X) > 0.06f && Mathf.Abs(localIcp.X) > Mathf.Abs(localIcp.Z) * 0.4f;
+                bool swingLeft = isLateralFall ? (localIcp.X > 0.0f) : !_lastSwingWasLeft;
                 _lastSwingWasLeft = swingLeft;
 
                 CurrentStepPhase = swingLeft ? StepPhase.LeftSwing : StepPhase.RightSwing;
@@ -154,7 +157,13 @@ public class DynamicSteppingModule
                 float cosKnee = (legLen1 * legLen1 + legLen2 * legLen2 - dist * dist) / (2.0f * legLen1 * legLen2);
                 float kneeAngle = Mathf.Pi - Mathf.Acos(Mathf.Clamp(cosKnee, -1.0f, 1.0f));
 
+                float cosHip = (dist * dist + legLen1 * legLen1 - legLen2 * legLen2) / (2.0f * dist * legLen1);
+                float hipIKOffset = Mathf.Acos(Mathf.Clamp(cosHip, -1.0f, 1.0f));
+
                 float hipPitch = Mathf.Atan2(-localTargetVec.Z, -localTargetVec.Y);
+                // Because the knee bends backward (negative pitch), we must rotate the thigh forward (positive pitch)
+                hipPitch += hipIKOffset;
+
                 float hipRoll = Mathf.Atan2(localTargetVec.X, -localTargetVec.Y);
 
                 swingThigh.FeedForwardTargetOffset = Quaternion.FromEuler(new Vector3(hipPitch * strength, 0.0f, hipRoll * strength));
