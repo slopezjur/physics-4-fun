@@ -1,0 +1,713 @@
+[gd_scene load_steps=30 format=3 uid="uid://dp62k4a8uwns2"]
+
+[ext_resource type="Script" path="res://Source/Ragdoll/HumanoidRagdoll.cs" id="1_ragdoll"]
+[ext_resource type="Script" path="res://Source/Ragdoll/ActiveBone.cs" id="2_bone"]
+[ext_resource type="Script" path="res://Source/Ragdoll/BalanceController.cs" id="3_balance"]
+[ext_resource type="Script" path="res://Source/Ragdoll/RagdollDebugInput.cs" id="4_input"]
+
+[sub_resource type="PhysicsMaterial" id="PhysicsMaterial_Foot"]
+friction = 1.2
+rough = true
+
+[sub_resource type="PhysicsMaterial" id="PhysicsMaterial_Body"]
+friction = 0.9
+rough = true
+
+[sub_resource type="StandardMaterial3D" id="Mat_Torso"]
+albedo_color = Color(0.18, 0.55, 0.85, 1)
+roughness = 0.4
+
+[sub_resource type="StandardMaterial3D" id="Mat_Head"]
+albedo_color = Color(0.95, 0.75, 0.6, 1)
+roughness = 0.5
+
+[sub_resource type="StandardMaterial3D" id="Mat_Limbs"]
+albedo_color = Color(0.2, 0.68, 0.78, 1)
+roughness = 0.4
+
+[sub_resource type="StandardMaterial3D" id="Mat_Joints"]
+albedo_color = Color(0.12, 0.35, 0.55, 1)
+roughness = 0.3
+
+[sub_resource type="StandardMaterial3D" id="Mat_Feet"]
+albedo_color = Color(0.1, 0.2, 0.3, 1)
+roughness = 0.8
+
+[sub_resource type="BoxShape3D" id="Shape_Pelvis"]
+size = Vector3(0.36, 0.2, 0.24)
+
+[sub_resource type="BoxMesh" id="Mesh_Pelvis"]
+material = SubResource("Mat_Joints")
+size = Vector3(0.36, 0.2, 0.24)
+
+[sub_resource type="CapsuleShape3D" id="Shape_Spine"]
+radius = 0.12
+height = 0.25
+
+[sub_resource type="CapsuleMesh" id="Mesh_Spine"]
+material = SubResource("Mat_Torso")
+radius = 0.12
+height = 0.25
+
+[sub_resource type="BoxShape3D" id="Shape_Chest"]
+size = Vector3(0.42, 0.3, 0.28)
+
+[sub_resource type="BoxMesh" id="Mesh_Chest"]
+material = SubResource("Mat_Torso")
+size = Vector3(0.42, 0.3, 0.28)
+
+[sub_resource type="SphereShape3D" id="Shape_Head"]
+radius = 0.14
+
+[sub_resource type="SphereMesh" id="Mesh_Head"]
+material = SubResource("Mat_Head")
+radius = 0.14
+height = 0.28
+
+[sub_resource type="StandardMaterial3D" id="Mat_Face"]
+albedo_color = Color(0.05, 0.05, 0.05, 1)
+roughness = 0.6
+
+[sub_resource type="SphereMesh" id="Mesh_Eye"]
+material = SubResource("Mat_Face")
+radius = 0.022
+height = 0.044
+
+[sub_resource type="BoxMesh" id="Mesh_Mouth"]
+material = SubResource("Mat_Face")
+size = Vector3(0.09, 0.015, 0.02)
+
+[sub_resource type="CapsuleShape3D" id="Shape_UpperArm"]
+radius = 0.06
+height = 0.32
+
+[sub_resource type="CapsuleMesh" id="Mesh_UpperArm"]
+material = SubResource("Mat_Limbs")
+radius = 0.06
+height = 0.32
+
+[sub_resource type="CapsuleShape3D" id="Shape_Forearm"]
+radius = 0.05
+height = 0.3
+
+[sub_resource type="CapsuleMesh" id="Mesh_Forearm"]
+material = SubResource("Mat_Limbs")
+radius = 0.05
+height = 0.3
+
+[sub_resource type="CapsuleShape3D" id="Shape_Thigh"]
+radius = 0.08
+height = 0.38
+
+[sub_resource type="CapsuleMesh" id="Mesh_Thigh"]
+material = SubResource("Mat_Limbs")
+radius = 0.08
+height = 0.38
+
+[sub_resource type="CapsuleShape3D" id="Shape_Shin"]
+radius = 0.07
+height = 0.38
+
+[sub_resource type="CapsuleMesh" id="Mesh_Shin"]
+material = SubResource("Mat_Limbs")
+radius = 0.07
+height = 0.38
+
+[sub_resource type="BoxShape3D" id="Shape_Foot"]
+size = Vector3(0.12, 0.08, 0.22)
+
+[sub_resource type="BoxMesh" id="Mesh_Foot"]
+material = SubResource("Mat_Feet")
+size = Vector3(0.12, 0.08, 0.22)
+
+[node name="ActiveRagdoll" type="Node3D" node_paths=PackedStringArray("Pelvis", "Spine", "Chest", "Head", "Balance")]
+script = ExtResource("1_ragdoll")
+Pelvis = NodePath("Pelvis")
+Spine = NodePath("Spine")
+Chest = NodePath("Chest")
+Head = NodePath("Head")
+Balance = NodePath("BalanceController")
+
+[node name="BalanceController" type="Node" parent="."]
+script = ExtResource("3_balance")
+
+[node name="RagdollDebugInput" type="Node" parent="." node_paths=PackedStringArray("Ragdoll")]
+script = ExtResource("4_input")
+Ragdoll = NodePath("..")
+
+[node name="Pelvis" type="RigidBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.82, 0)
+collision_layer = 2
+collision_mask = 1
+physics_material_override = SubResource("PhysicsMaterial_Body")
+mass = 14.0
+script = ExtResource("2_bone")
+BoneName = "Pelvis"
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Pelvis"]
+shape = SubResource("Shape_Pelvis")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Pelvis"]
+mesh = SubResource("Mesh_Pelvis")
+
+[node name="Joint_Pelvis_Spine" type="Generic6DOFJoint3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+node_a = NodePath("../Pelvis")
+node_b = NodePath("../Spine")
+angular_limit_x/enabled = true
+angular_limit_x/upper_angle = 0.5
+angular_limit_x/lower_angle = -0.5
+angular_limit_y/enabled = true
+angular_limit_y/upper_angle = 0.5
+angular_limit_y/lower_angle = -0.5
+angular_limit_z/enabled = true
+angular_limit_z/upper_angle = 0.5
+angular_limit_z/lower_angle = -0.5
+angular_spring_x/enabled = false
+angular_spring_x/stiffness = 350.0
+angular_spring_x/damping = 35.0
+angular_spring_y/enabled = false
+angular_spring_y/stiffness = 350.0
+angular_spring_y/damping = 35.0
+angular_spring_z/enabled = false
+angular_spring_z/stiffness = 350.0
+angular_spring_z/damping = 35.0
+
+[node name="Spine" type="RigidBody3D" parent="." node_paths=PackedStringArray("ParentBone")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.0, 0)
+collision_layer = 2
+collision_mask = 1
+mass = 8.0
+script = ExtResource("2_bone")
+BoneName = "Spine"
+ParentBone = NodePath("../Pelvis")
+ProportionalGain = 600.0
+DerivativeGain = 18.0
+MaxTorque = 300.0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Spine"]
+shape = SubResource("Shape_Spine")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Spine"]
+mesh = SubResource("Mesh_Spine")
+
+[node name="Joint_Spine_Chest" type="Generic6DOFJoint3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.12, 0)
+node_a = NodePath("../Spine")
+node_b = NodePath("../Chest")
+angular_limit_x/enabled = true
+angular_limit_x/upper_angle = 0.5
+angular_limit_x/lower_angle = -0.5
+angular_limit_y/enabled = true
+angular_limit_y/upper_angle = 0.5
+angular_limit_y/lower_angle = -0.5
+angular_limit_z/enabled = true
+angular_limit_z/upper_angle = 0.5
+angular_limit_z/lower_angle = -0.5
+angular_spring_x/enabled = false
+angular_spring_x/stiffness = 350.0
+angular_spring_x/damping = 35.0
+angular_spring_y/enabled = false
+angular_spring_y/stiffness = 350.0
+angular_spring_y/damping = 35.0
+angular_spring_z/enabled = false
+angular_spring_z/stiffness = 350.0
+angular_spring_z/damping = 35.0
+
+[node name="Chest" type="RigidBody3D" parent="." node_paths=PackedStringArray("ParentBone")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.25, 0)
+collision_layer = 2
+collision_mask = 1
+mass = 16.0
+script = ExtResource("2_bone")
+BoneName = "Chest"
+ParentBone = NodePath("../Spine")
+ProportionalGain = 350.0
+DerivativeGain = 20.0
+MaxTorque = 350.0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Chest"]
+shape = SubResource("Shape_Chest")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Chest"]
+mesh = SubResource("Mesh_Chest")
+
+[node name="Joint_Chest_Head" type="Generic6DOFJoint3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.4, 0)
+node_a = NodePath("../Chest")
+node_b = NodePath("../Head")
+angular_limit_x/enabled = true
+angular_limit_x/upper_angle = 0.7
+angular_limit_x/lower_angle = -0.7
+angular_limit_y/enabled = true
+angular_limit_y/upper_angle = 0.7
+angular_limit_y/lower_angle = -0.7
+angular_limit_z/enabled = true
+angular_limit_z/upper_angle = 0.7
+angular_limit_z/lower_angle = -0.7
+angular_spring_x/enabled = false
+angular_spring_x/stiffness = 150.0
+angular_spring_x/damping = 18.0
+angular_spring_y/enabled = false
+angular_spring_y/stiffness = 150.0
+angular_spring_y/damping = 18.0
+angular_spring_z/enabled = false
+angular_spring_z/stiffness = 150.0
+angular_spring_z/damping = 18.0
+
+[node name="Head" type="RigidBody3D" parent="." node_paths=PackedStringArray("ParentBone")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.54, 0)
+collision_layer = 2
+collision_mask = 1
+mass = 5.0
+script = ExtResource("2_bone")
+BoneName = "Head"
+ParentBone = NodePath("../Chest")
+ProportionalGain = 120.0
+DerivativeGain = 12.0
+MaxTorque = 250.0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Head"]
+shape = SubResource("Shape_Head")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Head"]
+mesh = SubResource("Mesh_Head")
+
+[node name="Eye_L" type="MeshInstance3D" parent="Head"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.05, 0.03, -0.135)
+mesh = SubResource("Mesh_Eye")
+
+[node name="Eye_R" type="MeshInstance3D" parent="Head"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.05, 0.03, -0.135)
+mesh = SubResource("Mesh_Eye")
+
+[node name="Mouth" type="MeshInstance3D" parent="Head"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.05, -0.135)
+mesh = SubResource("Mesh_Mouth")
+
+[node name="Joint_Chest_UpperArm_L" type="Generic6DOFJoint3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.24, 1.3, 0)
+node_a = NodePath("../Chest")
+node_b = NodePath("../UpperArm_L")
+angular_limit_x/enabled = true
+angular_limit_x/upper_angle = 1.4
+angular_limit_x/lower_angle = -1.4
+angular_limit_y/enabled = true
+angular_limit_y/upper_angle = 1.4
+angular_limit_y/lower_angle = -1.4
+angular_limit_z/enabled = true
+angular_limit_z/upper_angle = 1.4
+angular_limit_z/lower_angle = -1.4
+angular_spring_x/enabled = false
+angular_spring_x/stiffness = 100.0
+angular_spring_x/damping = 12.0
+angular_spring_y/enabled = false
+angular_spring_y/stiffness = 100.0
+angular_spring_y/damping = 12.0
+angular_spring_z/enabled = false
+angular_spring_z/stiffness = 100.0
+angular_spring_z/damping = 12.0
+
+[node name="UpperArm_L" type="RigidBody3D" parent="." node_paths=PackedStringArray("ParentBone")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.36, 1.16, 0)
+collision_layer = 2
+collision_mask = 1
+mass = 2.5
+script = ExtResource("2_bone")
+BoneName = "UpperArm_L"
+ParentBone = NodePath("../Chest")
+ProportionalGain = 120.0
+DerivativeGain = 10.0
+MaxTorque = 200.0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="UpperArm_L"]
+shape = SubResource("Shape_UpperArm")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="UpperArm_L"]
+mesh = SubResource("Mesh_UpperArm")
+
+[node name="Joint_UpperArm_Forearm_L" type="Generic6DOFJoint3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.36, 1.0, 0)
+node_a = NodePath("../UpperArm_L")
+node_b = NodePath("../Forearm_L")
+angular_limit_x/enabled = true
+angular_limit_x/upper_angle = 2.2
+angular_limit_x/lower_angle = -0.2
+angular_limit_y/enabled = true
+angular_limit_y/upper_angle = 0.15
+angular_limit_y/lower_angle = -0.15
+angular_limit_z/enabled = true
+angular_limit_z/upper_angle = 0.15
+angular_limit_z/lower_angle = -0.15
+angular_spring_x/enabled = false
+angular_spring_x/stiffness = 80.0
+angular_spring_x/damping = 10.0
+
+[node name="Forearm_L" type="RigidBody3D" parent="." node_paths=PackedStringArray("ParentBone")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.36, 0.84, 0)
+collision_layer = 2
+collision_mask = 1
+mass = 1.8
+physics_material_override = SubResource("PhysicsMaterial_Foot")
+script = ExtResource("2_bone")
+BoneName = "Forearm_L"
+ParentBone = NodePath("../UpperArm_L")
+ProportionalGain = 100.0
+DerivativeGain = 8.0
+MaxTorque = 150.0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Forearm_L"]
+shape = SubResource("Shape_Forearm")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Forearm_L"]
+mesh = SubResource("Mesh_Forearm")
+
+[node name="Joint_Chest_UpperArm_R" type="Generic6DOFJoint3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.24, 1.3, 0)
+node_a = NodePath("../Chest")
+node_b = NodePath("../UpperArm_R")
+angular_limit_x/enabled = true
+angular_limit_x/upper_angle = 1.4
+angular_limit_x/lower_angle = -1.4
+angular_limit_y/enabled = true
+angular_limit_y/upper_angle = 1.4
+angular_limit_y/lower_angle = -1.4
+angular_limit_z/enabled = true
+angular_limit_z/upper_angle = 1.4
+angular_limit_z/lower_angle = -1.4
+angular_spring_x/enabled = false
+angular_spring_x/stiffness = 100.0
+angular_spring_x/damping = 12.0
+angular_spring_y/enabled = false
+angular_spring_y/stiffness = 100.0
+angular_spring_y/damping = 12.0
+angular_spring_z/enabled = false
+angular_spring_z/stiffness = 100.0
+angular_spring_z/damping = 12.0
+
+[node name="UpperArm_R" type="RigidBody3D" parent="." node_paths=PackedStringArray("ParentBone")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.36, 1.16, 0)
+collision_layer = 2
+collision_mask = 1
+mass = 2.5
+script = ExtResource("2_bone")
+BoneName = "UpperArm_R"
+ParentBone = NodePath("../Chest")
+ProportionalGain = 120.0
+DerivativeGain = 10.0
+MaxTorque = 200.0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="UpperArm_R"]
+shape = SubResource("Shape_UpperArm")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="UpperArm_R"]
+mesh = SubResource("Mesh_UpperArm")
+
+[node name="Joint_UpperArm_Forearm_R" type="Generic6DOFJoint3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.36, 1.0, 0)
+node_a = NodePath("../UpperArm_R")
+node_b = NodePath("../Forearm_R")
+angular_limit_x/enabled = true
+angular_limit_x/upper_angle = 2.2
+angular_limit_x/lower_angle = -0.2
+angular_limit_y/enabled = true
+angular_limit_y/upper_angle = 0.15
+angular_limit_y/lower_angle = -0.15
+angular_limit_z/enabled = true
+angular_limit_z/upper_angle = 0.15
+angular_limit_z/lower_angle = -0.15
+angular_spring_x/enabled = false
+angular_spring_x/stiffness = 80.0
+angular_spring_x/damping = 10.0
+
+[node name="Forearm_R" type="RigidBody3D" parent="." node_paths=PackedStringArray("ParentBone")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.36, 0.84, 0)
+collision_layer = 2
+collision_mask = 1
+mass = 1.8
+physics_material_override = SubResource("PhysicsMaterial_Foot")
+script = ExtResource("2_bone")
+BoneName = "Forearm_R"
+ParentBone = NodePath("../UpperArm_R")
+ProportionalGain = 100.0
+DerivativeGain = 8.0
+MaxTorque = 150.0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Forearm_R"]
+shape = SubResource("Shape_Forearm")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Forearm_R"]
+mesh = SubResource("Mesh_Forearm")
+
+[node name="Joint_Pelvis_Thigh_L" type="Generic6DOFJoint3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.14, 0.74, 0)
+node_a = NodePath("../Pelvis")
+node_b = NodePath("../Thigh_L")
+angular_limit_x/enabled = true
+angular_limit_x/upper_angle = 1.1
+angular_limit_x/lower_angle = -0.5
+angular_limit_y/enabled = true
+angular_limit_y/upper_angle = 0.4
+angular_limit_y/lower_angle = -0.4
+angular_limit_z/enabled = true
+angular_limit_z/upper_angle = 0.5
+angular_limit_z/lower_angle = -0.5
+angular_spring_x/enabled = false
+angular_spring_x/stiffness = 450.0
+angular_spring_x/damping = 45.0
+angular_spring_y/enabled = false
+angular_spring_y/stiffness = 450.0
+angular_spring_y/damping = 45.0
+angular_spring_z/enabled = false
+angular_spring_z/stiffness = 450.0
+angular_spring_z/damping = 45.0
+
+[node name="Thigh_L" type="RigidBody3D" parent="." node_paths=PackedStringArray("ParentBone")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.14, 0.58, 0)
+collision_layer = 2
+collision_mask = 1
+physics_material_override = SubResource("PhysicsMaterial_Body")
+mass = 7.5
+script = ExtResource("2_bone")
+BoneName = "Thigh_L"
+ParentBone = NodePath("../Pelvis")
+ProportionalGain = 1600.0
+DerivativeGain = 32.0
+MaxTorque = 1600.0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Thigh_L"]
+shape = SubResource("Shape_Thigh")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Thigh_L"]
+mesh = SubResource("Mesh_Thigh")
+
+[node name="Joint_Thigh_Shin_L" type="Generic6DOFJoint3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.14, 0.42, 0)
+node_a = NodePath("../Thigh_L")
+node_b = NodePath("../Shin_L")
+angular_limit_x/enabled = true
+angular_limit_x/upper_angle = 0.2
+angular_limit_x/lower_angle = -2.1
+angular_limit_y/enabled = true
+angular_limit_y/upper_angle = 0.1
+angular_limit_y/lower_angle = -0.1
+angular_limit_z/enabled = true
+angular_limit_z/upper_angle = 0.1
+angular_limit_z/lower_angle = -0.1
+angular_spring_x/enabled = false
+angular_spring_x/stiffness = 400.0
+angular_spring_x/damping = 40.0
+
+[node name="Shin_L" type="RigidBody3D" parent="." node_paths=PackedStringArray("ParentBone")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.14, 0.25, 0)
+collision_layer = 2
+collision_mask = 1
+physics_material_override = SubResource("PhysicsMaterial_Body")
+mass = 4.5
+script = ExtResource("2_bone")
+BoneName = "Shin_L"
+ParentBone = NodePath("../Thigh_L")
+ProportionalGain = 1800.0
+DerivativeGain = 36.0
+MaxTorque = 1800.0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Shin_L"]
+shape = SubResource("Shape_Shin")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Shin_L"]
+mesh = SubResource("Mesh_Shin")
+
+[node name="Joint_Shin_Foot_L" type="Generic6DOFJoint3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.14, 0.08, 0)
+node_a = NodePath("../Shin_L")
+node_b = NodePath("../Foot_L")
+angular_limit_x/enabled = true
+angular_limit_x/upper_angle = 0.5
+angular_limit_x/lower_angle = -0.5
+angular_limit_y/enabled = true
+angular_limit_y/upper_angle = 0.2
+angular_limit_y/lower_angle = -0.2
+angular_limit_z/enabled = true
+angular_limit_z/upper_angle = 0.2
+angular_limit_z/lower_angle = -0.2
+angular_spring_x/enabled = false
+angular_spring_x/stiffness = 300.0
+angular_spring_x/damping = 30.0
+angular_spring_y/enabled = false
+angular_spring_y/stiffness = 300.0
+angular_spring_y/damping = 30.0
+angular_spring_z/enabled = false
+angular_spring_z/stiffness = 300.0
+angular_spring_z/damping = 30.0
+
+[node name="Foot_L" type="RigidBody3D" parent="." node_paths=PackedStringArray("ParentBone")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.14, 0.04, -0.03)
+collision_layer = 2
+collision_mask = 1
+mass = 2.0
+physics_material_override = SubResource("PhysicsMaterial_Foot")
+script = ExtResource("2_bone")
+BoneName = "Foot_L"
+ParentBone = NodePath("../Shin_L")
+ProportionalGain = 1200.0
+DerivativeGain = 6.0
+MaxTorque = 800.0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Foot_L"]
+shape = SubResource("Shape_Foot")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Foot_L"]
+mesh = SubResource("Mesh_Foot")
+
+[node name="Joint_Pelvis_Thigh_R" type="Generic6DOFJoint3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.14, 0.74, 0)
+node_a = NodePath("../Pelvis")
+node_b = NodePath("../Thigh_R")
+angular_limit_x/enabled = true
+angular_limit_x/upper_angle = 1.1
+angular_limit_x/lower_angle = -0.5
+angular_limit_y/enabled = true
+angular_limit_y/upper_angle = 0.4
+angular_limit_y/lower_angle = -0.4
+angular_limit_z/enabled = true
+angular_limit_z/upper_angle = 0.5
+angular_limit_z/lower_angle = -0.5
+angular_spring_x/enabled = false
+angular_spring_x/stiffness = 450.0
+angular_spring_x/damping = 45.0
+angular_spring_y/enabled = false
+angular_spring_y/stiffness = 450.0
+angular_spring_y/damping = 45.0
+angular_spring_z/enabled = false
+angular_spring_z/stiffness = 450.0
+angular_spring_z/damping = 45.0
+
+[node name="Thigh_R" type="RigidBody3D" parent="." node_paths=PackedStringArray("ParentBone")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.14, 0.58, 0)
+collision_layer = 2
+collision_mask = 1
+physics_material_override = SubResource("PhysicsMaterial_Body")
+mass = 7.5
+script = ExtResource("2_bone")
+BoneName = "Thigh_R"
+ParentBone = NodePath("../Pelvis")
+ProportionalGain = 1600.0
+DerivativeGain = 32.0
+MaxTorque = 1600.0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Thigh_R"]
+shape = SubResource("Shape_Thigh")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Thigh_R"]
+mesh = SubResource("Mesh_Thigh")
+
+[node name="Joint_Thigh_Shin_R" type="Generic6DOFJoint3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.14, 0.42, 0)
+node_a = NodePath("../Thigh_R")
+node_b = NodePath("../Shin_R")
+angular_limit_x/enabled = true
+angular_limit_x/upper_angle = 0.2
+angular_limit_x/lower_angle = -2.1
+angular_limit_y/enabled = true
+angular_limit_y/upper_angle = 0.1
+angular_limit_y/lower_angle = -0.1
+angular_limit_z/enabled = true
+angular_limit_z/upper_angle = 0.1
+angular_limit_z/lower_angle = -0.1
+angular_spring_x/enabled = false
+angular_spring_x/stiffness = 400.0
+angular_spring_x/damping = 40.0
+
+[node name="Shin_R" type="RigidBody3D" parent="." node_paths=PackedStringArray("ParentBone")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.14, 0.25, 0)
+collision_layer = 2
+collision_mask = 1
+physics_material_override = SubResource("PhysicsMaterial_Body")
+mass = 4.5
+script = ExtResource("2_bone")
+BoneName = "Shin_R"
+ParentBone = NodePath("../Thigh_R")
+ProportionalGain = 1800.0
+DerivativeGain = 36.0
+MaxTorque = 1800.0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Shin_R"]
+shape = SubResource("Shape_Shin")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Shin_R"]
+mesh = SubResource("Mesh_Shin")
+
+[node name="Joint_Shin_Foot_R" type="Generic6DOFJoint3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.14, 0.08, 0)
+node_a = NodePath("../Shin_R")
+node_b = NodePath("../Foot_R")
+angular_limit_x/enabled = true
+angular_limit_x/upper_angle = 0.5
+angular_limit_x/lower_angle = -0.5
+angular_limit_y/enabled = true
+angular_limit_y/upper_angle = 0.2
+angular_limit_y/lower_angle = -0.2
+angular_limit_z/enabled = true
+angular_limit_z/upper_angle = 0.2
+angular_limit_z/lower_angle = -0.2
+angular_spring_x/enabled = false
+angular_spring_x/stiffness = 300.0
+angular_spring_x/damping = 30.0
+angular_spring_y/enabled = false
+angular_spring_y/stiffness = 300.0
+angular_spring_y/damping = 30.0
+angular_spring_z/enabled = false
+angular_spring_z/stiffness = 300.0
+angular_spring_z/damping = 30.0
+
+[node name="Foot_R" type="RigidBody3D" parent="." node_paths=PackedStringArray("ParentBone")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.14, 0.04, -0.03)
+collision_layer = 2
+collision_mask = 1
+mass = 2.0
+physics_material_override = SubResource("PhysicsMaterial_Foot")
+script = ExtResource("2_bone")
+BoneName = "Foot_R"
+ParentBone = NodePath("../Shin_R")
+ProportionalGain = 1200.0
+DerivativeGain = 6.0
+MaxTorque = 800.0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Foot_R"]
+shape = SubResource("Shape_Foot")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Foot_R"]
+mesh = SubResource("Mesh_Foot")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

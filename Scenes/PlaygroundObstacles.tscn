@@ -1,0 +1,144 @@
+[gd_scene format=3 uid="uid://cx4vd24j5kq3b"]
+
+[ext_resource type="Script" path="res://Source/Physics/RotatingObstacle.cs" id="1_rotate"]
+
+[sub_resource type="PhysicsMaterial" id="PhysicsMaterial_Bouncy"]
+bounce = 0.95
+
+[sub_resource type="StandardMaterial3D" id="Mat_Sweeper"]
+albedo_color = Color(0.9, 0.5, 0.1, 1)
+metallic = 0.4
+roughness = 0.3
+
+[sub_resource type="StandardMaterial3D" id="Mat_Stairs"]
+albedo_color = Color(0.35, 0.4, 0.45, 1)
+roughness = 0.7
+
+[sub_resource type="StandardMaterial3D" id="Mat_Bumper"]
+albedo_color = Color(0.95, 0.85, 0.1, 1)
+emission_enabled = true
+emission = Color(0.95, 0.85, 0.1, 1)
+emission_energy_multiplier = 0.3
+
+[sub_resource type="CylinderShape3D" id="Shape_Post"]
+height = 1.2
+radius = 0.35
+
+[sub_resource type="CylinderMesh" id="Mesh_Post"]
+material = SubResource("Mat_Sweeper")
+top_radius = 0.35
+bottom_radius = 0.35
+height = 1.2
+
+[sub_resource type="BoxShape3D" id="Shape_Arm"]
+size = Vector3(6.5, 0.35, 0.35)
+
+[sub_resource type="BoxMesh" id="Mesh_Arm"]
+material = SubResource("Mat_Sweeper")
+size = Vector3(6.5, 0.35, 0.35)
+
+[sub_resource type="BoxShape3D" id="Shape_Step1"]
+size = Vector3(2.5, 0.3, 0.6)
+
+[sub_resource type="BoxMesh" id="Mesh_Step1"]
+material = SubResource("Mat_Stairs")
+size = Vector3(2.5, 0.3, 0.6)
+
+[sub_resource type="BoxShape3D" id="Shape_Step2"]
+size = Vector3(2.5, 0.6, 0.6)
+
+[sub_resource type="BoxMesh" id="Mesh_Step2"]
+material = SubResource("Mat_Stairs")
+size = Vector3(2.5, 0.6, 0.6)
+
+[sub_resource type="BoxShape3D" id="Shape_Step3"]
+size = Vector3(2.5, 0.9, 0.6)
+
+[sub_resource type="BoxMesh" id="Mesh_Step3"]
+material = SubResource("Mat_Stairs")
+size = Vector3(2.5, 0.9, 0.6)
+
+[sub_resource type="BoxShape3D" id="Shape_Platform"]
+size = Vector3(2.5, 1.2, 1.8)
+
+[sub_resource type="BoxMesh" id="Mesh_Platform"]
+material = SubResource("Mat_Stairs")
+size = Vector3(2.5, 1.2, 1.8)
+
+[sub_resource type="CylinderShape3D" id="Shape_Bumper"]
+height = 0.8
+radius = 0.9
+
+[sub_resource type="CylinderMesh" id="Mesh_Bumper"]
+material = SubResource("Mat_Bumper")
+top_radius = 0.9
+bottom_radius = 0.9
+height = 0.8
+
+[node name="PlaygroundObstacles" type="Node3D"]
+
+[node name="SweeperHazard" type="AnimatableBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.5, 0, -2)
+script = ExtResource("1_rotate")
+RotationSpeedRadPerSec = 1.8
+
+[node name="CollisionPost" type="CollisionShape3D" parent="SweeperHazard"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, 0)
+shape = SubResource("Shape_Post")
+
+[node name="MeshPost" type="MeshInstance3D" parent="SweeperHazard"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, 0)
+mesh = SubResource("Mesh_Post")
+
+[node name="CollisionArm" type="CollisionShape3D" parent="SweeperHazard"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.35, 0)
+shape = SubResource("Shape_Arm")
+
+[node name="MeshArm" type="MeshInstance3D" parent="SweeperHazard"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.35, 0)
+mesh = SubResource("Mesh_Arm")
+
+[node name="StairsAndLedge" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.5, 0, -2.5)
+
+[node name="CollisionStep1" type="CollisionShape3D" parent="StairsAndLedge"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.15, 0.9)
+shape = SubResource("Shape_Step1")
+
+[node name="MeshStep1" type="MeshInstance3D" parent="StairsAndLedge"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.15, 0.9)
+mesh = SubResource("Mesh_Step1")
+
+[node name="CollisionStep2" type="CollisionShape3D" parent="StairsAndLedge"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3, 0.3)
+shape = SubResource("Shape_Step2")
+
+[node name="MeshStep2" type="MeshInstance3D" parent="StairsAndLedge"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3, 0.3)
+mesh = SubResource("Mesh_Step2")
+
+[node name="CollisionStep3" type="CollisionShape3D" parent="StairsAndLedge"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.45, -0.3)
+shape = SubResource("Shape_Step3")
+
+[node name="MeshStep3" type="MeshInstance3D" parent="StairsAndLedge"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.45, -0.3)
+mesh = SubResource("Mesh_Step3")
+
+[node name="CollisionPlatform" type="CollisionShape3D" parent="StairsAndLedge"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, -1.5)
+shape = SubResource("Shape_Platform")
+
+[node name="MeshPlatform" type="MeshInstance3D" parent="StairsAndLedge"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, -1.5)
+mesh = SubResource("Mesh_Platform")
+
+[node name="BouncyBumper" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, -6)
+physics_material_override = SubResource("PhysicsMaterial_Bouncy")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="BouncyBumper"]
+shape = SubResource("Shape_Bumper")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="BouncyBumper"]
+mesh = SubResource("Mesh_Bumper")
