@@ -38,6 +38,9 @@ public partial class RagdollDebugInput : Node
                 case Key.Key5:
                     Ragdoll.SetState(RagdollState.Recovering);
                     break;
+                case Key.Key6:
+                    Ragdoll.DropToProne();
+                    break;
                 case Key.G:
                     ToggleZeroGravity();
                     break;

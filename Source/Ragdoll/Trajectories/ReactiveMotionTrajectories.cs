@@ -22,10 +22,10 @@ public class StumbleTrajectory : IMotionTrajectory
             "Forearm_L" => Quaternion.FromEuler(new Vector3(0.75f + windL * 0.3f, 0, 0)),
             "UpperArm_R" => Quaternion.FromEuler(new Vector3(windR, -0.35f, 0.65f)),
             "Forearm_R" => Quaternion.FromEuler(new Vector3(0.75f + windR * 0.3f, 0, 0)),
-            "Thigh_L" => Quaternion.FromEuler(new Vector3(-0.20f + Mathf.Sin(globalTime * 5.0f) * 0.3f, 0, 0)),
-            "Shin_L" => Quaternion.FromEuler(new Vector3(0.35f, 0, 0)),
-            "Thigh_R" => Quaternion.FromEuler(new Vector3(-0.20f - Mathf.Sin(globalTime * 5.0f) * 0.3f, 0, 0)),
-            "Shin_R" => Quaternion.FromEuler(new Vector3(0.35f, 0, 0)),
+            "Thigh_L" => Quaternion.FromEuler(new Vector3(0.20f + Mathf.Sin(globalTime * 5.0f) * 0.3f, 0, 0)),
+            "Shin_L" => Quaternion.FromEuler(new Vector3(-0.35f, 0, 0)),
+            "Thigh_R" => Quaternion.FromEuler(new Vector3(0.20f - Mathf.Sin(globalTime * 5.0f) * 0.3f, 0, 0)),
+            "Shin_R" => Quaternion.FromEuler(new Vector3(-0.35f, 0, 0)),
             _ => Quaternion.Identity
         };
     }
@@ -50,9 +50,9 @@ public class FlailTrajectory : IMotionTrajectory
             "UpperArm_R" => Quaternion.FromEuler(new Vector3(1.2f - panic, -0.4f, 0.4f)),
             "Forearm_R" => Quaternion.FromEuler(new Vector3(1.7f, -0.2f, 0.0f)),
             "Thigh_L" => Quaternion.FromEuler(new Vector3(0.6f, 0, 0.12f)),
-            "Shin_L" => Quaternion.FromEuler(new Vector3(0.85f, 0, 0)),
+            "Shin_L" => Quaternion.FromEuler(new Vector3(-0.85f, 0, 0)),
             "Thigh_R" => Quaternion.FromEuler(new Vector3(0.6f, 0, -0.12f)),
-            "Shin_R" => Quaternion.FromEuler(new Vector3(0.85f, 0, 0)),
+            "Shin_R" => Quaternion.FromEuler(new Vector3(-0.85f, 0, 0)),
             _ => Quaternion.Identity
         };
     }

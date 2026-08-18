@@ -36,16 +36,16 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
     [Export] public float AnkleRollDamping { get => _ankleBalance.AnkleRollDamping; set => _ankleBalance.AnkleRollDamping = value; }
 
     [ExportGroup("Pelvis Stabilization (Protected Balance Region)")]
-    [Export] public float PelvisStabilizerGain { get; set; } = 600.0f;
-    [Export] public float PelvisStabilizerDamping { get; set; } = 20.0f;
-    [Export] public float PelvisStabilizerMaxTorque { get; set; } = 300.0f;
+    [Export] public float PelvisStabilizerGain { get => _pelvisStabilization.Gain; set => _pelvisStabilization.Gain = value; }
+    [Export] public float PelvisStabilizerDamping { get => _pelvisStabilization.Damping; set => _pelvisStabilization.Damping = value; }
+    [Export] public float PelvisStabilizerMaxTorque { get => _pelvisStabilization.MaxTorque; set => _pelvisStabilization.MaxTorque = value; }
 
     [ExportGroup("Biomechanical Thresholds")]
-    [Export] public float DecoupleVelocityThreshold { get; set; } = 3.0f;
-    [Export] public float MaxStumbleTiltAngleDeg { get; set; } = 30.0f;
-    [Export] public float KnockoutTiltAngleDeg { get; set; } = 80.0f;
-    [Export] public float AutoRecoveryDelay { get; set; } = 0.8f;
-    [Export] public float RecoveryDuration { get; set; } = 2.4f;
+    [Export] public float DecoupleVelocityThreshold { get => _stateMachine.DecoupleVelocityThreshold; set => _stateMachine.DecoupleVelocityThreshold = value; }
+    [Export] public float MaxStumbleTiltAngleDeg { get => _stateMachine.MaxStumbleTiltAngleDeg; set => _stateMachine.MaxStumbleTiltAngleDeg = value; }
+    [Export] public float KnockoutTiltAngleDeg { get => _stateMachine.KnockoutTiltAngleDeg; set => _stateMachine.KnockoutTiltAngleDeg = value; }
+    [Export] public float AutoRecoveryDelay { get => _stateMachine.AutoRecoveryDelay; set => _stateMachine.AutoRecoveryDelay = value; }
+    [Export] public float RecoveryDuration { get => _stateMachine.RecoveryDuration; set => _stateMachine.RecoveryDuration = value; }
 
     [ExportGroup("Configuration")]
     [Export] public Godot.Collections.Dictionary<int, float> StateBalanceStrengthMap { get; set; } = new()
@@ -54,59 +54,46 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
         { (int)RagdollState.Stumbling, 0.85f },
         { (int)RagdollState.Flailing, 0.0f },
         { (int)RagdollState.KnockedOut, 0.0f },
-        { (int)RagdollState.Recovering, 0.4f }
+        { (int)RagdollState.Recovering, 1.0f }
     };
 
     // Subsystem Modules (SRP)
+    private readonly RagdollStateMachine _stateMachine = new();
+    private readonly GroundContactModule _groundContact = new();
     private readonly DynamicSteppingModule _stepping = new();
-    private readonly WeightTransferModule _weightTransfer = new();
+    private readonly WeightTransferModule _weightTransfer;
     private readonly AnkleBalanceModule _ankleBalance = new();
     private readonly HipStrategyModule _hipStrategy = new();
+    private readonly PelvisStabilizationModule _pelvisStabilization = new();
     private readonly ArmReflexModule _armReflex = new();
     private readonly VestibularGazeModule _gazeReflex = new();
     private readonly HitReactionReflexModule _hitReaction = new();
     private readonly ObstacleBracingReflexModule _obstacleBracing = new();
     private readonly List<IBiomechanicalReflex> _reflexPipeline = new();
+    private readonly List<IBalanceStrategy> _balancePipeline = new();
 
     // Live Telemetry Provider (ISP)
     public Vector3 CenterOfMass { get; private set; } = Vector3.Zero;
     public float TotalMass { get; private set; } = 0.0f;
     public RagdollOrientation CurrentOrientation { get; private set; } = RagdollOrientation.Upright;
-    public float RecoveryProgressNormalized { get; private set; } = 0.0f;
+    public float RecoveryProgressNormalized => _stateMachine.RecoveryProgressNormalized;
     public float CurrentTiltAngleDeg { get; private set; } = 0.0f;
-    public float LastSuspensionForce { get; private set; } = 0.0f;
     public float BalanceStrengthNow { get; private set; } = 0.0f;
     public float IcpEscapeDistance { get; private set; } = 0.0f;
-    public Vector3 PelvisStabilizerTorque { get; private set; } = Vector3.Zero;
+    public Vector3 PelvisStabilizerTorque => _pelvisStabilization.LastTorque;
     public Vector3 CenterOfMassVelocity { get; private set; } = Vector3.Zero;
 
-    public float StateTimerValue
-    {
-        get
-        {
-            if (_settleGraceTimer > 0.0f)
-            {
-                return _settleGraceTimer;
-            }
-            return _lastEvaluatedState switch
-            {
-                RagdollState.Stumbling => Mathf.Max(0.0f, _stumbleTimer),
-                RagdollState.KnockedOut => Mathf.Max(0.0f, AutoRecoveryDelay - _groundRestTimer),
-                RagdollState.Recovering => Mathf.Max(0.0f, _recoveryTimer),
-                _ => 0.0f
-            };
-        }
-    }
+    public float StateTimerValue => _stateMachine.StateTimerValue;
 
     public float SwingProgressNormalized =>
         CurrentStepPhase == StepPhase.DoubleSupport ? 0.0f : Mathf.Clamp(_stepping.StepProgress, 0.0f, 1.0f);
-    public bool IsGroundedL { get; private set; } = false;
-    public bool IsGroundedR { get; private set; } = false;
+    public bool IsGroundedL => _groundContact.IsGroundedL;
+    public bool IsGroundedR => _groundContact.IsGroundedR;
     public StepPhase CurrentStepPhase => _stepping.CurrentStepPhase;
     public float CurrentWeightShareL => _weightTransfer.CurrentWeightShareL;
     public float CurrentWeightShareR => _weightTransfer.CurrentWeightShareR;
-    public Vector3 GroundPointL => _groundPointL;
-    public Vector3 GroundPointR => _groundPointR;
+    public Vector3 GroundPointL => _groundContact.GroundPointL;
+    public Vector3 GroundPointR => _groundContact.GroundPointR;
     public ActiveBone? FootL => _footL;
     public ActiveBone? FootR => _footR;
     public ActiveBone? ThighL => _thighL;
@@ -132,19 +119,10 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
     private readonly List<ActiveBone> _bones = new();
     private readonly Godot.Collections.Array<Rid> _ragdollRids = new();
 
-    private Vector3 _groundPointL = Vector3.Zero;
-    private Vector3 _groundPointR = Vector3.Zero;
-    private float _stumbleTimer;
-    private float _groundRestTimer;
-    private float _recoveryTimer;
-    private float _flailGroundTimer;
-    private float _airborneTimer;
-    private float _settleGraceTimer = 0.15f;
-    private RagdollState _lastEvaluatedState = RagdollState.Balanced;
-
-    // EMA smoothing factor for the pelvis stabilizer's angular velocity (per 120 Hz tick)
-    private const float PelvisStabAngVelFilterAlpha = 0.25f;
-    private Vector3 _pelvisStabFilteredAngVel = Vector3.Zero;
+    public BalanceController()
+    {
+        _weightTransfer = new WeightTransferModule(_stepping);
+    }
 
     public void Initialize(ActiveBone pelvis, ActiveBone? chest, IEnumerable<ActiveBone> allBones)
     {
@@ -192,28 +170,31 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
         _reflexPipeline.Add(_gazeReflex);
         _reflexPipeline.Add(_hitReaction);
         _reflexPipeline.Add(_obstacleBracing);
+
+        // Register in OCP Balance Strategy Pipeline. Order preserves the exact execution
+        // sequence ApplyBalanceForces used before this pipeline existed: pelvis stabilization ->
+        // stepping -> weight transfer -> hip strategy -> ankle balance.
+        _balancePipeline.Clear();
+        _balancePipeline.Add(_pelvisStabilization);
+        _balancePipeline.Add(_stepping);
+        _balancePipeline.Add(_weightTransfer);
+        _balancePipeline.Add(_hipStrategy);
+        _balancePipeline.Add(_ankleBalance);
     }
 
     public void RegisterHit(ActiveBone hitBone, Vector3 hitPoint, Vector3 impulse)
     {
         _hitReaction.RegisterHit(hitBone, hitPoint, impulse);
-        _stumbleTimer = 1.2f;
+        _stateMachine.TriggerHitStumble();
     }
 
     public void Reset()
     {
-        _stumbleTimer = 0.0f;
-        _groundRestTimer = 0.0f;
-        _recoveryTimer = 0.0f;
-        _flailGroundTimer = 0.0f;
-        _airborneTimer = 0.0f;
-        _settleGraceTimer = 0.15f;
-        _lastEvaluatedState = RagdollState.Balanced;
-        LastSuspensionForce = 0.0f;
+        _stateMachine.Reset();
         CurrentTiltAngleDeg = 0.0f;
         BalanceStrengthNow = 0.0f;
         IcpEscapeDistance = 0.0f;
-        PelvisStabilizerTorque = Vector3.Zero;
+        _pelvisStabilization.ClearTorque();
         CenterOfMassVelocity = Vector3.Zero;
 
         _stepping.Reset();
@@ -239,10 +220,9 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
             return currentState;
         }
 
-        _lastEvaluatedState = currentState;
         UpdateCenterOfMass();
         ClassifyOrientation();
-        UpdateGroundSensors();
+        _groundContact.Update(_pelvis, _footL, _footR, _ragdollRids);
         UpdateIcpEscapeDistance();
 
         Vector3 pelvisUp = _pelvis.GlobalTransform.Basis.Y.Normalized();
@@ -251,111 +231,12 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
         float currentHeight = _pelvis.GlobalPosition.Y;
         float speed = _pelvis.LinearVelocity.Length();
 
-        if (!IsGroundedL && !IsGroundedR)
-        {
-            _airborneTimer += delta;
-        }
-        else
-        {
-            _airborneTimer = 0.0f;
-        }
-
-        if (_settleGraceTimer > 0.0f)
-        {
-            _settleGraceTimer -= delta;
-            return RagdollState.Balanced;
-        }
-
-        switch (currentState)
-        {
-            case RagdollState.Balanced:
-                if (CurrentTiltAngleDeg > KnockoutTiltAngleDeg || _airborneTimer > 0.6f)
-                {
-                    _groundRestTimer = 0.0f;
-                    _flailGroundTimer = 0.0f;
-                    return RagdollState.Flailing;
-                }
-                if (CurrentTiltAngleDeg > MaxStumbleTiltAngleDeg || speed > DecoupleVelocityThreshold)
-                {
-                    _stumbleTimer = 1.4f;
-                    return RagdollState.Stumbling;
-                }
-                return RagdollState.Balanced;
-
-            case RagdollState.Stumbling:
-                _stumbleTimer -= delta;
-                if (CurrentTiltAngleDeg > KnockoutTiltAngleDeg || (currentHeight < 0.25f && speed < 1.0f) || _airborneTimer > 0.6f)
-                {
-                    _groundRestTimer = 0.0f;
-                    _flailGroundTimer = 0.0f;
-                    return RagdollState.Flailing;
-                }
-                if (_stumbleTimer <= 0.0f && CurrentTiltAngleDeg < 30.0f && (IsGroundedL || IsGroundedR))
-                {
-                    return RagdollState.Balanced;
-                }
-                return RagdollState.Stumbling;
-
-            case RagdollState.Flailing:
-                if (currentHeight < 0.35f && speed < 2.5f)
-                {
-                    _flailGroundTimer += delta;
-                    if (_flailGroundTimer >= 0.25f)
-                    {
-                        _flailGroundTimer = 0.0f;
-                        _groundRestTimer = 0.0f;
-                        return RagdollState.KnockedOut;
-                    }
-                }
-                else
-                {
-                    _flailGroundTimer = 0.0f;
-                }
-                return RagdollState.Flailing;
-
-            case RagdollState.KnockedOut:
-                if (currentHeight < 0.45f && speed < 1.0f)
-                {
-                    _groundRestTimer += delta;
-                    if (_groundRestTimer >= AutoRecoveryDelay)
-                    {
-                        _groundRestTimer = 0.0f;
-                        _recoveryTimer = RecoveryDuration;
-                        RecoveryProgressNormalized = 0.0f;
-                        return RagdollState.Recovering;
-                    }
-                }
-                else
-                {
-                    _groundRestTimer = 0.0f;
-                }
-                return RagdollState.KnockedOut;
-
-            case RagdollState.Recovering:
-                _recoveryTimer -= delta;
-                RecoveryProgressNormalized = Mathf.Clamp(1.0f - (_recoveryTimer / RecoveryDuration), 0.0f, 1.0f);
-
-                if (RecoveryProgressNormalized >= 0.85f && CurrentTiltAngleDeg < 30.0f && currentHeight > 0.60f && (IsGroundedL || IsGroundedR))
-                {
-                    RecoveryProgressNormalized = 1.0f;
-                    return RagdollState.Balanced;
-                }
-
-                if (_recoveryTimer <= -1.5f)
-                {
-                    _groundRestTimer = 0.0f;
-                    return RagdollState.KnockedOut;
-                }
-                return RagdollState.Recovering;
-
-            default:
-                return currentState;
-        }
+        return _stateMachine.Evaluate(currentState, delta, CurrentTiltAngleDeg, currentHeight, speed, IsGroundedL, IsGroundedR);
     }
 
     public void TriggerStumble()
     {
-        _stumbleTimer = 1.4f;
+        _stateMachine.TriggerStumble();
     }
 
     public void ApplyBalanceForces(RagdollState state, float delta)
@@ -376,9 +257,8 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
 
         if (strength <= 0.01f)
         {
-            LastSuspensionForce = 0.0f;
             BalanceStrengthNow = 0.0f;
-            PelvisStabilizerTorque = Vector3.Zero;
+            _pelvisStabilization.ClearTorque();
             _stepping.Reset();
             _weightTransfer.Reset();
             _ankleBalance.Reset();
@@ -393,9 +273,8 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
 
         if (tiltAngle > 80.0f)
         {
-            LastSuspensionForce = 0.0f;
             BalanceStrengthNow = 0.0f;
-            PelvisStabilizerTorque = Vector3.Zero;
+            _pelvisStabilization.ClearTorque();
             _stepping.Reset();
             _ankleBalance.Reset();
             _hipStrategy.Reset();
@@ -407,135 +286,34 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
         float activeStrength = strength * tiltFade * speedFade;
         BalanceStrengthNow = activeStrength;
 
-        // Pelvis Protected Balance Region: direct attitude stabilization of the unactuated root
-        // Only active during upright balance phases. Disabled during recovery to prevent artificial floating/dragging on the floor.
-        if (state == RagdollState.Balanced || state == RagdollState.Stumbling)
+        // 2. Balance Strategy Pipeline (OCP): pelvis stabilization -> stepping -> weight transfer ->
+        // hip strategy -> ankle balance. Each strategy self-gates on state/step-phase/ground-contact.
+        BalanceContext context = BuildBalanceContext(state, activeStrength, delta);
+        foreach (var strategy in _balancePipeline)
         {
-            ApplyPelvisStabilization(activeStrength);
-        }
-
-        // 2. Dynamic Stepping Module (Capture Point)
-        if (state == RagdollState.Balanced || state == RagdollState.Stumbling)
-        {
-            _stepping.Update(
-                _pelvis,
-                _thighL,
-                _thighR,
-                _shinL,
-                _shinR,
-                _footL,
-                _footR,
-                CenterOfMass,
-                IsGroundedL,
-                IsGroundedR,
-                _groundPointL,
-                _groundPointR,
-                _settleGraceTimer > 0.0f,
-                activeStrength,
-                delta);
-        }
-        else
-        {
-            _stepping.Reset();
-        }
-
-        // 3. Continuous Asymmetric Weight Transfer Module
-        // Lateral CoM error in the yaw-level frame drives double-support weight shifting
-        float lateralComError = 0.0f;
-        if (_footL != null && _footR != null && GodotObject.IsInstanceValid(_footL) && GodotObject.IsInstanceValid(_footR))
-        {
-            Vector3 supportCenter = (_footL.GlobalPosition + _footR.GlobalPosition) * 0.5f;
-            Vector3 flatForward = -_pelvis.GlobalTransform.Basis.Z;
-            flatForward.Y = 0.0f;
-            flatForward = flatForward.Normalized();
-            Vector3 levelRight = flatForward.Cross(Vector3.Up);
-            lateralComError = (CenterOfMass - supportCenter).Dot(levelRight);
-        }
-
-        _weightTransfer.Update(
-            CurrentStepPhase,
-            _stepping.StepProgress,
-            lateralComError,
-            _thighL,
-            _thighR,
-            _shinL,
-            _shinR,
-            delta);
-
-        // 4. Pure Internal Joint Biomechanics (Zero Floating Forces)
-        LastSuspensionForce = 0.0f;
-
-        // 5. Hip Strategy (posture righting, sagittal CoM arrest, CoM height) via internal joint PD offsets
-        bool hasGroundContact = IsGroundedL || IsGroundedR;
-        if (activeStrength > 0.01f && hasGroundContact && CurrentStepPhase == StepPhase.DoubleSupport)
-        {
-            float groundY = (_groundPointL.Y + _groundPointR.Y) * 0.5f;
-            _hipStrategy.Apply(
-                _pelvis,
-                _spine,
-                _thighL,
-                _thighR,
-                _shinL,
-                _shinR,
-                _footL,
-                _footR,
-                CenterOfMass,
-                CenterOfMassVelocity,
-                groundY,
-                activeStrength);
-        }
-
-        // 6. Ankle Ground Reaction Strategy (Double Support Only)
-        if (CurrentStepPhase == StepPhase.DoubleSupport && (state == RagdollState.Balanced || state == RagdollState.Stumbling) && hasGroundContact)
-        {
-            _ankleBalance.ApplyBalance(_pelvis, _footL, _footR, _thighL, _thighR, CenterOfMass, CenterOfMassVelocity, activeStrength, delta);
+            strategy.Apply(in context);
         }
     }
 
-    /// <summary>
-    /// Pelvis Protected Balance Region (Euphoria DMS): the pelvis is the unactuated root, so it is
-    /// stabilized directly with an attitude PD torque; the counter-torque is distributed across the
-    /// grounded feet as reaction against the ground, keeping the interaction internal.
-    /// </summary>
-    private void ApplyPelvisStabilization(float activeStrength)
+    private BalanceContext BuildBalanceContext(RagdollState state, float activeStrength, float delta)
     {
-        PelvisStabilizerTorque = Vector3.Zero;
-
-        bool groundedL = IsGroundedL && _footL != null && GodotObject.IsInstanceValid(_footL);
-        bool groundedR = IsGroundedR && _footR != null && GodotObject.IsInstanceValid(_footR);
-        if ((!groundedL && !groundedR) || activeStrength <= 0.01f)
+        Vector3 icp = Vector3.Zero;
+        Vector3 baseOfSupportCenter = Vector3.Zero;
+        if (_footL != null && _footR != null && GodotObject.IsInstanceValid(_footL) && GodotObject.IsInstanceValid(_footR))
         {
-            return;
+            float groundY = (GroundPointL.Y + GroundPointR.Y) * 0.5f;
+            icp = BiomechanicalKinematics.ComputeInstantaneousCapturePoint(CenterOfMass, _pelvis.LinearVelocity, CenterOfMass.Y - groundY);
+            baseOfSupportCenter = (_footL.GlobalPosition + _footR.GlobalPosition) * 0.5f;
         }
 
-        // Axis-angle attitude error between pelvis up axis and world up (magnitude ~ sin(angle))
-        Vector3 pelvisUp = _pelvis.GlobalTransform.Basis.Y.Normalized();
-        Vector3 attitudeError = pelvisUp.Cross(Vector3.Up);
-
-        // Low-pass filter the pelvis angular velocity: joint reaction chatter (~20 rad/s at 120 Hz)
-        // would otherwise dominate the damping term and pump energy through the grounded feet
-        _pelvisStabFilteredAngVel += (_pelvis.AngularVelocity - _pelvisStabFilteredAngVel) * PelvisStabAngVelFilterAlpha;
-
-        Vector3 torque = (PelvisStabilizerGain * attitudeError) - (PelvisStabilizerDamping * _pelvisStabFilteredAngVel);
-        float maxTorque = PelvisStabilizerMaxTorque * activeStrength;
-        if (torque.LengthSquared() > maxTorque * maxTorque)
-        {
-            torque = torque.Normalized() * maxTorque;
-        }
-
-        PelvisStabilizerTorque = torque;
-        _pelvis.ApplyTorque(torque);
-
-        int groundedCount = (groundedL ? 1 : 0) + (groundedR ? 1 : 0);
-        Vector3 reaction = -torque / groundedCount;
-        if (groundedL)
-        {
-            _footL!.ApplyTorque(reaction);
-        }
-        if (groundedR)
-        {
-            _footR!.ApplyTorque(reaction);
-        }
+        return new BalanceContext(
+            _pelvis, _spine, _chest, _head,
+            _thighL, _thighR, _shinL, _shinR,
+            _footL, _footR,
+            state, CurrentStepPhase, activeStrength, delta,
+            CenterOfMass, CenterOfMassVelocity, icp, baseOfSupportCenter,
+            IsGroundedL, IsGroundedR, GroundPointL, GroundPointR,
+            _stateMachine.IsSettleGraceActive);
     }
 
     /// <summary>
@@ -550,55 +328,16 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
             return;
         }
 
-        float omega0 = Mathf.Sqrt(9.81f / Mathf.Max(0.35f, _pelvis.GlobalPosition.Y));
-        Vector3 comVel = _pelvis.LinearVelocity;
-        Vector3 icp = CenterOfMass + (new Vector3(comVel.X, 0.0f, comVel.Z) / omega0);
+        // Ground-relative CoM height, matching DynamicSteppingModule's ICP computation exactly
+        // (previously this used absolute pelvis height, a latent inconsistency between the two).
+        float groundY = (GroundPointL.Y + GroundPointR.Y) * 0.5f;
+        Vector3 icp = BiomechanicalKinematics.ComputeInstantaneousCapturePoint(CenterOfMass, _pelvis.LinearVelocity, CenterOfMass.Y - groundY);
         Vector3 supportCenter = (_footL.GlobalPosition + _footR.GlobalPosition) * 0.5f;
 
         // Yaw-level frame: flatten pelvis axes onto the ground plane
-        Vector3 forward = -_pelvis.GlobalTransform.Basis.Z;
-        forward.Y = 0.0f;
-        forward = forward.Normalized();
-        Vector3 right = forward.Cross(Vector3.Up);
-
-        Vector3 offset = icp - supportCenter;
-        float localX = offset.Dot(right);
-        float localZ = offset.Dot(forward);
-        IcpEscapeDistance = new Vector2(localX, localZ).Length();
-    }
-
-    private void UpdateGroundSensors()
-    {
-        var spaceState = _pelvis.GetWorld3D().DirectSpaceState;
-
-        IsGroundedL = UpdateFootGroundSensor(_footL, ref _groundPointL, spaceState);
-        IsGroundedR = UpdateFootGroundSensor(_footR, ref _groundPointR, spaceState);
-    }
-
-    /// <summary>
-    /// Contact-driven foot grounding: grounded = real physical contact with the world (contact monitor)
-    /// AND sole facing downward. The raycast is only used to query ground-point height (step targets,
-    /// foot elevation), never to decide contact state.
-    /// </summary>
-    private bool UpdateFootGroundSensor(ActiveBone? foot, ref Vector3 groundPoint, PhysicsDirectSpaceState3D spaceState)
-    {
-        if (foot == null || !GodotObject.IsInstanceValid(foot))
-        {
-            return false;
-        }
-
-        // Ground-point height query (works up to 0.25 m below the foot; fallback to foot position)
-        Vector3 rayStart = foot.GlobalPosition + new Vector3(0, 0.05f, 0);
-        Vector3 rayEnd = foot.GlobalPosition - new Vector3(0, 0.25f, 0);
-        var query = PhysicsRayQueryParameters3D.Create(rayStart, rayEnd, 1);
-        query.Exclude = _ragdollRids;
-        var result = spaceState.IntersectRay(query);
-        groundPoint = result.Count > 0 ? (Vector3)result["position"] : foot.GlobalPosition;
-
-        // Foot local -Y is the sole axis (identity-oriented at rest); require it within ~60 deg of world down
-        bool soleDown = (-foot.GlobalTransform.Basis.Y).Normalized().Dot(Vector3.Down) > 0.5f;
-
-        return soleDown && foot.IsInContactWithWorld();
+        Basis levelBasis = BiomechanicalKinematics.ComputeLevelBasis(_pelvis.GlobalTransform.Basis);
+        Vector3 localOffset = levelBasis.Inverse() * (icp - supportCenter);
+        IcpEscapeDistance = new Vector2(localOffset.X, localOffset.Z).Length();
     }
 
     private void ClassifyOrientation()
@@ -608,23 +347,10 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
 
     private void UpdateCenterOfMass()
     {
-        if (_bones.Count == 0 || TotalMass <= 0.0f)
+        if (BiomechanicalKinematics.TryComputeCenterOfMass(_bones, TotalMass, out Vector3 com, out Vector3 comVelocity))
         {
-            return;
+            CenterOfMass = com;
+            CenterOfMassVelocity = comVelocity;
         }
-
-        Vector3 weightedSum = Vector3.Zero;
-        Vector3 weightedVelocitySum = Vector3.Zero;
-        foreach (var bone in _bones)
-        {
-            if (GodotObject.IsInstanceValid(bone))
-            {
-                weightedSum += bone.GlobalPosition * bone.Mass;
-                weightedVelocitySum += bone.LinearVelocity * bone.Mass;
-            }
-        }
-
-        CenterOfMass = weightedSum / TotalMass;
-        CenterOfMassVelocity = weightedVelocitySum / TotalMass;
     }
 }

@@ -1,11 +1,13 @@
 using Godot;
+using Physics4Fun.Ragdoll;
+using Physics4Fun.Ragdoll.Interfaces;
 
 namespace Physics4Fun.Ragdoll.Modules;
 
 /// <summary>
 /// Encapsulates Instantaneous Capture Point (ICP) orbital dynamics and 2-bone analytical stepping IK (SRP).
 /// </summary>
-public class DynamicSteppingModule
+public class DynamicSteppingModule : IBalanceStrategy
 {
     public bool EnableDynamicStepping { get; set; } = true;
     public float StepDuration { get; set; } = 0.28f;
@@ -33,36 +35,37 @@ public class DynamicSteppingModule
         _lastSwingWasLeft = false;
     }
 
-    public void Update(
-        ActiveBone pelvis,
-        ActiveBone? thighL,
-        ActiveBone? thighR,
-        ActiveBone? shinL,
-        ActiveBone? shinR,
-        ActiveBone? footL,
-        ActiveBone? footR,
-        Vector3 centerOfMass,
-        bool isGroundedL,
-        bool isGroundedR,
-        Vector3 groundPointL,
-        Vector3 groundPointR,
-        bool isSettleGraceActive,
-        float strength,
-        float delta)
+    public void Apply(in BalanceContext context)
     {
-        if (!EnableDynamicStepping || footL == null || footR == null || !GodotObject.IsInstanceValid(footL) || !GodotObject.IsInstanceValid(footR))
+        if (context.State != RagdollState.Balanced && context.State != RagdollState.Stumbling)
+        {
+            Reset();
+            return;
+        }
+
+        if (!EnableDynamicStepping || context.FootL == null || context.FootR == null || !GodotObject.IsInstanceValid(context.FootL) || !GodotObject.IsInstanceValid(context.FootR))
         {
             CurrentStepPhase = StepPhase.DoubleSupport;
             return;
         }
 
-        // CoM height above the support ground (average ground point), not above world origin
-        float groundY = (groundPointL.Y + groundPointR.Y) * 0.5f;
-        float comHeight = Mathf.Max(0.2f, centerOfMass.Y - groundY);
-        float omega0 = Mathf.Sqrt(9.81f / comHeight);
-        Vector3 comVel = pelvis.LinearVelocity;
-        Vector3 icp = centerOfMass + (new Vector3(comVel.X, 0, comVel.Z) / omega0);
-        Vector3 supportCenter = (footL.GlobalPosition + footR.GlobalPosition) * 0.5f;
+        ActiveBone pelvis = context.Pelvis;
+        ActiveBone? thighL = context.ThighL;
+        ActiveBone? thighR = context.ThighR;
+        ActiveBone? shinL = context.ShinL;
+        ActiveBone? shinR = context.ShinR;
+        ActiveBone footL = context.FootL;
+        ActiveBone footR = context.FootR;
+        bool isGroundedL = context.IsGroundedL;
+        bool isGroundedR = context.IsGroundedR;
+        Vector3 groundPointL = context.GroundPointL;
+        Vector3 groundPointR = context.GroundPointR;
+        bool isSettleGraceActive = context.IsSettleGraceActive;
+        float strength = context.Strength;
+        float delta = context.Delta;
+
+        Vector3 icp = context.Icp;
+        Vector3 supportCenter = context.BaseOfSupportCenter;
 
         if (CurrentStepPhase == StepPhase.DoubleSupport)
         {
@@ -75,7 +78,7 @@ public class DynamicSteppingModule
 
             // Use a yaw-only (level) pelvis basis so pelvis pitch/roll during a fall
             // does not bleed horizontal ICP escape into the local vertical axis.
-            Basis levelBasis = ComputeLevelBasis(pelvis.GlobalTransform.Basis);
+            Basis levelBasis = BiomechanicalKinematics.ComputeLevelBasis(pelvis.GlobalTransform.Basis);
             Vector3 localIcp = levelBasis.Inverse() * (icp - supportCenter);
             float pelvisSpeed = new Vector2(pelvis.LinearVelocity.X, pelvis.LinearVelocity.Z).Length();
             float tiltCos = pelvis.GlobalTransform.Basis.Y.Normalized().Dot(Vector3.Up);
@@ -200,24 +203,5 @@ public class DynamicSteppingModule
                 CurrentStepPhase = StepPhase.DoubleSupport;
             }
         }
-    }
-
-    /// <summary>
-    /// Builds a level (yaw-only) basis from the pelvis orientation, flattening its
-    /// forward axis onto the horizontal plane so pitch/roll do not leak into local Y.
-    /// </summary>
-    private static Basis ComputeLevelBasis(Basis pelvisBasis)
-    {
-        Vector3 forward = -pelvisBasis.Z;
-        forward.Y = 0.0f;
-        if (forward.LengthSquared() < 1e-6f)
-        {
-            forward = new Vector3(0.0f, 0.0f, -1.0f);
-        }
-
-        forward = forward.Normalized();
-        Vector3 zAxis = -forward;
-        Vector3 xAxis = Vector3.Up.Cross(zAxis).Normalized();
-        return new Basis(xAxis, Vector3.Up, zAxis);
     }
 }

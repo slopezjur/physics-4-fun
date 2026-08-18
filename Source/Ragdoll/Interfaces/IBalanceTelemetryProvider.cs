@@ -1,4 +1,3 @@
-using System;
 using Godot;
 
 namespace Physics4Fun.Ragdoll.Interfaces;
@@ -13,8 +12,6 @@ public interface IBalanceTelemetryProvider
     float CurrentWeightShareR { get; }
     bool IsGroundedL { get; }
     bool IsGroundedR { get; }
-    [Obsolete("Vestigial — always 0")]
-    float LastSuspensionForce { get; }
     float CurrentTiltAngleDeg { get; }
     Vector3 CenterOfMass { get; }
     float TotalMass { get; }

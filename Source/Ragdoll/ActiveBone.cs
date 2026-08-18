@@ -180,7 +180,16 @@ public partial class ActiveBone : RigidBody3D
             state.AngularVelocity = Vector3.Zero;
             _pendingReset = false;
         }
+        if (_pendingTeleportTransform.HasValue)
+        {
+            state.Transform = _pendingTeleportTransform.Value;
+            state.LinearVelocity = Vector3.Zero;
+            state.AngularVelocity = Vector3.Zero;
+            _pendingTeleportTransform = null;
+        }
     }
+
+    public Transform3D InitialTransform => _initialTransform;
 
     public void ResetBone()
     {
@@ -191,6 +200,25 @@ public partial class ActiveBone : RigidBody3D
         PhysicsServer3D.BodySetState(rid, PhysicsServer3D.BodyState.AngularVelocity, Vector3.Zero);
 
         GlobalTransform = _initialTransform;
+        LinearVelocity = Vector3.Zero;
+        AngularVelocity = Vector3.Zero;
+        TargetLocalRotation = _restLocalRotation;
+        FeedForwardTargetOffset = Quaternion.Identity;
+        _smoothedFeedForwardOffset = Quaternion.Identity;
+        _pid.Reset();
+    }
+
+    private Transform3D? _pendingTeleportTransform;
+
+    public void Teleport(Transform3D targetTransform)
+    {
+        _pendingTeleportTransform = targetTransform;
+        Rid rid = GetRid();
+        PhysicsServer3D.BodySetState(rid, PhysicsServer3D.BodyState.Transform, targetTransform);
+        PhysicsServer3D.BodySetState(rid, PhysicsServer3D.BodyState.LinearVelocity, Vector3.Zero);
+        PhysicsServer3D.BodySetState(rid, PhysicsServer3D.BodyState.AngularVelocity, Vector3.Zero);
+
+        GlobalTransform = targetTransform;
         LinearVelocity = Vector3.Zero;
         AngularVelocity = Vector3.Zero;
         TargetLocalRotation = _restLocalRotation;

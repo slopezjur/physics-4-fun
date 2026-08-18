@@ -188,14 +188,14 @@ layout_mode = 2
 mouse_filter = 2
 theme_override_colors/font_color = Color(0.88, 0.88, 0.88, 1)
 theme_override_font_sizes/font_size = 13
-text = "• Crosshair: Aim at any body limb to inspect name & mass
-• Middle-Click / E (Hold): Grab Limb & Drag (Draws 3D Tether)
-• Mouse Wheel (While Grabbing): Adjust Distance
-• Left-Click (Hold): Continuous Rapid Cannonball Fire
-• Right-Click + WASD/QE: Fly Camera
-• 1: Balanced | 2: Stumble | 3: Defensive Flail | 4: Knockout | 5: Recover
-• Space: Chest Impact Kick
-• G: Zero-Gravity | F: Freeze Pelvis | R: Reset Simulation"
+text = "- Crosshair: Aim at any body limb to inspect name & mass
+- Middle-Click / E (Hold): Grab Limb & Drag (Draws 3D Tether)
+- Mouse Wheel (While Grabbing): Adjust Distance
+- Left-Click (Hold): Continuous Rapid Cannonball Fire
+- Right-Click + WASD/QE: Fly Camera
+- 1: Balanced | 2: Stumble | 3: Defensive Flail | 4: Knockout | 5: Recover | 6: Drop Prone
+- Space: Chest Impact Kick
+- G: Zero-Gravity | F: Freeze Pelvis | R: Reset Simulation"
 
 [node name="RagdollTelemetryHud" type="PanelContainer" parent="CanvasLayer" node_paths=PackedStringArray("Ragdoll")]
 anchors_preset = 1
@@ -209,5 +209,7 @@ grow_horizontal = 0
 mouse_filter = 2
 script = ExtResource("8_telemetry")
 Ragdoll = NodePath("../../ActiveRagdoll")
+
+
 
 

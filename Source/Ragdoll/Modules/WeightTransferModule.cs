@@ -1,12 +1,23 @@
 using Godot;
+using Physics4Fun.Ragdoll;
+using Physics4Fun.Ragdoll.Interfaces;
 
 namespace Physics4Fun.Ragdoll.Modules;
 
 /// <summary>
 /// Encapsulates continuous asymmetric weight transfer and dynamic joint impedance modulation (SRP).
+/// Depends on DynamicSteppingModule for the current step phase/progress (must run after it in the
+/// balance pipeline) — an explicit, intentional collaboration between two same-tick strategies.
 /// </summary>
-public class WeightTransferModule
+public class WeightTransferModule : IBalanceStrategy
 {
+    private readonly DynamicSteppingModule _stepping;
+
+    public WeightTransferModule(DynamicSteppingModule stepping)
+    {
+        _stepping = stepping;
+    }
+
     public float CurrentWeightShareL { get; private set; } = 0.5f;
     public float CurrentWeightShareR { get; private set; } = 0.5f;
 
@@ -16,16 +27,30 @@ public class WeightTransferModule
         CurrentWeightShareR = 0.5f;
     }
 
-    public void Update(
-        StepPhase stepPhase,
-        float stepProgress,
-        float lateralComError,
-        ActiveBone? thighL,
-        ActiveBone? thighR,
-        ActiveBone? shinL,
-        ActiveBone? shinR,
-        float delta)
+    public void Apply(in BalanceContext context)
     {
+        // Lateral CoM error in the yaw-level frame drives double-support weight shifting
+        float lateralComError = 0.0f;
+        ActiveBone? footL = context.FootL;
+        ActiveBone? footR = context.FootR;
+        if (footL != null && footR != null && GodotObject.IsInstanceValid(footL) && GodotObject.IsInstanceValid(footR))
+        {
+            Vector3 supportCenter = (footL.GlobalPosition + footR.GlobalPosition) * 0.5f;
+            Vector3 flatForward = -context.Pelvis.GlobalTransform.Basis.Z;
+            flatForward.Y = 0.0f;
+            flatForward = flatForward.Normalized();
+            Vector3 levelRight = flatForward.Cross(Vector3.Up);
+            lateralComError = (context.CenterOfMass - supportCenter).Dot(levelRight);
+        }
+
+        StepPhase stepPhase = _stepping.CurrentStepPhase;
+        float stepProgress = _stepping.StepProgress;
+        ActiveBone? thighL = context.ThighL;
+        ActiveBone? thighR = context.ThighR;
+        ActiveBone? shinL = context.ShinL;
+        ActiveBone? shinR = context.ShinR;
+        float delta = context.Delta;
+
         float targetShareL = 0.5f;
         float targetShareR = 0.5f;
 

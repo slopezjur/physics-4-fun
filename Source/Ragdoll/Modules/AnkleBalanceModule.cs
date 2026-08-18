@@ -1,11 +1,13 @@
 using Godot;
+using Physics4Fun.Ragdoll;
+using Physics4Fun.Ragdoll.Interfaces;
 
 namespace Physics4Fun.Ragdoll.Modules;
 
 /// <summary>
 /// Encapsulates ankle ground reaction strategy and ground torque coupling in double support (SRP).
 /// </summary>
-public class AnkleBalanceModule
+public class AnkleBalanceModule : IBalanceStrategy
 {
     // Effective gains in consistent units: radians of ankle offset per meter of CoM error.
     // DC position hold comes from the integral term, NOT from high proportional gain: pushing G
@@ -29,19 +31,22 @@ public class AnkleBalanceModule
         _comErrorIntegral = Vector2.Zero;
     }
 
-    // thighL/thighR are kept for signature compatibility with BalanceController;
-    // hip posture correction lives in BalanceController, so they are unused here.
-    public void ApplyBalance(
-        ActiveBone pelvis,
-        ActiveBone? footL,
-        ActiveBone? footR,
-        ActiveBone? thighL,
-        ActiveBone? thighR,
-        Vector3 centerOfMass,
-        Vector3 centerOfMassVelocity,
-        float strength,
-        float delta)
+    public void Apply(in BalanceContext context)
     {
+        bool hasGroundContact = context.IsGroundedL || context.IsGroundedR;
+        bool isBalancedOrStumbling = context.State == RagdollState.Balanced || context.State == RagdollState.Stumbling;
+        if (!(context.CurrentStepPhase == StepPhase.DoubleSupport && isBalancedOrStumbling && hasGroundContact))
+        {
+            return;
+        }
+
+        ActiveBone? footL = context.FootL;
+        ActiveBone? footR = context.FootR;
+        Vector3 centerOfMass = context.CenterOfMass;
+        Vector3 centerOfMassVelocity = context.CenterOfMassVelocity;
+        float strength = context.Strength;
+        float delta = context.Delta;
+
         if (footL == null || footR == null || !GodotObject.IsInstanceValid(footL) || !GodotObject.IsInstanceValid(footR))
         {
             return;

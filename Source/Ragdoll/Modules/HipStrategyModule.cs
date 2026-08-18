@@ -1,4 +1,6 @@
 using Godot;
+using Physics4Fun.Ragdoll;
+using Physics4Fun.Ragdoll.Interfaces;
 
 namespace Physics4Fun.Ragdoll.Modules;
 
@@ -14,7 +16,7 @@ namespace Physics4Fun.Ragdoll.Modules;
 ///  3. CoM height: symmetric knee extension/flexion holds the pelvis at its rest height
 ///     above the ground instead of free-riding on the closed-chain equilibrium.
 /// </summary>
-public class HipStrategyModule
+public class HipStrategyModule : IBalanceStrategy
 {
     // Posture channel (tilt righting)
     public float HipPitchGain { get; set; } = 0.8f;
@@ -42,20 +44,27 @@ public class HipStrategyModule
         _restPelvisHeight = -1.0f;
     }
 
-    public void Apply(
-        ActiveBone pelvis,
-        ActiveBone? spine,
-        ActiveBone? thighL,
-        ActiveBone? thighR,
-        ActiveBone? shinL,
-        ActiveBone? shinR,
-        ActiveBone? footL,
-        ActiveBone? footR,
-        Vector3 centerOfMass,
-        Vector3 centerOfMassVelocity,
-        float groundY,
-        float strength)
+    public void Apply(in BalanceContext context)
     {
+        bool hasGroundContact = context.IsGroundedL || context.IsGroundedR;
+        if (!(context.Strength > 0.01f && hasGroundContact && context.CurrentStepPhase == StepPhase.DoubleSupport))
+        {
+            return;
+        }
+
+        ActiveBone pelvis = context.Pelvis;
+        ActiveBone? spine = context.Spine;
+        ActiveBone? thighL = context.ThighL;
+        ActiveBone? thighR = context.ThighR;
+        ActiveBone? shinL = context.ShinL;
+        ActiveBone? shinR = context.ShinR;
+        ActiveBone? footL = context.FootL;
+        ActiveBone? footR = context.FootR;
+        Vector3 centerOfMass = context.CenterOfMass;
+        Vector3 centerOfMassVelocity = context.CenterOfMassVelocity;
+        float groundY = (context.GroundPointL.Y + context.GroundPointR.Y) * 0.5f;
+        float strength = context.Strength;
+
         if (footL == null || footR == null || !GodotObject.IsInstanceValid(footL) || !GodotObject.IsInstanceValid(footR))
         {
             return;
@@ -69,7 +78,7 @@ public class HipStrategyModule
         // 2. Sagittal CoM arrest in a yaw-level frame (pelvis pitch cannot mask divergence).
         // Local +Z is forward; a forward error demands the +pitch braking offset that
         // rotates the thighs backward against the planted feet (established convention).
-        Basis levelBasis = ComputeLevelBasis(pelvis.GlobalTransform.Basis);
+        Basis levelBasis = BiomechanicalKinematics.ComputeLevelBasis(pelvis.GlobalTransform.Basis);
         Vector3 supportCenter = (footL.GlobalPosition + footR.GlobalPosition) * 0.5f;
         Vector3 comLocal = levelBasis.Inverse() * (centerOfMass - supportCenter);
         Vector3 velLocal = levelBasis.Inverse() * centerOfMassVelocity;
@@ -119,24 +128,5 @@ public class HipStrategyModule
         {
             shinR.FeedForwardTargetOffset = kneeOffset;
         }
-    }
-
-    /// <summary>
-    /// Builds a level (yaw-only) basis from the pelvis orientation, flattening its
-    /// forward axis onto the horizontal plane so pitch/roll do not leak into local Y.
-    /// </summary>
-    private static Basis ComputeLevelBasis(Basis pelvisBasis)
-    {
-        Vector3 forward = -pelvisBasis.Z;
-        forward.Y = 0.0f;
-        if (forward.LengthSquared() < 1e-6f)
-        {
-            forward = new Vector3(0.0f, 0.0f, -1.0f);
-        }
-
-        forward = forward.Normalized();
-        Vector3 zAxis = -forward;
-        Vector3 xAxis = Vector3.Up.Cross(zAxis).Normalized();
-        return new Basis(xAxis, Vector3.Up, zAxis);
     }
 }

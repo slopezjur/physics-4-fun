@@ -157,6 +157,28 @@ public partial class HumanoidRagdoll : Node3D
         GD.Print("[HumanoidRagdoll] Ragdoll reset to initial standing state.");
     }
 
+    public void DropToProne()
+    {
+        _time = 0.0f;
+        _stateTime = 0.0f;
+        CurrentState = RagdollState.KnockedOut;
+        Balance?.Reset();
+        
+        // Rotate -90 degrees around X (pitch) and elevate slightly to avoid floor clipping
+        Transform3D proneOffset = new Transform3D(new Basis(Vector3.Right, -Mathf.Pi / 2), new Vector3(0, 0.5f, 0));
+
+        foreach (var bone in _allBones)
+        {
+            if (IsInstanceValid(bone))
+            {
+                bone.Teleport(proneOffset * bone.InitialTransform);
+            }
+        }
+        UpdateBoneMuscleStiffness();
+        UpdateBoneTargetRotations();
+        GD.Print("[HumanoidRagdoll] Dropped to prone.");
+    }
+
     public IReadOnlyList<ActiveBone> GetBones() => _allBones;
 
     public float CurrentMuscleStiffness

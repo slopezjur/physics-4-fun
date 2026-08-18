@@ -10,12 +10,15 @@ This document outlines the complete biomechanical foundation, physics formulatio
 Physics4Fun.Ragdoll/
 ├── Interfaces/
 │   ├── IBalanceTelemetryProvider.cs    # Read-only contract for UI & diagnostics
-│   └── IBiomechanicalReflex.cs         # Autonomous reflex strategy contract
+│   ├── IBiomechanicalReflex.cs         # Autonomous reflex strategy contract
+│   └── IBalanceStrategy.cs             # Balance strategy contract (BalanceContext + Apply)
 ├── Modules/
 │   ├── DynamicSteppingModule.cs         # Instantaneous Capture Point (ICP) & 2-bone IK
 │   ├── WeightTransferModule.cs          # Asymmetric weight shifting & impedance scaling
 │   ├── AnkleBalanceModule.cs            # Ankle ground reaction strategy (PI) & planar foot alignment
 │   ├── HipStrategyModule.cs             # Medium-tier hip strategy: posture, CoM arrest, CoM height
+│   ├── PelvisStabilizationModule.cs     # Protected Balance Region: pelvis attitude PD stabilizer
+│   ├── GroundContactModule.cs           # Contact-driven foot ground sensing
 │   └── Reflexes/
 │       ├── ArmReflexModule.cs           # Counter-momentum torques & parachute fall bracing
 │       ├── VestibularGazeModule.cs      # VOR horizon leveling & gaze tracking
@@ -31,21 +34,23 @@ Physics4Fun.Ragdoll/
 │   └── RagdollTelemetryRecorder.cs     # Time-series telemetry logger & CSV export
 ├── ActiveBone.cs                        # Biomechanical PD actuator observing Newton's 3rd Law
 ├── BalanceController.cs                 # High-level coordinator composing balance modules
+├── BiomechanicalKinematics.cs           # Shared ICP, level-frame & CoM math (DRY)
 ├── BiomechanicalMotionSynthesizer.cs    # Trajectory registry & orientation-keyed dispatch
-├── HumanoidRagdoll.cs                   # Root skeletal actor & state machine driver
+├── HumanoidRagdoll.cs                   # Root skeletal actor & state transition driver
 ├── OrientationClassifier.cs             # Spatial orientation classifier (Upright/Prone/Supine/Side)
-├── PoseLibrary.cs                       # Anatomical rest pose definitions
 ├── RagdollDebugInput.cs                 # Debug interaction (impulses, freeze toggles)
 ├── RagdollOrientation.cs                # Orientation enum
 ├── RagdollState.cs                      # Behavioral state enum
+├── RagdollStateMachine.cs               # Balanced/Stumbling/Flailing/KnockedOut/Recovering FSM
 └── StepPhase.cs                         # DoubleSupport, LeftSwing, RightSwing
 ```
 
 ### Design Conventions:
-* Each physical capability (ICP stepping, asymmetric weight shifting, ankle reactions, arm reflexes, vestibular gaze, hit reactions, environmental bracing, and get-up synthesis) is encapsulated in a dedicated module without cross-contamination.
-* Autonomous reflexes implement `IBiomechanicalReflex` and register into the pipeline dynamically without modifying core balance code. Motion trajectories implement `IMotionTrajectory` and register into `BiomechanicalMotionSynthesizer`; any trajectory can be substituted for another at runtime.
+* Each physical capability (ICP stepping, asymmetric weight shifting, ankle reactions, hip strategy, pelvis stabilization, arm reflexes, vestibular gaze, hit reactions, environmental bracing, and get-up synthesis) is encapsulated in a dedicated module without cross-contamination.
+* Autonomous reflexes implement `IBiomechanicalReflex` and register into a pipeline dynamically without modifying core balance code. Balance strategies (stepping, weight transfer, hip, ankle, pelvis stabilization) implement `IBalanceStrategy` and register into `BalanceController`'s balance pipeline the same way — each strategy receives a single per-tick `BalanceContext` and self-gates on state/step-phase/ground-contact, so a new strategy can be added by registering it, no orchestrator edits required. Motion trajectories implement `IMotionTrajectory` and register into `BiomechanicalMotionSynthesizer`; any trajectory can be substituted for another at runtime.
 * Telemetry consumers (`RagdollTelemetryRecorder`, HUDs) bind to `IBalanceTelemetryProvider`, isolating diagnostics and UI from mutable physics controllers.
-* High-level controllers depend on abstractions (`IBiomechanicalReflex`, `IMotionTrajectory`, `IBalanceTelemetryProvider`) rather than concrete monolithic physics blocks.
+* High-level controllers depend on abstractions (`IBiomechanicalReflex`, `IBalanceStrategy`, `IMotionTrajectory`, `IBalanceTelemetryProvider`) rather than concrete monolithic physics blocks.
+* `BalanceController` composes the two pipelines and owns bone wiring, telemetry, and per-tick sensing; the state machine (`RagdollStateMachine`), ground sensing (`GroundContactModule`), and shared kinematics math (`BiomechanicalKinematics`) are each extracted into their own single-purpose classes rather than living inline in the coordinator.
 
 ---
 
@@ -67,10 +72,10 @@ All standing forces and vertical support operate purely through internal knee an
 * **Single Support:** Stance leg carries ~95% of the target weight share with stiffened impedance ($120\%$) and an active lateral lean shifts the CoM over the stance foot so the swing leg truly unweights; swings commit — only real foot contact late in the arc counts as touchdown.
 
 ### Pillar 3: Protected Balance Region (Pelvis Stabilization)
-The pelvis is the skeletal root and has no parent actuator, yet it absorbs every reaction torque from the spine and thigh motors. A dedicated stabilizer computes the pelvis attitude error ($\text{pelvisUp} \times \text{worldUp}$) and applies a corrective PD torque directly to the pelvis, distributing the equal-and-opposite reaction across the grounded feet. The stabilizer scales with the global balance strength fades, fully disengaging during flailing, knockout, and deep-tilt regimes so the body falls naturally once balance is lost.
+The pelvis is the skeletal root and has no parent actuator, yet it absorbs every reaction torque from the spine and thigh motors. `PelvisStabilizationModule` (an `IBalanceStrategy`) computes the pelvis attitude error ($\text{pelvisUp} \times \text{worldUp}$) and applies a corrective PD torque directly to the pelvis, distributing the equal-and-opposite reaction across the grounded feet. The stabilizer scales with the global balance strength fades, fully disengaging during flailing, knockout, and deep-tilt regimes so the body falls naturally once balance is lost.
 
 ### Pillar 4: Instantaneous Capture Point (ICP) & Analytical 2-Bone IK
-When horizontal velocity displaces the CoM beyond the support polygon, orbital ICP determines the swing foot landing location:
+The capture-point projection and yaw-level reference frame are centralized in `BiomechanicalKinematics` (a single implementation shared by `DynamicSteppingModule`, `HipStrategyModule`, and `BalanceController`'s ICP-escape telemetry — previously duplicated with a latent inconsistency between two slightly different height formulas). When horizontal velocity displaces the CoM beyond the support polygon, orbital ICP determines the swing foot landing location:
 $$\vec{x}_{\text{cp}} = \vec{x}_{\text{CoM}} + \frac{\vec{v}_{\text{CoM}}}{\omega_0}, \quad \omega_0 = \sqrt{\frac{g}{h_{\text{CoM}}}}$$
 where $h_{\text{CoM}}$ is measured above the actual ground contact height. The ICP escape test is evaluated in a yaw-only level frame so pelvis pitch cannot mask horizontal divergence. Analytical 2-bone IK resolves anatomical hip pitch/roll and knee flexion along a cycloid swing trajectory directed toward the ICP landing target, with leg segment lengths measured from the skeleton at runtime.
 

@@ -2,13 +2,6 @@ using Godot;
 
 namespace Physics4Fun.Ragdoll.Trajectories;
 
-/// <summary>
-/// 4-Phase Supine (lying on back) physical recovery trajectory strategy:
-/// Phase 1 (0.00-0.30): Roll over to Prone (reach left arm across, flex & cross right leg, roll spine).
-/// Phase 2 (0.30-0.60): Hands and knees press into floor, pushing up into Quadruped stance.
-/// Phase 3 (0.60-0.85): Bear-crawl feet flat under pelvis, establishing ground contact.
-/// Phase 4 (0.85-1.00): Quad drive from squat to full upright balance.
-/// </summary>
 public class SupineRecoveryTrajectory : IMotionTrajectory
 {
     public Quaternion EvaluateBoneTarget(string boneName, float globalTime, float phaseNormalized)
@@ -20,90 +13,95 @@ public class SupineRecoveryTrajectory : IMotionTrajectory
 
         if (t < 0.30f)
         {
-            // Phase 1: Roll over to Prone
+            // Phase 1: Roll over to Prone. Arm L reaches across, Arm R tucks.
             float p = t / 0.30f;
-            spinePitch = Mathf.Lerp(0.0f, -0.25f, p);
-            spineRoll = Mathf.Lerp(0.0f, 0.85f, p);
+            spinePitch = Mathf.Lerp(0.0f, -0.20f, p);
+            spineRoll = Mathf.Lerp(0.0f, 1.50f, p); // Roll body strongly
             chestPitch = Mathf.Lerp(0.0f, -0.30f, p);
-            chestRoll = Mathf.Lerp(0.0f, 0.85f, p);
+            chestRoll = Mathf.Lerp(0.0f, 1.50f, p);
 
-            thighPitchL = Mathf.Lerp(0.0f, 0.70f, p);
+            thighPitchL = Mathf.Lerp(0.0f, 1.20f, p);
             thighPitchR = Mathf.Lerp(0.0f, 0.50f, p);
-            shinPitch = Mathf.Lerp(0.0f, -1.20f, p);
-            footPitch = Mathf.Lerp(0.0f, -0.30f, p);
+            shinPitch = Mathf.Lerp(0.0f, -1.50f, p);
+            footPitch = 0.0f;
 
-            armPitchL = Mathf.Lerp(0.0f, 0.80f, p);
-            armRollL = Mathf.Lerp(0.0f, -0.40f, p);
-            armPitchR = Mathf.Lerp(0.0f, 0.40f, p);
-            armRollR = Mathf.Lerp(0.0f, 0.20f, p);
-            forearmPitch = Mathf.Lerp(0.0f, 1.20f, p);
+            armPitchL = Mathf.Lerp(0.0f, 1.00f, p);
+            armRollL = Mathf.Lerp(0.0f, -0.50f, p); // Reach across body
+            
+            // Arm R goes directly to the planted push-up position
+            armPitchR = Mathf.Lerp(0.0f, -0.50f, p);
+            armRollR = Mathf.Lerp(0.0f, 1.00f, p); 
+            forearmPitch = Mathf.Lerp(0.0f, 2.00f, p);
         }
         else if (t < 0.60f)
         {
-            // Phase 2: Push up into Quadruped (all-fours) Stance
+            // Phase 2: Explosive Push Up. Same as Prone Phase 2.
             float p = (t - 0.30f) / 0.30f;
-            spinePitch = Mathf.Lerp(-0.25f, 0.10f, p);
-            spineRoll = Mathf.Lerp(0.85f, 0.0f, p);
-            chestPitch = Mathf.Lerp(-0.30f, 0.05f, p);
-            chestRoll = Mathf.Lerp(0.85f, 0.0f, p);
+            spinePitch = Mathf.Lerp(-0.20f, -0.10f, p);
+            spineRoll = Mathf.Lerp(1.50f, 0.0f, p);
+            chestPitch = Mathf.Lerp(-0.30f, -0.10f, p);
+            chestRoll = Mathf.Lerp(1.50f, 0.0f, p);
 
-            thighPitchL = Mathf.Lerp(0.70f, 1.35f, p);
-            thighPitchR = Mathf.Lerp(0.50f, 1.35f, p);
-            shinPitch = Mathf.Lerp(-1.20f, -1.45f, p);
-            footPitch = Mathf.Lerp(-0.30f, -0.20f, p);
+            thighPitchL = Mathf.Lerp(1.20f, 1.40f, p);
+            thighPitchR = Mathf.Lerp(0.50f, 1.40f, p);
+            shinPitch = Mathf.Lerp(-1.50f, -1.50f, p);
+            footPitch = Mathf.Lerp(0.0f, 0.50f, p);
 
-            armPitchL = Mathf.Lerp(0.80f, 0.45f, p);
-            armRollL = Mathf.Lerp(-0.40f, 0.15f, p);
-            armPitchR = Mathf.Lerp(0.40f, 0.45f, p);
-            armRollR = Mathf.Lerp(0.20f, 0.15f, p);
-            forearmPitch = Mathf.Lerp(1.20f, 0.25f, p);
+            // Now both arms mirror the push-up extension
+            armPitchL = Mathf.Lerp(1.00f, 1.00f, p); 
+            armRollL = Mathf.Lerp(-0.50f, 0.50f, p);
+            
+            armPitchR = Mathf.Lerp(-0.50f, 1.00f, p);
+            armRollR = Mathf.Lerp(1.00f, 0.50f, p);
+            
+            forearmPitch = Mathf.Lerp(2.00f, 0.20f, p);
         }
         else if (t < 0.85f)
         {
-            // Phase 3: Bear-Crawl to Squat Transition
+            // Phase 3: Rock back onto heels. Same as Prone Phase 3.
             float p = (t - 0.60f) / 0.25f;
-            spinePitch = Mathf.Lerp(0.10f, 0.45f, p);
+            spinePitch = Mathf.Lerp(-0.10f, -0.50f, p);
             spineRoll = 0.0f;
-            chestPitch = Mathf.Lerp(0.05f, 0.30f, p);
+            chestPitch = Mathf.Lerp(-0.10f, -0.50f, p);
             chestRoll = 0.0f;
 
-            thighPitchL = Mathf.Lerp(1.35f, 0.95f, p);
-            thighPitchR = Mathf.Lerp(1.35f, 0.95f, p);
-            shinPitch = Mathf.Lerp(-1.45f, -1.10f, p);
-            footPitch = Mathf.Lerp(-0.20f, 0.0f, p);
+            thighPitchL = Mathf.Lerp(1.40f, 1.00f, p);
+            thighPitchR = Mathf.Lerp(1.40f, 1.00f, p);
+            shinPitch = Mathf.Lerp(-1.50f, -1.20f, p);
+            footPitch = Mathf.Lerp(0.50f, -0.20f, p);
 
-            armPitchL = Mathf.Lerp(0.45f, 0.80f, p);
-            armRollL = Mathf.Lerp(0.15f, 0.10f, p);
-            armPitchR = Mathf.Lerp(0.45f, 0.80f, p);
-            armRollR = Mathf.Lerp(0.15f, 0.10f, p);
-            forearmPitch = Mathf.Lerp(0.25f, 0.20f, p);
+            armPitchL = Mathf.Lerp(1.00f, 1.50f, p);
+            armRollL = Mathf.Lerp(0.50f, 0.20f, p);
+            armPitchR = Mathf.Lerp(1.00f, 1.50f, p);
+            armRollR = Mathf.Lerp(0.50f, 0.20f, p);
+            forearmPitch = Mathf.Lerp(0.20f, 0.10f, p);
         }
         else
         {
-            // Phase 4: Full Upright Leg Extension
+            // Phase 4: Stand up. Same as Prone Phase 4.
             float p = (t - 0.85f) / 0.15f;
-            spinePitch = Mathf.Lerp(0.45f, 0.0f, p);
+            spinePitch = Mathf.Lerp(-0.50f, 0.0f, p);
             spineRoll = 0.0f;
-            chestPitch = Mathf.Lerp(0.30f, 0.0f, p);
+            chestPitch = Mathf.Lerp(-0.50f, 0.0f, p);
             chestRoll = 0.0f;
 
-            thighPitchL = Mathf.Lerp(0.95f, 0.0f, p);
-            thighPitchR = Mathf.Lerp(0.95f, 0.0f, p);
-            shinPitch = Mathf.Lerp(-1.10f, 0.0f, p);
-            footPitch = 0.0f;
+            thighPitchL = Mathf.Lerp(1.00f, 0.0f, p);
+            thighPitchR = Mathf.Lerp(1.00f, 0.0f, p);
+            shinPitch = Mathf.Lerp(-1.20f, 0.0f, p);
+            footPitch = Mathf.Lerp(-0.20f, 0.0f, p);
 
-            armPitchL = Mathf.Lerp(0.80f, 0.06f, p);
-            armRollL = Mathf.Lerp(0.10f, 0.0f, p);
-            armPitchR = Mathf.Lerp(0.80f, 0.06f, p);
-            armRollR = Mathf.Lerp(0.10f, 0.0f, p);
-            forearmPitch = Mathf.Lerp(0.20f, 0.20f, p);
+            armPitchL = Mathf.Lerp(1.50f, 0.0f, p);
+            armRollL = Mathf.Lerp(0.20f, 0.0f, p);
+            armPitchR = Mathf.Lerp(1.50f, 0.0f, p);
+            armRollR = Mathf.Lerp(0.20f, 0.0f, p);
+            forearmPitch = Mathf.Lerp(0.10f, 0.0f, p);
         }
 
         return boneName switch
         {
             "Spine" => Quaternion.FromEuler(new Vector3(spinePitch, 0, spineRoll)),
             "Chest" => Quaternion.FromEuler(new Vector3(chestPitch, 0, chestRoll)),
-            "Head" => Quaternion.FromEuler(new Vector3(0.1f, 0, 0)),
+            "Head" => Quaternion.FromEuler(new Vector3(-0.2f, 0, 0)),
             "Thigh_L" => Quaternion.FromEuler(new Vector3(thighPitchL, 0, 0)),
             "Thigh_R" => Quaternion.FromEuler(new Vector3(thighPitchR, 0, 0)),
             "Shin_L" or "Shin_R" => Quaternion.FromEuler(new Vector3(shinPitch, 0, 0)),
