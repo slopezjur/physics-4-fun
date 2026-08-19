@@ -21,6 +21,14 @@ public sealed class PidController3D
     /// </summary>
     public float EffectiveInertia { get; set; } = 0.12f;
 
+    /// <summary>
+    /// Divide-by-zero guard for the SPD denominator. Must stay below every real body inertia:
+    /// clamping <see cref="EffectiveInertia"/> UP to a fictitious value voids the SPD stability
+    /// guarantee and turns the D term into a per-tick velocity amplifier (see MinCapturedInertia
+    /// in ActiveBone for the derivation).
+    /// </summary>
+    private const float MinInertia = 1e-5f;
+
     // EMA smoothing factor for the measured angular velocity feeding the D term
     private const float AngularVelocityFilterAlpha = 0.4f;
 
@@ -75,7 +83,7 @@ public sealed class PidController3D
 
         // Tan-Liu-Turk Stable Proportional-Derivative (SPD) formulation
         // Ensures unconditional discrete numerical stability (prevents discrete limit-cycle chatter and physics explosion)
-        float inertia = Mathf.Max(0.01f, EffectiveInertia);
+        float inertia = Mathf.Max(MinInertia, EffectiveInertia);
         float denominator = 1.0f + (DerivativeGain * delta / inertia) + (ProportionalGain * delta * delta / inertia);
 
         // Implicitly stabilized proportional and derivative terms

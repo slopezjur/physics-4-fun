@@ -47,7 +47,8 @@ public class HipStrategyModule : IBalanceStrategy
     public void Apply(in BalanceContext context)
     {
         bool hasGroundContact = context.IsGroundedL || context.IsGroundedR;
-        if (!(context.Strength > 0.01f && hasGroundContact && context.CurrentStepPhase == StepPhase.DoubleSupport))
+        bool isBalancedOrStumbling = context.State == RagdollState.Balanced || context.State == RagdollState.Stumbling;
+        if (!(isBalancedOrStumbling && context.Strength > 0.01f && hasGroundContact && context.CurrentStepPhase == StepPhase.DoubleSupport))
         {
             return;
         }

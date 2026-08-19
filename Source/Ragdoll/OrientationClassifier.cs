@@ -25,13 +25,19 @@ public static class OrientationClassifier
             return RagdollOrientation.Upright;
         }
 
-        if (forwardDot > 0.20f)
+        // Hysteresis mirrors the Upright check above: entering Supine/Prone needs a strong
+        // signal (|forwardDot| > 0.20), but once classified, small wobbles near the boundary
+        // don't immediately kick it back out to Side. Without this, a wobbling pelvis during
+        // recovery flickers Prone<->Side<->Supine every tick; since BiomechanicalMotionSynthesizer
+        // dispatches a different trajectory per orientation, the flicker thrashes bone targets
+        // between incompatible poses and the ragdoll never rises.
+        if (forwardDot > 0.20f || (_previous == RagdollOrientation.Supine && forwardDot > 0.05f))
         {
             _previous = RagdollOrientation.Supine;
             return RagdollOrientation.Supine; // Chest facing sky (on back)
         }
 
-        if (forwardDot < -0.20f)
+        if (forwardDot < -0.20f || (_previous == RagdollOrientation.Prone && forwardDot < -0.05f))
         {
             _previous = RagdollOrientation.Prone;
             return RagdollOrientation.Prone;  // Chest facing ground (on belly)

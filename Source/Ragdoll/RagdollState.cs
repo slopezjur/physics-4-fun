@@ -28,5 +28,12 @@ public enum RagdollState
     /// <summary>
     /// Automatic recovery sequence: pushing off ground to stand back up.
     /// </summary>
-    Recovering
+    Recovering,
+
+    /// <summary>
+    /// Debug drill: an isolated knee push-up, entered and left by hand rather than by the state
+    /// machine. Exists to develop the arm press on its own, without the legs or the get-up phase
+    /// machine in the way.
+    /// </summary>
+    PushUpDrill
 }

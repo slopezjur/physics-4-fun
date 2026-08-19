@@ -117,6 +117,8 @@ public partial class RagdollTelemetryHud : PanelContainer
             $"--- TELEMETRY METRICS ---\n" +
             $"Engine: Jolt @ {physicsFps} Hz (FPS: {fps})\n" +
             $"State: {Ragdoll.CurrentState.ToString().ToUpper()}\n" +
+            (Ragdoll.CurrentState == RagdollState.Recovering ? $"Get-Up Phase: {Ragdoll.CurrentGetUpPhase}\n" : string.Empty) +
+            (Ragdoll.CurrentState == RagdollState.PushUpDrill ? $"Push-Up Rep: {Ragdoll.DrillCycleNormalized:F2} (0=bottom, 1=lockout)\n" : string.Empty) +
             $"Step Phase: {stepPhase}\n" +
             $"Weight Transfer: L: {weightL:F0}% | R: {weightR:F0}%\n" +
             $"Grounded Feet: {groundStatus}\n" +

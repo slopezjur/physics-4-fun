@@ -16,12 +16,14 @@ public static class BiomechanicalMotionSynthesizer
     private static readonly IMotionTrajectory _flailTrajectory = new FlailTrajectory();
     private static readonly IMotionTrajectory _supineRecovery = new SupineRecoveryTrajectory();
     private static readonly IMotionTrajectory _proneRecovery = new ProneRecoveryTrajectory();
+    private static readonly IMotionTrajectory _pushUpDrill = new PushUpDrillTrajectory();
 
     private static readonly Dictionary<RagdollState, IMotionTrajectory> _stateTrajectories = new()
     {
         { RagdollState.Balanced, _standingTrajectory },
         { RagdollState.Stumbling, _stumbleTrajectory },
-        { RagdollState.Flailing, _flailTrajectory }
+        { RagdollState.Flailing, _flailTrajectory },
+        { RagdollState.PushUpDrill, _pushUpDrill }
     };
 
     private static readonly Dictionary<RagdollOrientation, IMotionTrajectory> _recoveryTrajectories = new()
@@ -30,6 +32,20 @@ public static class BiomechanicalMotionSynthesizer
         { RagdollOrientation.Prone, _proneRecovery },
         { RagdollOrientation.Side, _supineRecovery } // Side rolls into supine recovery
     };
+
+
+    /// <summary>
+    /// The recovery trajectory that would be selected for the given orientation, exposed so
+    /// GetUpPhaseController can read its phase boundaries and drive it from physical state.
+    /// </summary>
+    public static IPhasedRecoveryTrajectory? GetRecoveryTrajectory(RagdollOrientation orientation)
+    {
+        if (_recoveryTrajectories.TryGetValue(orientation, out IMotionTrajectory? trajectory))
+        {
+            return trajectory as IPhasedRecoveryTrajectory;
+        }
+        return _supineRecovery as IPhasedRecoveryTrajectory;
+    }
 
     public static Quaternion ComputeTargetRotation(
         string boneName,

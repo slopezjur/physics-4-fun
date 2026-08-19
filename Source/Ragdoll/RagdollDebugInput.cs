@@ -41,6 +41,9 @@ public partial class RagdollDebugInput : Node
                 case Key.Key6:
                     Ragdoll.DropToProne();
                     break;
+                case Key.Key7:
+                    Ragdoll.StartPushUpDrill();
+                    break;
                 case Key.G:
                     ToggleZeroGravity();
                     break;

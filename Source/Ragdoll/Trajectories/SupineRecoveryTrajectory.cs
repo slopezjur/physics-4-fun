@@ -1,9 +1,27 @@
+using System.Collections.Generic;
 using Godot;
 
 namespace Physics4Fun.Ragdoll.Trajectories;
 
-public class SupineRecoveryTrajectory : IMotionTrajectory
+public class SupineRecoveryTrajectory : IPhasedRecoveryTrajectory
 {
+    /// <summary>
+    /// Roll to prone -> push up -> rock back onto heels -> stand, spread over the five-stage phase
+    /// model so it stays in step with <see cref="Recovery.GetUpPhase"/>.
+    ///
+    /// NOT tuned for the asymmetric model the way <see cref="ProneRecoveryTrajectory"/> is: the
+    /// keyframes below still predate it. Key 6 drops the body prone, so prone is the tuned path;
+    /// supine currently rolls face-down and then relies on those older poses. Rebuilding it to
+    /// drive a lead knee the same way is follow-up work.
+    /// </summary>
+    public IReadOnlyList<float> PhaseBoundaries { get; } = new[] { 0.20f, 0.40f, 0.62f, 0.85f };
+
+    public Quaternion EvaluateBoneTarget(string boneName, in RecoveryPose pose)
+    {
+        // Lead side is not yet honoured here; see the PhaseBoundaries note.
+        return EvaluateBoneTarget(boneName, pose.GlobalTime, pose.PhaseNormalized);
+    }
+
     public Quaternion EvaluateBoneTarget(string boneName, float globalTime, float phaseNormalized)
     {
         float t = Mathf.Clamp(phaseNormalized, 0.0f, 1.0f);

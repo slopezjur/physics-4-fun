@@ -29,6 +29,16 @@ public class WeightTransferModule : IBalanceStrategy
 
     public void Apply(in BalanceContext context)
     {
+        // Upright double-support weight shifting only. The other strategies already self-gate this
+        // way; this one did not, and once the tilt gate stopped blanket-disabling the pipeline
+        // during recovery it would otherwise have started shifting weight between feet that are
+        // still folded underneath a body lying on the floor.
+        if (context.State != RagdollState.Balanced && context.State != RagdollState.Stumbling)
+        {
+            Reset();
+            return;
+        }
+
         // Lateral CoM error in the yaw-level frame drives double-support weight shifting
         float lateralComError = 0.0f;
         ActiveBone? footL = context.FootL;

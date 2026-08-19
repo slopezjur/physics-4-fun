@@ -54,7 +54,8 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
         { (int)RagdollState.Stumbling, 0.85f },
         { (int)RagdollState.Flailing, 0.0f },
         { (int)RagdollState.KnockedOut, 0.0f },
-        { (int)RagdollState.Recovering, 1.0f }
+        { (int)RagdollState.Recovering, 1.0f },
+        { (int)RagdollState.PushUpDrill, 0.0f }
     };
 
     // Subsystem Modules (SRP)
@@ -110,6 +111,8 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
     private ActiveBone? _upperArmR;
     private ActiveBone? _forearmL;
     private ActiveBone? _forearmR;
+    private ActiveBone? _handL;
+    private ActiveBone? _handR;
     private ActiveBone? _thighL;
     private ActiveBone? _thighR;
     private ActiveBone? _shinL;
@@ -148,6 +151,8 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
                 case "UpperArm_R": _upperArmR = bone; break;
                 case "Forearm_L": _forearmL = bone; break;
                 case "Forearm_R": _forearmR = bone; break;
+                case "Hand_L": _handL = bone; break;
+                case "Hand_R": _handR = bone; break;
                 case "Head": _head = bone; break;
             }
         }
@@ -239,7 +244,7 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
         _stateMachine.TriggerStumble();
     }
 
-    public void ApplyBalanceForces(RagdollState state, float delta)
+    public void ApplyBalanceForces(RagdollState state, Recovery.GetUpPhase getUpPhase, float delta)
     {
         if (_pelvis == null || !GodotObject.IsInstanceValid(_pelvis))
         {
@@ -271,7 +276,13 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
         float tiltAngle = Mathf.RadToDeg(Mathf.Acos(dot));
         float speed = _pelvis.LinearVelocity.Length();
 
-        if (tiltAngle > 80.0f)
+        // The tilt gate exists so balance strategies do not fight a fall in progress. It must not
+        // apply while recovering: a get-up spends its whole duration far past 80 degrees, and
+        // blanket-zeroing the pipeline there left the pelvis with no attitude control at all.
+        // The upright-biped strategies stay off regardless - they self-gate to Balanced/Stumbling.
+        bool isRecovering = state == RagdollState.Recovering;
+
+        if (!isRecovering && tiltAngle > 80.0f)
         {
             BalanceStrengthNow = 0.0f;
             _pelvisStabilization.ClearTorque();
@@ -281,21 +292,23 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
             return;
         }
 
-        float tiltFade = Mathf.Clamp(1.0f - ((tiltAngle - 60.0f) / 20.0f), 0.0f, 1.0f);
+        // Tilt fade is meaningless when the body is deliberately not upright; speed fade still
+        // applies, since a fast-moving body should not be receiving stabilizer torque either way.
+        float tiltFade = isRecovering ? 1.0f : Mathf.Clamp(1.0f - ((tiltAngle - 60.0f) / 20.0f), 0.0f, 1.0f);
         float speedFade = Mathf.Clamp(1.0f - (speed / DecoupleVelocityThreshold), 0.0f, 1.0f);
         float activeStrength = strength * tiltFade * speedFade;
         BalanceStrengthNow = activeStrength;
 
         // 2. Balance Strategy Pipeline (OCP): pelvis stabilization -> stepping -> weight transfer ->
         // hip strategy -> ankle balance. Each strategy self-gates on state/step-phase/ground-contact.
-        BalanceContext context = BuildBalanceContext(state, activeStrength, delta);
+        BalanceContext context = BuildBalanceContext(state, getUpPhase, activeStrength, delta);
         foreach (var strategy in _balancePipeline)
         {
             strategy.Apply(in context);
         }
     }
 
-    private BalanceContext BuildBalanceContext(RagdollState state, float activeStrength, float delta)
+    private BalanceContext BuildBalanceContext(RagdollState state, Recovery.GetUpPhase getUpPhase, float activeStrength, float delta)
     {
         Vector3 icp = Vector3.Zero;
         Vector3 baseOfSupportCenter = Vector3.Zero;
@@ -310,7 +323,8 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
             _pelvis, _spine, _chest, _head,
             _thighL, _thighR, _shinL, _shinR,
             _footL, _footR,
-            state, CurrentStepPhase, activeStrength, delta,
+            _forearmL, _forearmR, _handL, _handR,
+            state, getUpPhase, CurrentStepPhase, activeStrength, delta,
             CenterOfMass, CenterOfMassVelocity, icp, baseOfSupportCenter,
             IsGroundedL, IsGroundedR, GroundPointL, GroundPointR,
             _stateMachine.IsSettleGraceActive);

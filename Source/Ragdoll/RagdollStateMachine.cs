@@ -13,7 +13,16 @@ public class RagdollStateMachine
     public float MaxStumbleTiltAngleDeg { get; set; } = 30.0f;
     public float KnockoutTiltAngleDeg { get; set; } = 80.0f;
     public float AutoRecoveryDelay { get; set; } = 0.8f;
-    public float RecoveryDuration { get; set; } = 2.4f;
+    /// <summary>
+    /// Nominal get-up window. The trajectory itself is now advanced by GetUpPhaseController from
+    /// physical state, so this only sets the give-up horizon: a quasi-static rise dwells on each
+    /// phase until its criteria are met, which takes considerably longer than keyframe playback.
+    ///
+    /// Must comfortably exceed the phase machine's worst case, 4 phases x (PhaseBlendDuration 0.55
+    /// + PhaseTimeout 1.2) = 7.03 s. At the previous 6.0 s the abandon point (6.0 + 1.5 = 7.5 s)
+    /// left only 0.47 s of margin, and attempts were observed being killed at exactly +7.5 s.
+    /// </summary>
+    public float RecoveryDuration { get; set; } = 10.0f;
 
     public float RecoveryProgressNormalized { get; private set; } = 0.0f;
     public bool IsSettleGraceActive => _settleGraceTimer > 0.0f;
@@ -76,6 +85,14 @@ public class RagdollStateMachine
         else
         {
             _airborneTimer = 0.0f;
+        }
+
+        // Checked ahead of the settle grace: the drill is entered by hand right after a teleport,
+        // which resets the grace timer, and the grace branch would otherwise force the state to
+        // Balanced on the very next tick and the drill would never run.
+        if (currentState == RagdollState.PushUpDrill)
+        {
+            return RagdollState.PushUpDrill;
         }
 
         if (_settleGraceTimer > 0.0f)
@@ -153,7 +170,10 @@ public class RagdollStateMachine
                 _recoveryTimer -= delta;
                 RecoveryProgressNormalized = Mathf.Clamp(1.0f - (_recoveryTimer / RecoveryDuration), 0.0f, 1.0f);
 
-                if (RecoveryProgressNormalized >= 0.85f && tiltAngleDeg < 30.0f && currentHeight > 0.60f && (isGroundedL || isGroundedR))
+                // Success is now purely physical: upright, risen, and in contact. The old
+                // "progress >= 0.85" gate tied success to the clock, which no longer tracks the
+                // phase-driven trajectory and would block an early, clean rise.
+                if (tiltAngleDeg < 30.0f && currentHeight > 0.60f && (isGroundedL || isGroundedR))
                 {
                     RecoveryProgressNormalized = 1.0f;
                     return RagdollState.Balanced;

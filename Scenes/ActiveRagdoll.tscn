@@ -325,7 +325,6 @@ BoneName = "UpperArm_L"
 ParentBone = NodePath("../Chest")
 ProportionalGain = 120.0
 DerivativeGain = 10.0
-ApparentInertiaMultiplier = 5.0
   MaxTorque = 200.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="UpperArm_L"]
@@ -362,7 +361,6 @@ BoneName = "Forearm_L"
 ParentBone = NodePath("../UpperArm_L")
 ProportionalGain = 100.0
 DerivativeGain = 8.0
-ApparentInertiaMultiplier = 5.0
   MaxTorque = 150.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Forearm_L"]
@@ -404,7 +402,6 @@ BoneName = "UpperArm_R"
 ParentBone = NodePath("../Chest")
 ProportionalGain = 120.0
 DerivativeGain = 10.0
-ApparentInertiaMultiplier = 5.0
   MaxTorque = 200.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="UpperArm_R"]
@@ -441,7 +438,6 @@ BoneName = "Forearm_R"
 ParentBone = NodePath("../UpperArm_R")
 ProportionalGain = 100.0
 DerivativeGain = 8.0
-ApparentInertiaMultiplier = 5.0
   MaxTorque = 150.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Forearm_R"]
@@ -748,7 +744,6 @@ BoneName = "Hand_L"
 ParentBone = NodePath("../Forearm_L")
 ProportionalGain = 60.0
 DerivativeGain = 6.0
-ApparentInertiaMultiplier = 5.0
 MaxTorque = 50.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Hand_L"]
@@ -781,7 +776,6 @@ BoneName = "Hand_R"
 ParentBone = NodePath("../Forearm_R")
 ProportionalGain = 60.0
 DerivativeGain = 6.0
-ApparentInertiaMultiplier = 5.0
 MaxTorque = 50.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Hand_R"]

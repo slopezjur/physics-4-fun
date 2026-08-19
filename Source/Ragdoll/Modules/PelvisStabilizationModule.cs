@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Godot;
 using Physics4Fun.Ragdoll.Interfaces;
 
@@ -31,21 +32,47 @@ public class PelvisStabilizationModule : IBalanceStrategy
         LastTorque = Vector3.Zero;
     }
 
+    /// <summary>
+    /// Attitude torque cap (N·m) while rising from the ground. Deliberately well under
+    /// <see cref="MaxTorque"/>: during a get-up this assists the limbs in bringing the pelvis
+    /// upright, it does not drive the motion. If the rise only works with this raised, the leg
+    /// drive is not actually working.
+    /// </summary>
+    public float RecoveryMaxTorque { get; set; } = 120.0f;
+
+    /// <summary>Limbs that can carry the stabilizer's reaction into the ground, in preference order.</summary>
+    private readonly List<ActiveBone> _reactionLimbs = new();
+
     public void Apply(in BalanceContext context)
     {
-        // Only active during upright balance phases. Disabled during recovery to prevent artificial
-        // floating/dragging on the floor. Unlike a grounding/strength gate failure below, this
-        // outer gate does NOT zero LastTorque — it leaves the previous tick's value untouched.
-        if (context.State != RagdollState.Balanced && context.State != RagdollState.Stumbling)
+        // Active during upright balance, and during the two get-up stages where the body is
+        // genuinely rising over a support leg. The pelvis is the unactuated skeletal root, so
+        // without this it has no attitude control at all - measured as exactly 0 N·m of pelvis
+        // torque on every frame of every recovery dump.
+        bool upright = context.State == RagdollState.Balanced || context.State == RagdollState.Stumbling;
+        bool rising = context.State == RagdollState.Recovering
+                      && (context.GetUpPhase == Recovery.GetUpPhase.HalfKneelRise
+                          || context.GetUpPhase == Recovery.GetUpPhase.StandUp);
+
+        // Unlike a grounding/strength gate failure below, this outer gate does NOT zero LastTorque —
+        // it leaves the previous tick's value untouched.
+        if (!upright && !rising)
         {
             return;
         }
 
         LastTorque = Vector3.Zero;
 
-        bool groundedL = context.IsGroundedL && context.FootL != null && GodotObject.IsInstanceValid(context.FootL);
-        bool groundedR = context.IsGroundedR && context.FootR != null && GodotObject.IsInstanceValid(context.FootR);
-        if ((!groundedL && !groundedR) || context.Strength <= 0.01f)
+        if (context.Strength <= 0.01f)
+        {
+            return;
+        }
+
+        // The reaction has to go somewhere real, or this becomes angular momentum from nothing.
+        // While upright that means the grounded feet; while rising it means whichever limbs are
+        // actually touching the world, which prone is the forearms rather than any sole-down foot.
+        CollectReactionLimbs(context, rising);
+        if (_reactionLimbs.Count == 0)
         {
             return;
         }
@@ -61,7 +88,7 @@ public class PelvisStabilizationModule : IBalanceStrategy
         _filteredAngularVelocity += (pelvis.AngularVelocity - _filteredAngularVelocity) * AngularVelocityFilterAlpha;
 
         Vector3 torque = (Gain * attitudeError) - (Damping * _filteredAngularVelocity);
-        float maxTorque = MaxTorque * context.Strength;
+        float maxTorque = (rising ? RecoveryMaxTorque : MaxTorque) * context.Strength;
         if (torque.LengthSquared() > maxTorque * maxTorque)
         {
             torque = torque.Normalized() * maxTorque;
@@ -70,15 +97,45 @@ public class PelvisStabilizationModule : IBalanceStrategy
         LastTorque = torque;
         pelvis.ApplyTorque(torque);
 
-        int groundedCount = (groundedL ? 1 : 0) + (groundedR ? 1 : 0);
-        Vector3 reaction = -torque / groundedCount;
-        if (groundedL)
+        Vector3 reaction = -torque / _reactionLimbs.Count;
+        foreach (ActiveBone limb in _reactionLimbs)
         {
-            context.FootL!.ApplyTorque(reaction);
+            limb.ApplyTorque(reaction);
         }
-        if (groundedR)
+    }
+
+    private void CollectReactionLimbs(in BalanceContext context, bool rising)
+    {
+        _reactionLimbs.Clear();
+
+        if (!rising)
         {
-            context.FootR!.ApplyTorque(reaction);
+            if (context.IsGroundedL && context.FootL != null && GodotObject.IsInstanceValid(context.FootL))
+            {
+                _reactionLimbs.Add(context.FootL);
+            }
+            if (context.IsGroundedR && context.FootR != null && GodotObject.IsInstanceValid(context.FootR))
+            {
+                _reactionLimbs.Add(context.FootR);
+            }
+            return;
+        }
+
+        // Sole-down grounding never qualifies while the body is still folded on the floor, so use
+        // real world contact instead — the same test GetUpPhaseController plants its phases on.
+        AddIfContacting(context.FootL);
+        AddIfContacting(context.FootR);
+        AddIfContacting(context.ForearmL);
+        AddIfContacting(context.ForearmR);
+        AddIfContacting(context.HandL);
+        AddIfContacting(context.HandR);
+    }
+
+    private void AddIfContacting(ActiveBone? limb)
+    {
+        if (limb != null && GodotObject.IsInstanceValid(limb) && limb.IsInContactWithWorld())
+        {
+            _reactionLimbs.Add(limb);
         }
     }
 }
