@@ -96,7 +96,7 @@ $Timesteps   = 80000000
 # Use this when you want a run of a known DURATION - throughput is not predictable enough to
 # express "15 minutes" as a step count, especially with a visible instance.
 # 0 = no time limit.   900 = 15 minutes.
-$MaxSeconds  = 300
+$MaxSeconds  = 1800
 
 # --- Run identity ------------------------------------------------------------
 # Bump this for each new experiment. TensorBoard auto-appends _1, _2, ... so runs
