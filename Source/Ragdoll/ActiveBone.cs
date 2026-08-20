@@ -344,6 +344,62 @@ public partial class ActiveBone : RigidBody3D
     ///
     /// Returns true when there is no joint to check against, so unconstrained bones never register.
     /// </summary>
+    /// <summary>
+    /// Per-axis angular limits of this bone's joint, in radians about its rest frame.
+    ///
+    /// Exposed so an external controller can scale its commands to what the joint can actually
+    /// reach. Anything outside these bounds is not a smaller motion than requested - it is the
+    /// actuator pinned against a hard stop at full torque with a permanent tracking error (see
+    /// IsTargetWithinJointLimits below), which is indistinguishable from any other out-of-range
+    /// command. A controller that cannot see these numbers cannot avoid that.
+    ///
+    /// Axes with no joint, or with their limit disabled, report the supplied fallback so callers
+    /// do not have to special-case free rotation.
+    /// </summary>
+    public void GetJointAngularLimits(float fallback, out Vector3 lower, out Vector3 upper)
+    {
+        lower = new Vector3(-fallback, -fallback, -fallback);
+        upper = new Vector3(fallback, fallback, fallback);
+
+        if (_joint == null || !IsInstanceValid(_joint))
+        {
+            return;
+        }
+
+        ReadAxisLimit("angular_limit_x", fallback, out float lx, out float ux);
+        ReadAxisLimit("angular_limit_y", fallback, out float ly, out float uy);
+        ReadAxisLimit("angular_limit_z", fallback, out float lz, out float uz);
+        lower = new Vector3(lx, ly, lz);
+        upper = new Vector3(ux, uy, uz);
+    }
+
+    private void ReadAxisLimit(string axisPrefix, float fallback, out float lower, out float upper)
+    {
+        if (_joint == null || !(bool)_joint.Get($"{axisPrefix}/enabled"))
+        {
+            lower = -fallback;
+            upper = fallback;
+            return;
+        }
+
+        lower = (float)_joint.Get($"{axisPrefix}/lower_angle");
+        upper = (float)_joint.Get($"{axisPrefix}/upper_angle");
+    }
+
+    /// <remarks>
+    /// KNOWN LIMITATION - unreliable for axes whose X limit exceeds +/-pi/2 (1.571 rad).
+    ///
+    /// Godot decomposes a Basis with Euler order YXZ, whose principal branch can only represent
+    /// |x| &lt;= pi/2. Four axes on this rig exceed that - Thigh x(+2.10), Shin x(-2.60),
+    /// Forearm x(+2.60), UpperArm x(+3.00) - and for those GetEuler() returns a different triple
+    /// than the one commanded, so the comparison below is against the wrong numbers. Measured: a
+    /// commanded (2.6, 0.05, 0.05) comes back as (0.54, -3.09, -3.09) and reports a violation that
+    /// did not occur.
+    ///
+    /// A correct check needs swing-twist decomposition about each joint axis rather than Euler.
+    /// Until then, treat a reported violation on those axes as unverified. The RL action path does
+    /// not depend on this: JointLimitedActionSpace scales into the limits by construction.
+    /// </remarks>
     public bool IsTargetWithinJointLimits()
     {
         if (_joint == null || !IsInstanceValid(_joint))

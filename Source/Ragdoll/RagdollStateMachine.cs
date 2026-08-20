@@ -89,10 +89,16 @@ public class RagdollStateMachine
 
         // Checked ahead of the settle grace: the drill is entered by hand right after a teleport,
         // which resets the grace timer, and the grace branch would otherwise force the state to
-        // Balanced on the very next tick and the drill would never run.
+        // Balanced on the very next tick and the drill would never run. Same reasoning applies to
+        // the RL state, which the bridge also enters right after a teleport-based episode reset.
         if (currentState == RagdollState.PushUpDrill)
         {
             return RagdollState.PushUpDrill;
+        }
+
+        if (currentState == RagdollState.ReinforcementLearning)
+        {
+            return RagdollState.ReinforcementLearning;
         }
 
         if (_settleGraceTimer > 0.0f)

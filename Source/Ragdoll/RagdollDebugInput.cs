@@ -19,6 +19,13 @@ public partial class RagdollDebugInput : Node
             return;
         }
 
+        // The RL state is externally driven (see RagdollRLBridge) - a stray debug keypress must
+        // not be able to yank CurrentState out from under an active episode.
+        if (Ragdoll.CurrentState == RagdollState.ReinforcementLearning)
+        {
+            return;
+        }
+
         if (@event is InputEventKey keyEvent && keyEvent.Pressed && !keyEvent.Echo)
         {
             switch (keyEvent.Keycode)

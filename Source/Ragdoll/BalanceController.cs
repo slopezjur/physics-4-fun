@@ -55,7 +55,8 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
         { (int)RagdollState.Flailing, 0.0f },
         { (int)RagdollState.KnockedOut, 0.0f },
         { (int)RagdollState.Recovering, 1.0f },
-        { (int)RagdollState.PushUpDrill, 0.0f }
+        { (int)RagdollState.PushUpDrill, 0.0f },
+        { (int)RagdollState.ReinforcementLearning, 0.0f }
     };
 
     // Subsystem Modules (SRP)

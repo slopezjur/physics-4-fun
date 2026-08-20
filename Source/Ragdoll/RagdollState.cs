@@ -35,5 +35,15 @@ public enum RagdollState
     /// machine. Exists to develop the arm press on its own, without the legs or the get-up phase
     /// machine in the way.
     /// </summary>
-    PushUpDrill
+    PushUpDrill,
+
+    /// <summary>
+    /// Driven by an external RL policy (see Source/RL/RagdollRLBridge.cs) rather than any
+    /// procedural trajectory. Gated the same way as PushUpDrill: the state machine and the
+    /// upright-biped balance strategies stay out of it entirely, full muscle stiffness, entered
+    /// and left by the bridge rather than by FSM transitions. The policy writes joint targets
+    /// through the same FeedForwardTargetOffset seam BalanceController's reflexes already use, so
+    /// it composes with the existing PD/SPD actuators instead of replacing them.
+    /// </summary>
+    ReinforcementLearning
 }

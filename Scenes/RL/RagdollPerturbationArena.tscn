@@ -1,0 +1,72 @@
+[gd_scene load_steps=12 format=3]
+
+[ext_resource type="PackedScene" uid="uid://dp62k4a8uwns2" path="res://Scenes/ActiveRagdoll.tscn" id="1_ragdoll"]
+[ext_resource type="Script" path="res://Source/RL/RagdollRLBridge.cs" id="2_bridge"]
+[ext_resource type="Script" path="res://Scenes/RL/RagdollAIController.gd" id="3_aicontroller"]
+[ext_resource type="Script" path="res://addons/godot_rl_agents/sync.gd" id="4_sync"]
+[ext_resource type="Script" path="res://Source/UI/RagdollTelemetryHud.cs" id="5_telemetry"]
+[ext_resource type="Script" path="res://Source/Camera/CameraController.cs" id="6_camera"]
+[ext_resource type="Script" path="res://Source/RL/PolicyAutoLoader.cs" id="7_autoload"]
+[ext_resource type="Script" path="res://Source/RL/Perturbation/BallGun.cs" id="8_ballgun"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_floor"]
+size = Vector3(20, 1, 20)
+
+[sub_resource type="BoxMesh" id="BoxMesh_floor"]
+size = Vector3(20, 1, 20)
+
+[node name="RagdollPerturbationArena" type="Node3D" node_paths=PackedStringArray("Sync", "Bridge")]
+script = ExtResource("7_autoload")
+Sync = NodePath("Sync")
+Bridge = NodePath("RLBridge")
+
+[node name="Floor" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Floor"]
+shape = SubResource("BoxShape3D_floor")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Floor"]
+mesh = SubResource("BoxMesh_floor")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.707107, -0.5, 0.5, 0, 0.707107, 0.707107, -0.707107, -0.5, 0.5, 0, 5, 0)
+shadow_enabled = true
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.965926, 0.258819, 0, -0.258819, 0.965926, 0, 2.8, 5.0)
+current = true
+script = ExtResource("6_camera")
+
+[node name="ActiveRagdoll" parent="." instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="." node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="." node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="BallGun" type="Node3D" parent="." node_paths=PackedStringArray("Target", "Bridge")]
+script = ExtResource("8_ballgun")
+Target = NodePath("../ActiveRagdoll")
+Bridge = NodePath("../RLBridge")
+IntervalSeconds = 3.0
+FirstShotDelaySeconds = 1.5
+LaunchSpeed = 9.0
+BallMass = 3.0
+
+[node name="Sync" type="Node" parent="."]
+script = ExtResource("4_sync")
+action_repeat = 8
+onnx_model_path = "res://Models/policy.onnx"
+
+[node name="CanvasLayer" type="CanvasLayer" parent="."]
+
+[node name="RagdollTelemetryHud" type="PanelContainer" parent="CanvasLayer" node_paths=PackedStringArray("Ragdoll", "RLBridge")]
+script = ExtResource("5_telemetry")
+Ragdoll = NodePath("../../ActiveRagdoll")
+RLBridge = NodePath("../../RLBridge")

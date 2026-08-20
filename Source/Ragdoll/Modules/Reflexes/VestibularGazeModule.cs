@@ -44,6 +44,18 @@ public class VestibularGazeModule : IBiomechanicalReflex
             return;
         }
 
+        // The RL dummy is driven entirely by its policy - no procedural reflex may touch it, the
+        // same self-gating every other balance module already does for this state. Beyond the
+        // architectural point there is a concrete failure: HumanoidRagdoll.UpdateBoneTargetRotations
+        // returns early for RL and therefore no longer resets FeedForwardTargetOffset to Identity
+        // each tick, so the accumulating Slerp below drifts out of normalisation and throws
+        // "Quaternion is not normalized" every frame.
+        if (state == RagdollState.ReinforcementLearning)
+        {
+            Reset();
+            return;
+        }
+
         // In steady double-support balance, maintain natural neutral head pose
         if (state == RagdollState.Balanced && stepPhase == StepPhase.DoubleSupport)
         {
@@ -90,6 +102,10 @@ public class VestibularGazeModule : IBiomechanicalReflex
         targetHeadYaw = Mathf.Clamp(targetHeadYaw, -0.40f, 0.40f);
 
         Quaternion targetOffset = Quaternion.FromEuler(new Vector3(targetHeadPitch, targetHeadYaw, targetHeadRoll));
-        _head.FeedForwardTargetOffset = _head.FeedForwardTargetOffset.Slerp(targetOffset, Mathf.Clamp(delta * 6.0f, 0.0f, 1.0f));
+        // Normalised explicitly: this is a self-accumulating Slerp (the result feeds back in as the
+        // next tick's start), so without it small numerical drift compounds indefinitely.
+        _head.FeedForwardTargetOffset = _head.FeedForwardTargetOffset
+            .Slerp(targetOffset, Mathf.Clamp(delta * 6.0f, 0.0f, 1.0f))
+            .Normalized();
     }
 }

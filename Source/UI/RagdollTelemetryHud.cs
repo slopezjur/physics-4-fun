@@ -1,6 +1,7 @@
 using Godot;
 using Physics4Fun.Ragdoll;
 using Physics4Fun.Ragdoll.Interfaces;
+using Physics4Fun.RL;
 
 namespace Physics4Fun.UI;
 
@@ -13,6 +14,12 @@ public partial class RagdollTelemetryHud : PanelContainer
 {
     [Export] public HumanoidRagdoll? Ragdoll { get; set; }
     [Export] public BalanceController? Balance { get; set; }
+
+    /// <summary>
+    /// Optional: only set in the RL arena scene. Left null (and inert) in TestChamber and any
+    /// other scene without an RL bridge, so this HUD stays usable everywhere.
+    /// </summary>
+    [Export] public RagdollRLBridge? RLBridge { get; set; }
 
     public IBalanceTelemetryProvider? TelemetryProvider => Balance;
 
@@ -119,6 +126,14 @@ public partial class RagdollTelemetryHud : PanelContainer
             $"State: {Ragdoll.CurrentState.ToString().ToUpper()}\n" +
             (Ragdoll.CurrentState == RagdollState.Recovering ? $"Get-Up Phase: {Ragdoll.CurrentGetUpPhase}\n" : string.Empty) +
             (Ragdoll.CurrentState == RagdollState.PushUpDrill ? $"Push-Up Rep: {Ragdoll.DrillCycleNormalized:F2} (0=bottom, 1=lockout)\n" : string.Empty) +
+            (Ragdoll.CurrentState == RagdollState.ReinforcementLearning && RLBridge != null
+                ? $"--- RL EPISODE ---\n" +
+                  $"Episode: {RLBridge.EpisodeCount} ({(RLBridge.StartedStanding ? "STANDING" : "PRONE")} start) | " +
+                  $"Elapsed: {RLBridge.EpisodeElapsedSeconds:F1}s / {RLBridge.EffectiveMaxEpisodeSeconds:F1}s\n" +
+                  $"Reward (live): {RLBridge.CurrentAccumulatedReward:F2}\n" +
+                  $"Last Episode: {RLBridge.LastEpisodeEndReason} | reward={RLBridge.LastEpisodeReward:F2} | {RLBridge.LastEpisodeDurationSeconds:F1}s\n" +
+                  $"Policy Active: {(Ragdoll.ReinforcementLearningPolicyActive ? "YES" : "NO (idling)")}\n"
+                : string.Empty) +
             $"Step Phase: {stepPhase}\n" +
             $"Weight Transfer: L: {weightL:F0}% | R: {weightR:F0}%\n" +
             $"Grounded Feet: {groundStatus}\n" +
@@ -128,12 +143,20 @@ public partial class RagdollTelemetryHud : PanelContainer
             $"Torso Tilt: {tiltAngle:F1}° (KO Limit: 80°)\n" +
             $"Balance Strength: {balanceStrength:F0}% | ICP Escape: {icpEscape:F2} m\n" +
             $"Pelvis Stabilizer: {pelvisStabTorque:F0} N·m\n\n" +
-            $"--- DEBUG CONTROLS ---\n" +
-            $"[T] Reset & Record 5s Telemetry\n" +
-            $"[1-5] Force State (1:Bal, 2:Stumble, 3:Flail, 4:KO, 5:Rec)\n" +
-            $"[G] Toggle Zero-Gravity\n" +
-            $"[F] Freeze / Unfreeze Pelvis\n" +
-            $"[Space] Chest Impact Kick\n" +
-            $"[R] Reset Simulation\n";
+            (RLBridge == null
+                ? $"--- DEBUG CONTROLS ---\n" +
+                  $"[T] Reset & Record 5s Telemetry\n" +
+                  $"[1-5] Force State (1:Bal, 2:Stumble, 3:Flail, 4:KO, 5:Rec)\n" +
+                  $"[G] Toggle Zero-Gravity\n" +
+                  $"[F] Freeze / Unfreeze Pelvis\n" +
+                  $"[Space] Chest Impact Kick\n" +
+                  $"[R] Reset Simulation\n"
+                : $"--- CAMERA ---\n" +
+                  $"[Right-Drag] Look around\n" +
+                  $"[WASD / Q,E] Move / Up,Down\n" +
+                  $"[Shift] Move faster\n" +
+                  $"[Wheel] Adjust speed\n\n" +
+                  $"--- DEBUG CONTROLS ---\n" +
+                  $"Ragdoll keys disabled during RL episodes\n");
     }
 }

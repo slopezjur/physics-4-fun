@@ -27,7 +27,8 @@ public partial class HumanoidRagdoll : Node3D
         { (int)RagdollState.Flailing, 0.35f },
         { (int)RagdollState.KnockedOut, 0.0f },
         { (int)RagdollState.Recovering, 1.15f },
-        { (int)RagdollState.PushUpDrill, 1.0f }
+        { (int)RagdollState.PushUpDrill, 1.0f },
+        { (int)RagdollState.ReinforcementLearning, 1.0f }
     };
 
     /// <summary>
@@ -39,6 +40,21 @@ public partial class HumanoidRagdoll : Node3D
     /// velocity factor toward 1 (more stable, not less). MaxTorque is deliberately untouched.
     /// </summary>
     [Export] public float ArmLoadBearingGain { get; set; } = 10.0f;
+
+    /// <summary>
+    /// Overall muscle stiffness the RL state holds while no policy has sent an action yet (e.g.
+    /// waiting for a Python training server, or between episodes). See UpdateBoneMuscleStiffness
+    /// for why full strength is wrong here specifically.
+    /// </summary>
+    [Export] public float ReinforcementLearningIdleStiffness { get; set; } = 0.3f;
+
+    /// <summary>
+    /// Set by an external RL driver (e.g. RagdollRLBridge) once it has applied at least one real
+    /// action this episode. HumanoidRagdoll only reads this to decide idle vs full stiffness for
+    /// the RL state - it does not know or care what sets it, keeping this class ignorant of any
+    /// specific RL implementation, matching how it already treats Balance/the state machine.
+    /// </summary>
+    public bool ReinforcementLearningPolicyActive { get; set; }
 
     private readonly List<ActiveBone> _allBones = new();
     private readonly List<ActiveBone> _plantedLimbs = new();
@@ -75,6 +91,13 @@ public partial class HumanoidRagdoll : Node3D
 
     public override void _UnhandledInput(InputEvent @event)
     {
+        // The RL state is externally driven (see RagdollRLBridge) - a stray debug keypress must
+        // not be able to yank CurrentState out from under an active episode.
+        if (CurrentState == RagdollState.ReinforcementLearning)
+        {
+            return;
+        }
+
         if (@event is InputEventKey keyEvent && keyEvent.Pressed && !keyEvent.Echo)
         {
             if (keyEvent.Keycode == Key.T)
@@ -231,14 +254,14 @@ public partial class HumanoidRagdoll : Node3D
         GD.Print("[HumanoidRagdoll] Ragdoll reset to initial standing state.");
     }
 
-    public void DropToProne()
+    public void DropToProne(bool silent = false)
     {
         _time = 0.0f;
         _stateTime = 0.0f;
         CurrentState = RagdollState.KnockedOut;
         _activeRecoveryTrajectory = null;
         Balance?.Reset();
-        
+
         // Rotate -90 degrees around X (pitch) and elevate slightly to avoid floor clipping
         Transform3D proneOffset = new Transform3D(new Basis(Vector3.Right, -Mathf.Pi / 2), new Vector3(0, 0.5f, 0));
 
@@ -251,7 +274,10 @@ public partial class HumanoidRagdoll : Node3D
         }
         UpdateBoneMuscleStiffness();
         UpdateBoneTargetRotations();
-        GD.Print("[HumanoidRagdoll] Dropped to prone.");
+        if (!silent)
+        {
+            GD.Print("[HumanoidRagdoll] Dropped to prone.");
+        }
     }
 
     /// <summary>Seconds spent settling into the bottom pose before reps begin.</summary>
@@ -294,6 +320,87 @@ public partial class HumanoidRagdoll : Node3D
         }
     }
 
+    /// <summary>
+    /// Enters (or re-enters, for an episode reset) the RL state: teleports the body prone and hands
+    /// control to whatever writes <see cref="ActiveBone.FeedForwardTargetOffset"/> externally - the
+    /// RL bridge, per bone, once per physics tick. Reuses the same teleport <see cref="DropToProne"/>
+    /// already does for the procedural get-up debug key, so a fresh episode starts from the same
+    /// physical pose every time regardless of how the previous one ended.
+    /// </summary>
+    /// <param name="silent">
+    /// When true, suppresses the per-call debug prints (episode resets fire every few seconds
+    /// during training - the RL bridge logs one consolidated line per episode instead).
+    /// </param>
+    /// <summary>
+    /// Teleports every bone to its authored standing pose, velocities cleared.
+    ///
+    /// The mirror of <see cref="DropToProne"/>, which is this same teleport composed with a -90
+    /// degree pitch offset. Exists so an RL episode can begin already standing: a policy that has
+    /// only ever started prone never observes a standing state at all, so "stay up" is not a
+    /// harder version of the task it knows - it is a region of the state space it has never seen.
+    /// Deliberately does NOT set CurrentState; the caller owns that, exactly as with DropToProne.
+    /// </summary>
+    public void TeleportToStanding()
+    {
+        _time = 0.0f;
+        _stateTime = 0.0f;
+        _activeRecoveryTrajectory = null;
+        Balance?.Reset();
+
+        foreach (var bone in _allBones)
+        {
+            if (IsInstanceValid(bone))
+            {
+                bone.Teleport(bone.InitialTransform);
+            }
+        }
+        UpdateBoneMuscleStiffness();
+    }
+
+    public void StartReinforcementLearning(bool silent = false, bool startStanding = false)
+    {
+        if (startStanding)
+        {
+            TeleportToStanding();
+        }
+        else
+        {
+            DropToProne(silent);
+        }
+
+        CurrentState = RagdollState.ReinforcementLearning;
+        UpdateBoneMuscleStiffness();
+        SeedTargetsToCurrentPose();
+        if (!silent)
+        {
+            GD.Print("[HumanoidRagdoll] Reinforcement learning episode started.");
+        }
+    }
+
+    /// <summary>
+    /// Points every bone's PD target at the pose it is already in, giving zero actuator error.
+    ///
+    /// Used to start an RL episode: DropToProne teleports the body, and without this the targets
+    /// would still hold the previous pose, so the muscles would fight the new configuration before
+    /// the policy has issued a single action. Starting at zero error means all subsequent motion is
+    /// attributable to the policy, which is what makes the reward signal meaningful.
+    /// </summary>
+    private void SeedTargetsToCurrentPose()
+    {
+        foreach (var bone in _allBones)
+        {
+            if (!IsInstanceValid(bone) || bone.ParentBone == null || !IsInstanceValid(bone.ParentBone))
+            {
+                continue;
+            }
+
+            Quaternion parentRot = bone.ParentBone.GlobalTransform.Basis.GetRotationQuaternion().Normalized();
+            Quaternion selfRot = bone.GlobalTransform.Basis.GetRotationQuaternion().Normalized();
+            bone.TargetLocalRotation = (parentRot.Inverse() * selfRot).Normalized();
+            bone.FeedForwardTargetOffset = Quaternion.Identity;
+        }
+    }
+
     public IReadOnlyList<ActiveBone> GetBones() => _allBones;
 
     public float CurrentMuscleStiffness
@@ -307,6 +414,21 @@ public partial class HumanoidRagdoll : Node3D
 
     private void UpdateBoneTargetRotations()
     {
+        // Pure-RL separation: in the RL state the policy owns every joint target outright, so the
+        // procedural pipeline writes nothing at all here. Without this early return the trajectory
+        // layer would keep stamping TargetLocalRotation = restPose (standing) onto a body lying
+        // prone every tick - an unreachable target the actuators saturate against, which is the
+        // visible "shaking" and which the policy cannot overcome no matter how good it is, since
+        // its action only composes on top of whatever this function last wrote.
+        //
+        // The RL dummy still uses the shared body (ActiveBone muscles + joint limits); it is only
+        // the procedural brain that is disconnected. Balance/state-machine/debug-input already
+        // gate themselves off for this state - this was the last remaining coupling.
+        if (CurrentState == RagdollState.ReinforcementLearning)
+        {
+            return;
+        }
+
         RagdollOrientation orientation = Balance?.CurrentOrientation ?? RagdollOrientation.Upright;
 
         // During recovery the trajectory is driven by achieved physical state (contacts made,
@@ -374,11 +496,26 @@ public partial class HumanoidRagdoll : Node3D
             stiffness = Mathf.Lerp(0.60f, 1.0f, Balance.RecoveryProgressNormalized);
         }
 
+        // Base target rotation while Recovering/PushUpDrill is a pose authored for the current body
+        // orientation; the RL state has none yet (see UpdateBoneTargetRotations - it falls through
+        // to Identity offset, i.e. the STANDING rest angles) and no policy exists before the bridge
+        // receives its first action. Commanding a standing pose at full strength while physically
+        // prone fights itself and shows up as visible shaking with nothing intelligent behind it.
+        // Idling softer until a real action arrives keeps that quiet without touching anything the
+        // policy will actually be judged on once training starts.
+        if (CurrentState == RagdollState.ReinforcementLearning && !ReinforcementLearningPolicyActive)
+        {
+            stiffness = ReinforcementLearningIdleStiffness;
+        }
+
         // The arms stop being free limbs and become support struts during a press. Their authored
         // gains are tuned for a relaxed hang (~14 N.m/rad effective, against a torso at 121-201),
         // which cannot control a push-up, so scale their impedance for the phases that need it.
+        // The RL state only counts once a policy is actually driving it, for the same reason as the
+        // idle-stiffness softening just above.
         bool armsLoadBearing = CurrentState == RagdollState.PushUpDrill
-                               || CurrentState == RagdollState.Recovering;
+                               || CurrentState == RagdollState.Recovering
+                               || (CurrentState == RagdollState.ReinforcementLearning && ReinforcementLearningPolicyActive);
         float armGain = armsLoadBearing ? Mathf.Max(1.0f, ArmLoadBearingGain) : 1.0f;
 
         foreach (var bone in _allBones)

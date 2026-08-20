@@ -1,0 +1,10 @@
+# Installed separately, before this file, with an explicit CUDA index:
+#   rl/.venv/Scripts/python.exe -m pip install "torch==2.13.0+cu132" --index-url https://download.pytorch.org/whl/cu132
+# Left out of this file because a plain `pip install -r requirements.txt` would otherwise pull the
+# CPU-only build from the default index instead of respecting the CUDA index above.
+# torch==2.13.0+cu132
+
+# godot-rl pins stable-baselines3<=2.4.0 and gymnasium<=1.0.0 as of 0.8.2 - installing it directly
+# (rather than stable-baselines3 separately) lets pip resolve those compatible versions itself.
+godot-rl==0.8.2
+tensorboard
