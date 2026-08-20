@@ -165,18 +165,27 @@ class RewardDecompositionCallback(BaseCallback):
     out, but implication is not observation: explicit per-reason fractions distinguish "never
     succeeds" from "succeeds occasionally and the mean hides it".
 
-    Finally, splits the success rate by START POSE. Once StandingStartProbability drops below 1.0
-    the run is training two tasks of wildly different difficulty at once, and every aggregate
-    number becomes a mixture of them - ep_rew_mean most of all. A prone policy that is genuinely
-    improving would stay invisible behind the already-solved standing half. Both keys needed for
-    the split (episode_end_reason and started_standing) already arrive in the same info dict on a
-    terminal transition, so this costs nothing extra on the wire.
+    Finally, splits the success rate by START POSE. The run trains a spread of tasks of wildly
+    different difficulty at once, and every aggregate number is a mixture of them - ep_rew_mean most
+    of all. A prone policy that is genuinely improving would stay invisible behind the already-solved
+    standing end. The keys needed for the split (episode_end_reason and start_pose_t) already arrive
+    in the same info dict on a terminal transition, so it costs nothing extra on the wire.
+
+    Buckets, deliberately not a uniform partition:
+
+    * ``start_standing/*`` - began at exactly upright. The refresher that keeps the goal state alive.
+    * ``start_prone/*``    - began exactly flat. THE headline: this is the get-up, and its definition
+                             is unchanged since the first run so the whole history stays comparable.
+    * ``curriculum/*``     - everything strictly between, i.e. the reverse-curriculum poses.
+    * ``pose_0.0/`` ... ``pose_1.0/`` - per-decile, which shows WHICH level the agent is stuck at
+                             rather than only that the aggregate stopped moving.
     """
 
     def __init__(self) -> None:
         super().__init__()
         self._terms: dict[str, list[float]] = {}
         self._stand: dict[str, list[float]] = {}
+        self._balls: dict[str, list[float]] = {}
         self._reasons: dict[str, int] = {}
         # start pose -> {"episodes": n, "successes": n}
         self._by_start: dict[str, dict[str, int]] = {}
@@ -194,19 +203,49 @@ class RewardDecompositionCallback(BaseCallback):
                     self._stand.setdefault(key[6:], []).append(float(value))
                 elif key.startswith("act_"):
                     self._stand.setdefault(key, []).append(float(value))
-                elif key == "started_standing":
+                elif key in ("started_standing", "start_pose_t", "curriculum_t"):
                     self._stand.setdefault(key, []).append(float(value))
+                # Perturbation telemetry. Own namespace because it describes the ENVIRONMENT, not
+                # the policy: ball/hits below ball/shots means shots are missing, which inflates
+                # every balance metric and is invisible in all of them.
+                elif key.startswith("ball_"):
+                    self._balls.setdefault(key[5:], []).append(float(value))
             reason = info.get("episode_end_reason")
             if reason is not None:
                 self._reasons[str(reason)] = self._reasons.get(str(reason), 0) + 1
 
-                started = info.get("started_standing")
-                if started is not None:
-                    bucket = "start_standing" if float(started) >= 0.5 else "start_prone"
-                    counts = self._by_start.setdefault(bucket, {"episodes": 0, "successes": 0})
-                    counts["episodes"] += 1
-                    if str(reason) == "Standing":
-                        counts["successes"] += 1
+                # Bucket on the CONTINUOUS start pose, not on started_standing.
+                #
+                # The reverse curriculum turned the start pose into a continuum, and the old
+                # two-way split silently breaks under it: started_standing is only true at exactly
+                # t=1, so everything else - including near-standing curriculum poses the agent
+                # solves easily - would land in "start_prone" and inflate the one number this
+                # project is judged on. start_prone/success has to keep meaning "began flat on the
+                # floor" or 32M steps of history stop being comparable.
+                #
+                # So the endpoints keep their exact historical definitions and the interior gets
+                # its own bucket, plus a per-decile breakdown showing which level is the wall.
+                pose = info.get("start_pose_t")
+                if pose is not None:
+                    pose = float(pose)
+                    if pose >= 1.0:
+                        bucket = "start_standing"
+                    elif pose <= 0.0:
+                        bucket = "start_prone"
+                    else:
+                        bucket = "curriculum"
+
+                    # Two decimals, matching CurriculumStep. At one decimal every level the
+                    # curriculum actually visits early on (0.99 down to 0.90) rounds into a single
+                    # "pose_1.0" bucket, so the per-level breakdown - the whole point of it, since
+                    # it says WHICH rung the agent is stuck on - reads as one flat line. Only levels
+                    # actually sampled get a tag, so this stays sparse rather than emitting 100.
+                    won = str(reason) == "Standing"
+                    for key in (bucket, f"pose_{round(pose, 2):.2f}"):
+                        counts = self._by_start.setdefault(key, {"episodes": 0, "successes": 0})
+                        counts["episodes"] += 1
+                        if won:
+                            counts["successes"] += 1
         return True
 
     def _on_rollout_end(self) -> None:
@@ -219,6 +258,17 @@ class RewardDecompositionCallback(BaseCallback):
         for term, values in self._stand.items():
             if values:
                 self.logger.record(f"standing/{term}", sum(values) / len(values))
+
+        for term, values in self._balls.items():
+            if values:
+                self.logger.record(f"ball/{term}", sum(values) / len(values))
+        shots = self._balls.get("shots")
+        hits = self._balls.get("hits")
+        if shots and hits and sum(shots):
+            self.logger.record("ball/hit_rate", sum(hits) / sum(shots))
+        small = self._balls.get("small_shots")
+        if shots and small and sum(shots):
+            self.logger.record("ball/small_share", sum(small) / sum(shots))
 
         total = sum(self._reasons.values())
         for reason, count in self._reasons.items():
@@ -235,6 +285,7 @@ class RewardDecompositionCallback(BaseCallback):
 
         self._terms.clear()
         self._stand.clear()
+        self._balls.clear()
         self._reasons.clear()
         self._by_start.clear()
 

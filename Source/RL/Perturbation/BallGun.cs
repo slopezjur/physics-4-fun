@@ -1,6 +1,7 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using Godot;
 using Physics4Fun.Ragdoll;
+using Physics4Fun.RL.Interfaces;
 
 namespace Physics4Fun.RL.Perturbation;
 
@@ -20,7 +21,7 @@ namespace Physics4Fun.RL.Perturbation;
 /// to *anticipate a scripted event*. Dodging is a different task and would need the ball in the
 /// observation vector.
 /// </summary>
-public partial class BallGun : Node3D
+public partial class BallGun : Node3D, IRlPerturbationDiagnostics
 {
     /// <summary>The ragdoll to aim at. Balls target its chest, falling back to the pelvis.</summary>
     [Export] public HumanoidRagdoll? Target { get; set; }
@@ -34,19 +35,63 @@ public partial class BallGun : Node3D
     /// </summary>
     [Export] public RagdollRLBridge? Bridge { get; set; }
 
-    /// <summary>Simulation seconds between shots.</summary>
-    [Export] public float IntervalSeconds { get; set; } = 3.0f;
+    /// <summary>
+    /// Simulation seconds between shots.
+    ///
+    /// 10 s is deliberately LONGER than the training episode window (5 s), which is how "exactly one
+    /// ball per episode" is expressed without a shot counter: the second shot would fall past the
+    /// end of the episode. One hit per episode keeps credit assignment clean - one perturbation, one
+    /// recovery, one outcome. With several hits per episode there is no way to tell which one caused
+    /// the fall.
+    ///
+    /// Not set to exactly the window length: the second shot would then land on the episode
+    /// boundary, and whether it fires at all would depend on tick ordering.
+    ///
+    /// The arena scene overrides this to 3 s, because there the point is to watch repeated
+    /// recoveries rather than to train. See its .tscn.
+    /// </summary>
+    [Export] public float IntervalSeconds { get; set; } = 10.0f;
 
     /// <summary>
     /// Grace period at episode start before the first shot, so the dummy is not hit mid-teleport
     /// while the actuators are still settling into the reset pose.
     /// </summary>
-    [Export] public float FirstShotDelaySeconds { get; set; } = 1.5f;
+    [Export] public float FirstShotDelaySeconds { get; set; } = 1.0f;
 
-    /// <summary>Launch speed (m/s). Impulse is scaled by mass, so this is the actual ball speed.</summary>
-    [Export] public float LaunchSpeed { get; set; } = 9.0f;
+    /// <summary>
+    /// Launch speed (m/s). Impulse is scaled by mass, so this is the actual ball speed.
+    ///
+    /// 1.5 kg at 6 m/s, down from the 3 kg at 9 m/s this was first written with. That original shot
+    /// was not a perturbation, it was a knockdown - computed against the rig's real numbers
+    /// (80.6 kg summed from the bone masses, CoM 0.840 m, I about the ground line 69.5 kg.m^2,
+    /// chest impact at 1.250 m):
+    ///
+    ///     energy to tip a PASSIVE body over the toe edge          6.74 J
+    ///     3 kg @ 9 m/s delivers                                  11.79 J   = 1.75x tipping
+    ///     2 kg @ 6 m/s delivers                                   2.33 J   = 0.35x tipping
+    ///     1.5 kg @ 6 m/s delivers                                  1.31 J   = 0.19x tipping
+    ///
+    /// At 1.75x no balance policy can absorb the hit without stepping, so training on it would have
+    /// produced a flat zero success rate with no gradient - the same failure mode as a curriculum
+    /// rung set past the cliff.
+    ///
+    /// 2 kg was measured too: against a policy with no perturbation training it drove reward/shaping
+    /// to -7.99 (final head height ~0.30 m, i.e. on the floor) and fired episode_end/Inverted at
+    /// 1.7% - a condition that had never once triggered in this project. Fully flat on its back is a
+    /// knockdown, not a shove, so 1.5 kg it is.
+    ///
+    /// Cross-checked against the criterion that actually decides success: a 1.5 kg @ 6 m/s hit
+    /// shifts the instantaneous capture point by 0.039 m against GetUpTermination's 0.15 m
+    /// allowance, about a quarter of the balance budget. A real disturbance the policy must actively
+    /// null, well short of a free topple.
+    ///
+    /// This is also the natural axis for a difficulty curriculum - the frontier machinery in
+    /// RagdollRLBridge would drive impulse instead of start pose with no change to its logic.
+    /// </summary>
+    [Export] public float LaunchSpeed { get; set; } = 6.0f;
 
-    [Export] public float BallMass { get; set; } = 3.0f;
+    /// <summary>Ball mass (kg). See <see cref="LaunchSpeed"/> for how the pair was chosen.</summary>
+    [Export] public float BallMass { get; set; } = 1.5f;
     [Export] public float BallRadius { get; set; } = 0.22f;
 
     /// <summary>Horizontal distance from the target the ball spawns at.</summary>
@@ -66,6 +111,48 @@ public partial class BallGun : Node3D
     /// <summary>Simulation seconds a ball survives before being freed.</summary>
     [Export] public float BallLifetimeSeconds { get; set; } = 4.0f;
 
+    /// <summary>
+    /// Chance a given shot is a SMALL ball aimed at a random body part rather than the heavy
+    /// chest shot above. 0 disables the small ball entirely.
+    ///
+    /// The two are different disturbances, not two sizes of one. The heavy ball is 0.44 m across
+    /// and does not bounce off, so it stays in contact and keeps pushing - a sustained shove whose
+    /// scale is set by kinetic energy. The small ball is brief contact at speed, so momentum
+    /// transfer dominates: 0.2 kg at 6 m/s moves an 80.6 kg body by 0.018 m/s, shifting the capture
+    /// point about 0.005 m against the 0.15 m allowance in GetUpTermination - under 4% of the
+    /// balance budget. Globally that is a poke; locally it snaps a limb, which is the point.
+    ///
+    /// 6 m/s rather than the 12 it was first written at, and the SPEED was cut rather than the mass
+    /// because the complaint was that it looked too fast - halving mass would have left it just as
+    /// fast on screen. It now travels at the same speed as the heavy ball, so the two read as
+    /// different sizes rather than as different weapons.
+    ///
+    /// Fired from ONE gun rather than a second gun node, deliberately. Two guns on independent
+    /// clocks would put several balls in the air at once, and the reason the training interval
+    /// exceeds the episode window is to keep exactly one impact per episode so a fall can be
+    /// attributed to a specific hit. Randomising the profile per shot gives variety without
+    /// giving that up.
+    /// </summary>
+    [Export] public float SmallBallProbability { get; set; } = 0.5f;
+
+    [Export] public float SmallBallMass { get; set; } = 0.2f;
+    [Export] public float SmallBallRadius { get; set; } = 0.06f;
+    [Export] public float SmallBallSpeed { get; set; } = 6.0f;
+
+    /// <summary>
+    /// Bones the SMALL ball may target, chosen uniformly per shot. The heavy ball always aims at
+    /// the chest, because a 0.44 m sphere aimed at a forearm mostly hits the torso anyway.
+    ///
+    /// Resolved through HumanoidRagdoll.FindBone; a name this rig does not have is skipped rather
+    /// than fatal, so the gun degrades to the bones that do exist instead of refusing to fire.
+    /// </summary>
+    [Export] public string[] SmallBallTargetBones { get; set; } =
+    {
+        "Head", "Chest", "Spine", "Pelvis",
+        "UpperArm_L", "Forearm_L", "UpperArm_R", "Forearm_R",
+        "Thigh_L", "Shin_L", "Thigh_R", "Shin_R"
+    };
+
     /// <summary>Master switch, so one scene can carry the gun and disable it per experiment.</summary>
     [Export] public bool Enabled { get; set; } = true;
 
@@ -76,14 +163,39 @@ public partial class BallGun : Node3D
 
     private readonly struct Ball
     {
-        public Ball(RigidBody3D body, float remaining)
+        public Ball(RigidBody3D body, float remaining, bool hasHit = false)
         {
             Body = body;
             Remaining = remaining;
+            HasHit = hasHit;
         }
 
         public RigidBody3D Body { get; }
         public float Remaining { get; }
+
+        /// <summary>Set once the ball has touched the ragdoll, so one ball counts at most one hit.</summary>
+        public bool HasHit { get; }
+    }
+
+    private int _shotsThisEpisode;
+    private int _hitsThisEpisode;
+    private int _smallShotsThisEpisode;
+
+    /// <summary>Reused across episodes rather than reallocated - see the reward's note on per-tick allocation.</summary>
+    private readonly Dictionary<string, float> _stats = new()
+    {
+        ["shots"] = 0.0f, ["hits"] = 0.0f, ["small_shots"] = 0.0f,
+    };
+
+    public IReadOnlyDictionary<string, float> EpisodePerturbationStats
+    {
+        get
+        {
+            _stats["shots"] = _shotsThisEpisode;
+            _stats["hits"] = _hitsThisEpisode;
+            _stats["small_shots"] = _smallShotsThisEpisode;
+            return _stats;
+        }
     }
 
     public override void _Ready()
@@ -152,6 +264,35 @@ public partial class BallGun : Node3D
         }
         _live.Clear();
         _timeUntilNextShot = FirstShotDelaySeconds;
+        _shotsThisEpisode = 0;
+        _hitsThisEpisode = 0;
+        _smallShotsThisEpisode = 0;
+    }
+
+    /// <summary>
+    /// Whether this ball is currently touching the ragdoll, counted at most once per ball.
+    ///
+    /// Contacts are read from the body rather than via a signal so the check stays on the physics
+    /// clock with everything else here, and so a ball that grazes and separates inside one tick is
+    /// still caught by the next AgeBalls pass while it remains in contact.
+    /// </summary>
+    private bool DetectHit(Ball ball)
+    {
+        if (ball.HasHit || !IsInstanceValid(ball.Body))
+        {
+            return false;
+        }
+
+        foreach (Node3D other in ball.Body.GetCollidingBodies())
+        {
+            if (other is ActiveBone)
+            {
+                _hitsThisEpisode++;
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -175,13 +316,19 @@ public partial class BallGun : Node3D
                 _live.RemoveAt(i);
                 continue;
             }
-            _live[i] = new Ball(_live[i].Body, remaining);
+            _live[i] = new Ball(_live[i].Body, remaining, _live[i].HasHit || DetectHit(_live[i]));
         }
     }
 
     private void Fire()
     {
-        ActiveBone? aimBone = Target!.Chest;
+        bool small = SmallBallProbability > 0.0f && _rng.Randf() < SmallBallProbability;
+
+        ActiveBone? aimBone = small ? PickSmallBallTarget() : Target!.Chest;
+        if (aimBone == null || !IsInstanceValid(aimBone))
+        {
+            aimBone = Target!.Chest;
+        }
         if (aimBone == null || !IsInstanceValid(aimBone))
         {
             aimBone = Target.Pelvis;
@@ -191,8 +338,16 @@ public partial class BallGun : Node3D
             return;
         }
 
+        float mass = small ? SmallBallMass : BallMass;
+        float radius = small ? SmallBallRadius : BallRadius;
+        float speed = small ? SmallBallSpeed : LaunchSpeed;
+
+        // A small ball aimed at a limb needs a tighter spread, or the aim jitter alone can make
+        // it miss what it was aimed at - which reads as a hit-rate hole rather than as a miss.
+        float jitter = small ? Mathf.Min(AimHeightJitter, radius) : AimHeightJitter;
+
         Vector3 aimPoint = aimBone.GlobalPosition
-                           + new Vector3(0.0f, _rng.RandfRange(-AimHeightJitter, AimHeightJitter), 0.0f);
+                           + new Vector3(0.0f, _rng.RandfRange(-jitter, jitter), 0.0f);
 
         float azimuth = RandomizeDirection ? _rng.RandfRange(0.0f, Mathf.Tau) : 0.0f;
         Vector3 offset = new Vector3(Mathf.Cos(azimuth), 0.0f, Mathf.Sin(azimuth)) * SpawnDistance;
@@ -200,26 +355,33 @@ public partial class BallGun : Node3D
 
         var body = new RigidBody3D
         {
-            Mass = BallMass,
+            Mass = mass,
             // The ball is small, fast and aimed at thin limbs; without continuous detection it
             // tunnels straight through the ragdoll at these speeds and the hit silently never
             // happens - which would look like a policy that learned to ignore impacts.
             ContinuousCd = true,
+            // Required for GetCollidingBodies to return anything - see DetectHit. Four is ample:
+            // the question is "did this ball touch the ragdoll at all", not how many bones it brushed.
+            ContactMonitor = true,
+            MaxContactsReported = 4,
             GlobalPosition = spawn
         };
 
-        var shape = new CollisionShape3D { Shape = new SphereShape3D { Radius = BallRadius } };
+        var shape = new CollisionShape3D { Shape = new SphereShape3D { Radius = radius } };
         body.AddChild(shape);
 
         var mesh = new MeshInstance3D
         {
             Mesh = new SphereMesh
             {
-                Radius = BallRadius,
-                Height = BallRadius * 2.0f,
+                Radius = radius,
+                Height = radius * 2.0f,
                 Material = new StandardMaterial3D
                 {
-                    AlbedoColor = new Color(0.9f, 0.25f, 0.1f),
+                    // Distinct colours so the two profiles are tellable apart on sight.
+                    AlbedoColor = small
+                        ? new Color(0.95f, 0.85f, 0.15f)
+                        : new Color(0.9f, 0.25f, 0.1f),
                     Roughness = 0.3f,
                     Metallic = 0.6f
                 }
@@ -232,8 +394,32 @@ public partial class BallGun : Node3D
 
         // Impulse scales with mass so LaunchSpeed is the ball's actual speed in m/s, and changing
         // BallMass changes how hard it hits without also changing how fast it arrives.
-        body.ApplyCentralImpulse((aimPoint - spawn).Normalized() * LaunchSpeed * BallMass);
+        body.ApplyCentralImpulse((aimPoint - spawn).Normalized() * speed * mass);
 
         _live.Add(new Ball(body, BallLifetimeSeconds));
+        _shotsThisEpisode++;
+        if (small) { _smallShotsThisEpisode++; }
+    }
+
+    /// <summary>Uniform pick from SmallBallTargetBones, skipping any name this rig lacks.</summary>
+    private ActiveBone? PickSmallBallTarget()
+    {
+        if (Target == null || SmallBallTargetBones == null || SmallBallTargetBones.Length == 0)
+        {
+            return null;
+        }
+
+        int start = _rng.RandiRange(0, SmallBallTargetBones.Length - 1);
+        for (int i = 0; i < SmallBallTargetBones.Length; i++)
+        {
+            string name = SmallBallTargetBones[(start + i) % SmallBallTargetBones.Length];
+            ActiveBone? bone = Target.FindBone(name);
+            if (bone != null && IsInstanceValid(bone))
+            {
+                return bone;
+            }
+        }
+
+        return null;
     }
 }

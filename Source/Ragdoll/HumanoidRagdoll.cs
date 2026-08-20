@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Godot;
 
@@ -91,25 +91,40 @@ public partial class HumanoidRagdoll : Node3D
 
     public override void _UnhandledInput(InputEvent @event)
     {
+        if (@event is not InputEventKey keyEvent || !keyEvent.Pressed || keyEvent.Echo)
+        {
+            return;
+        }
+
+        // T is allowed during RL; everything else is not. Telemetry recording only READS state, so
+        // it cannot yank CurrentState out from under an active episode the way the pose keys can -
+        // and a balance run is precisely when you most want a dump, because the interesting event
+        // (a ball landing) is invisible in the aggregate metrics.
+        if (keyEvent.Keycode == Key.T)
+        {
+            StartTelemetryRecording();
+            return;
+        }
+
         // The RL state is externally driven (see RagdollRLBridge) - a stray debug keypress must
         // not be able to yank CurrentState out from under an active episode.
         if (CurrentState == RagdollState.ReinforcementLearning)
         {
             return;
         }
-
-        if (@event is InputEventKey keyEvent && keyEvent.Pressed && !keyEvent.Echo)
-        {
-            if (keyEvent.Keycode == Key.T)
-            {
-                StartTelemetryRecording();
-            }
-        }
     }
 
     public void StartTelemetryRecording(float duration = Diagnostics.RagdollTelemetryRecorder.DefaultDurationSeconds)
     {
-        ResetRagdoll();
+        // Never reset during RL. The reset exists so a procedural dump starts from a known pose,
+        // but under RL the bridge owns the body: teleporting it here would desynchronise the
+        // episode from what Python believes is happening, and would destroy the very state the
+        // recording is meant to capture. A balance dump wants the dummy exactly as it is.
+        if (CurrentState != RagdollState.ReinforcementLearning)
+        {
+            ResetRagdoll();
+        }
+
         _recorder.StartRecording(duration);
     }
 
@@ -142,7 +157,18 @@ public partial class HumanoidRagdoll : Node3D
             Balance.Initialize(Pelvis, Chest, _allBones);
         }
 
-        _recorder.RecordingFinished += ResetRagdoll;
+        // Same reasoning as StartTelemetryRecording: the tidy-up reset is right for a procedural
+        // dump and wrong under RL, where it would teleport the body the moment the recording ends
+        // and desynchronise the bridge from what Python believes the episode is doing.
+        _recorder.RecordingFinished += OnRecordingFinished;
+    }
+
+    private void OnRecordingFinished()
+    {
+        if (CurrentState != RagdollState.ReinforcementLearning)
+        {
+            ResetRagdoll();
+        }
     }
 
     public override void _PhysicsProcess(double delta)
@@ -254,6 +280,13 @@ public partial class HumanoidRagdoll : Node3D
         GD.Print("[HumanoidRagdoll] Ragdoll reset to initial standing state.");
     }
 
+    /// <summary>
+    /// Metres the body is raised when spawned prone, so the teleport does not start it clipped into
+    /// the floor. Shared with <see cref="TeleportToGetUpPose"/>, which tapers it to zero as the pose
+    /// approaches standing - the two must agree or t=0 would not reproduce this pose.
+    /// </summary>
+    private const float ProneSpawnLift = 0.5f;
+
     public void DropToProne(bool silent = false)
     {
         _time = 0.0f;
@@ -263,7 +296,7 @@ public partial class HumanoidRagdoll : Node3D
         Balance?.Reset();
 
         // Rotate -90 degrees around X (pitch) and elevate slightly to avoid floor clipping
-        Transform3D proneOffset = new Transform3D(new Basis(Vector3.Right, -Mathf.Pi / 2), new Vector3(0, 0.5f, 0));
+        Transform3D proneOffset = new Transform3D(new Basis(Vector3.Right, -Mathf.Pi / 2), new Vector3(0, ProneSpawnLift, 0));
 
         foreach (var bone in _allBones)
         {
@@ -340,32 +373,76 @@ public partial class HumanoidRagdoll : Node3D
     /// harder version of the task it knows - it is a region of the state space it has never seen.
     /// Deliberately does NOT set CurrentState; the caller owns that, exactly as with DropToProne.
     /// </summary>
-    public void TeleportToStanding()
+    public void TeleportToStanding() => TeleportToGetUpPose(1.0f);
+
+    /// <summary>
+    /// Teleports the body to a pose <paramref name="poseT"/> of the way from prone (0) to standing
+    /// (1), velocities cleared. The two endpoints are exactly <see cref="DropToProne"/>'s pose and
+    /// <see cref="TeleportToStanding"/>'s, so this generalises both rather than adding a third
+    /// convention.
+    ///
+    /// Exists for reverse-curriculum start-state sampling. Prone-start training had a 0% success
+    /// rate over 63M steps in one run and 32M in another, because there was no gradient anywhere
+    /// between the two start poses the project had: the reward's shaping term telescopes to
+    /// 10 * (height gained), so an episode that never rises earns nothing no matter what it tried.
+    /// Sampling start states ACROSS the gap gives the agent poses it can already almost solve, then
+    /// walks the distribution back toward prone as each level is cleared.
+    ///
+    /// The interpolation is a rigid whole-body transform, deliberately. Applying the get-up
+    /// trajectory's joint angles here instead would produce more anatomically convincing
+    /// intermediates (a real half-kneel rather than a tilted body), but ProneRecoveryTrajectory
+    /// returns JOINT rotations only - it says nothing about where the pelvis ends up in the world,
+    /// which is the half of the pose that actually distinguishes lying down from kneeling. Getting
+    /// the root from it needs forward kinematics over the bone hierarchy, and an FK error there
+    /// yields a self-intersecting pose that the solver resolves explosively. A rigid transform
+    /// cannot tear the joints apart at all: every bone moves by the same matrix, so all relative
+    /// joint geometry is preserved exactly, which is the same property that makes DropToProne safe.
+    ///
+    /// What this gives up is realism, not usefulness: pitch 0 is the pose the policy already
+    /// solves ~87% of the time and pitch 90 is the one it has never solved, so intermediate angles
+    /// are monotonically harder and do span the gap. Layering the trajectory's joint angles on top
+    /// is the natural follow-up once the curriculum itself is shown to move the prone success rate.
+    /// </summary>
+    /// <param name="poseT">0 = prone, 1 = standing. Clamped.</param>
+    public void TeleportToGetUpPose(float poseT)
     {
         _time = 0.0f;
         _stateTime = 0.0f;
         _activeRecoveryTrajectory = null;
         Balance?.Reset();
 
+        float t = Mathf.Clamp(poseT, 0.0f, 1.0f);
+
+        // Both endpoints reproduce the existing poses exactly: at t=1 the transform is the identity
+        // (InitialTransform untouched, i.e. TeleportToStanding), and at t=0 it is the -90 degree
+        // pitch plus 0.5 m lift that DropToProne has always used. The lift tapers with the pitch so
+        // a barely-tilted body is not spawned hovering above the floor.
+        float pitch = Mathf.Lerp(-Mathf.Pi / 2.0f, 0.0f, t);
+        float lift = Mathf.Lerp(ProneSpawnLift, 0.0f, t);
+        Transform3D poseOffset = new Transform3D(new Basis(Vector3.Right, pitch), new Vector3(0, lift, 0));
+
         foreach (var bone in _allBones)
         {
             if (IsInstanceValid(bone))
             {
-                bone.Teleport(bone.InitialTransform);
+                bone.Teleport(poseOffset * bone.InitialTransform);
             }
         }
         UpdateBoneMuscleStiffness();
     }
 
-    public void StartReinforcementLearning(bool silent = false, bool startStanding = false)
+    public void StartReinforcementLearning(bool silent = false, float startPoseT = 0.0f)
     {
-        if (startStanding)
+        // DropToProne is still used for the exact-prone case rather than TeleportToGetUpPose(0):
+        // it also sets CurrentState and refreshes target rotations, and the debug key path depends
+        // on that. The two produce the same physical pose by construction.
+        if (startPoseT <= 0.0f)
         {
-            TeleportToStanding();
+            DropToProne(silent);
         }
         else
         {
-            DropToProne(silent);
+            TeleportToGetUpPose(startPoseT);
         }
 
         CurrentState = RagdollState.ReinforcementLearning;
@@ -648,7 +725,14 @@ public partial class HumanoidRagdoll : Node3D
         return distL < distR ? BodySide.Left : BodySide.Right;
     }
 
-    private ActiveBone? FindBone(string boneName)
+    /// <summary>
+    /// Looks a bone up by name, or null if this rig does not have it.
+    ///
+    /// Public so external nodes can aim at a named bone without holding a reference to every
+    /// one - the ball gun uses it to target a random body part. A pure lookup: it reads the
+    /// registry built in _Ready and changes nothing.
+    /// </summary>
+    public ActiveBone? FindBone(string boneName)
     {
         foreach (var bone in _allBones)
         {

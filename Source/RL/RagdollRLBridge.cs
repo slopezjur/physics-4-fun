@@ -141,8 +141,108 @@ public partial class RagdollRLBridge : Node
     /// episode runs ~16 decision steps and a prone one ~120, so a 50/50 episode split puts ~88% of
     /// samples on the prone task while retaining the standing skill for the remaining ~12%. That
     /// retention matters because a get-up ENDS in standing - the two skills compose.
+    ///
+    /// SUPERSEDED by the reverse curriculum below, which samples a start pose from a continuum
+    /// rather than picking one of two. Kept only as the floor of that continuum: an episode still
+    /// starts exactly standing with this probability, so the goal-state skill keeps being refreshed
+    /// no matter how far the curriculum has walked toward prone. Set it to 0 to hand every episode
+    /// to the curriculum.
     /// </summary>
-    [Export] public float StandingStartProbability { get; set; } = 0.5f;
+    [Export] public float StandingStartProbability { get; set; } = 0.2f;
+
+    /// <summary>
+    /// Hardest (lowest) start pose the curriculum currently samples, on the 0 = prone, 1 = standing
+    /// scale of <see cref="HumanoidRagdoll.TeleportToGetUpPose"/>. Episodes draw uniformly from
+    /// [CurriculumPoseT, 1].
+    ///
+    /// Walks DOWN toward 0 as the agent clears each level. That direction is the whole idea: the
+    /// get-up's terminal state is the one thing already learned (87% success on a 1.5 s hold as of
+    /// 32M steps), so the curriculum extends backwards from a solved goal instead of forwards from
+    /// an unsolved start. Attempting it earlier would not have worked - at 36% the goal state was
+    /// not solid enough to build on.
+    ///
+    /// Starts just BELOW 1.0, not at it. At exactly 1.0 the sampling range [1, 1] is a single point,
+    /// so every episode starts standing, no episode counts as a curriculum episode, no outcome is
+    /// ever recorded, and the level can never advance - a curriculum that is silently frozen at the
+    /// one pose already solved. _Ready clamps this below 1.0 for the same reason.
+    /// </summary>
+    [Export] public float CurriculumPoseT { get; set; } = 0.99f;
+
+    /// <summary>
+    /// How much closer to prone each advance moves the floor.
+    ///
+    /// 0.01, not the 0.1 this was first written with, because the pose parameter is severely
+    /// non-linear in difficulty. The start pose is a rigid tilt, so the CoM moves off the support
+    /// polygon as comHeight * sin(pitch); with the CoM near the 0.82 m pelvis rest height and
+    /// GetUpTermination allowing 0.15 m of ICP escape, the body is at its tipping point at
+    ///
+    ///     asin(0.15 / 0.90) = 9.6 degrees, i.e. t = 0.893.
+    ///
+    /// So every pose the balance controller can recover from lives in t = [0.893, 1.0] - the first
+    /// 11% of the range - and everything below it is already falling. At 0.1 the first rung landed
+    /// on t = 0.90, CoM 0.141 m against a 0.15 m limit: exactly the tipping point, dropped from a
+    /// standstill. Measured over ~1,300 episodes it scored 0.000 while exact-standing scored 0.50,
+    /// and because a level only advances ON SUCCESS the curriculum would have been frozen there for
+    /// the entire run, looking healthy the whole time.
+    ///
+    /// At 0.01 the rungs are ~0.9 degrees apart, which spans the recoverable band in ~11 levels.
+    /// Expect the curriculum to stall near 0.89 - that stall is meaningful, not a bug: it is where
+    /// a rigid tilt stops being a balance problem and becomes a get-up, which needs a change of
+    /// support (hands, knees) that no whole-body rotation can express. See TeleportToGetUpPose.
+    /// </summary>
+    [Export] public float CurriculumStep { get; set; } = 0.01f;
+
+    /// <summary>
+    /// Success rate over the trailing window that promotes the curriculum to the next level.
+    ///
+    /// 0.7 rather than something near 1.0 deliberately: waiting for near-perfection at every level
+    /// spends most of training polishing poses that are not the goal, and the levels are not
+    /// independent - competence at 0.5 keeps improving while the agent works on 0.4.
+    /// </summary>
+    [Export] public float CurriculumAdvanceRate { get; set; } = 0.7f;
+
+    /// <summary>
+    /// Episodes of history the advance decision reads. 20 at ~45 standing episodes per rollout means
+    /// roughly two decisions per rollout at most, so the level cannot run away inside one update.
+    /// </summary>
+    [Export] public int CurriculumWindow { get; set; } = 20;
+
+    /// <summary>
+    /// Share of curriculum episodes drawn from the FRONTIER band [floor, floor + step] rather than
+    /// uniformly over the whole cleared range [floor, 1].
+    ///
+    /// Without this the curriculum outruns the policy, which is exactly what the first run did:
+    /// uniform sampling from [0.955, 1] has a mean pose of 0.978, so the advance window was
+    /// dominated by easy rehearsal episodes and cleared the 70% gate while the frontier itself was
+    /// at 0.5% (pose_0.96) and 0.0% (pose_0.95). The floor kept descending past levels the agent
+    /// could not do at all, which looks like progress and is not.
+    ///
+    /// It also fixes a sampling-rate problem that would have bitten later. The frontier is one step
+    /// wide out of a range of (1 - floor), so under uniform sampling its share SHRINKS as the
+    /// curriculum descends: 22% of draws at floor 0.955, but 2% at floor 0.5. Voting would have
+    /// slowed to a crawl exactly when the levels got interesting. A fixed share keeps the decision
+    /// rate constant no matter how far down the curriculum has walked.
+    /// </summary>
+    [Export] public float CurriculumFrontierShare { get; set; } = 0.5f;
+
+    /// <summary>
+    /// Whether reaching the standing criterion ends the episode and pays the terminal bonus.
+    ///
+    /// True for the get-up task. **Set false in the perturbation scene**: there the episode would
+    /// otherwise end at ~2.1 s, before the first ball even lands, and the hold requirement would
+    /// fight the ball interval. See GetUpTermination for the full argument.
+    /// </summary>
+    [Export] public bool EndEpisodeOnStandingSuccess { get; set; } = true;
+
+    /// <summary>
+    /// Optional perturbation source (the ball gun) polled for episode telemetry only.
+    ///
+    /// Typed as Node, not BallGun: Godot exports must be Godot types, and more importantly this
+    /// bridge is deliberately ignorant of what perturbs it. It casts to IRlPerturbationDiagnostics
+    /// at report time, so a scene without a gun - or with a different one - needs no change here,
+    /// and nothing about the perturbation reaches the policy through this path.
+    /// </summary>
+    [Export] public Node? PerturbationSource { get; set; }
 
     /// <summary>
     /// Effort-penalty weight handed to the reward. Near zero during discovery; see
@@ -214,6 +314,12 @@ public partial class RagdollRLBridge : Node
     /// <summary>Whether the current episode began standing (vs prone). Exposed for HUD display.</summary>
     public bool StartedStanding => _startedStanding;
 
+    /// <summary>This episode's start pose, 0 = prone to 1 = standing. Exposed for HUD display.</summary>
+    public float StartPoseT => _startPoseT;
+
+    /// <summary>Hardest start pose the curriculum has reached so far. Exposed for HUD display.</summary>
+    public float ActiveCurriculumT => _activeCurriculumT;
+
     private ActiveBone?[] _controlledBones = System.Array.Empty<ActiveBone?>();
 
 
@@ -237,6 +343,23 @@ public partial class RagdollRLBridge : Node
 
     /// <summary>Which pose the current episode began from - reported so runs stay interpretable.</summary>
     private bool _startedStanding;
+
+    /// <summary>This episode's start pose on the 0 = prone, 1 = standing scale.</summary>
+    private float _startPoseT = 1.0f;
+
+    /// <summary>The curriculum floor actually in use; initialised from CurriculumPoseT, then walked down.</summary>
+    private float _activeCurriculumT = 1.0f;
+
+    /// <summary>
+    /// Trailing success/failure history for the advance decision, oldest first.
+    ///
+    /// Per-process rather than shared: the 32 training instances each run their own curriculum off
+    /// their own results. They cannot see each other without a transport change, and the divergence
+    /// is mild (they receive the same policy every rollout, so their success rates track closely)
+    /// and arguably useful - a spread of levels in the batch is a wider start-state distribution,
+    /// which is what the curriculum is for in the first place.
+    /// </summary>
+    private readonly System.Collections.Generic.Queue<bool> _curriculumHistory = new();
     private bool _physicsRateApplied;
 
     /// <summary>
@@ -264,6 +387,15 @@ public partial class RagdollRLBridge : Node
         // required here, not merely convenient.
         ProcessPhysicsPriority = 100;
 
+        // Seeded from the export here rather than at the field, so a scene or a resumed run can set
+        // the starting level and the runtime value still has somewhere separate to walk down to.
+        //
+        // Capped strictly below 1.0: at exactly 1.0 the sample range collapses to a point, every
+        // episode starts standing, nothing is ever recorded as a curriculum outcome and the level
+        // can never advance. That failure is silent - the run looks healthy and simply never
+        // progresses - so it is clamped here rather than left to whoever edits the scene.
+        _activeCurriculumT = Mathf.Clamp(CurriculumPoseT, 0.0f, 1.0f - CurriculumStep);
+
         _pendingOffsets = new Quaternion[ControlledBoneNames.Length];
         for (int i = 0; i < _pendingOffsets.Length; i++)
         {
@@ -282,7 +414,7 @@ public partial class RagdollRLBridge : Node
         _actions.Bind(_controlledBones);
         _observations = new GetUpObservation(ControlledBoneNames.Length);
         _reward = new GetUpProgressReward(EffortWeight);
-        _termination = new GetUpTermination();
+        _termination = new GetUpTermination(EndEpisodeOnStandingSuccess);
 
         // Enters the RL state and takes the first episode's starting pose immediately - without
         // this the ragdoll would sit in RagdollState.Balanced (the project default) until the
@@ -577,6 +709,19 @@ public partial class RagdollRLBridge : Node
             info["rew_total"] = _episodeRewardTotal;
             info["episode_end_reason"] = _doneReason;
             info["started_standing"] = _startedStanding ? 1.0f : 0.0f;
+            info["start_pose_t"] = _startPoseT;
+            info["curriculum_t"] = _activeCurriculumT;
+
+            // Whether the ball actually connected. Without it a good balance score is ambiguous:
+            // "recovered from the hit" and "was never hit" are indistinguishable in every other
+            // metric, and shots CAN miss (randomised direction plus AimHeightJitter).
+            if (PerturbationSource is IRlPerturbationDiagnostics perturbation)
+            {
+                foreach (var stat in perturbation.EpisodePerturbationStats)
+                {
+                    info[$"ball_{stat.Key}"] = stat.Value;
+                }
+            }
             if (_actions is IRlActionDiagnostics actionDiagnostics)
             {
                 foreach (var stat in actionDiagnostics.EpisodeActionStats)
@@ -611,6 +756,12 @@ public partial class RagdollRLBridge : Node
             { "max_episode_seconds", MaxEpisodeSeconds },
             { "prone_max_episode_seconds", ProneMaxEpisodeSeconds },
             { "standing_start_probability", StandingStartProbability },
+            { "curriculum_pose_t", CurriculumPoseT },
+            { "curriculum_step", CurriculumStep },
+            { "curriculum_advance_rate", CurriculumAdvanceRate },
+            { "curriculum_window", CurriculumWindow },
+            { "curriculum_frontier_share", CurriculumFrontierShare },
+            { "end_episode_on_standing_success", EndEpisodeOnStandingSuccess },
             { "effort_weight", EffortWeight },
             { "physics_ticks_per_second", Engine.PhysicsTicksPerSecond },
             { "engine_time_scale", Engine.TimeScale },
@@ -673,6 +824,94 @@ public partial class RagdollRLBridge : Node
     public bool IsDone() => _done;
 
     /// <summary>
+    /// Draws this episode's start pose: exactly standing with probability StandingStartProbability,
+    /// otherwise uniform over [_activeCurriculumT, 1].
+    ///
+    /// Uniform over the whole cleared range rather than only at the current floor, so earlier levels
+    /// keep being rehearsed. Sampling the floor alone is the classic way to make a curriculum forget
+    /// what it just learned - the policy is free to trade away competence at 0.7 while specialising
+    /// on 0.5, and nothing measures the loss until the level it needs stops working.
+    /// </summary>
+    private float SampleStartPose()
+    {
+        if (GD.Randf() < StandingStartProbability)
+        {
+            return 1.0f;
+        }
+
+        // Frontier band: the one step the curriculum is actually trying to clear. Only these vote
+        // (see IsFrontierPose), so their share has to be held fixed rather than left to shrink as
+        // the range widens.
+        if (GD.Randf() < CurriculumFrontierShare)
+        {
+            return Mathf.Lerp(_activeCurriculumT, Mathf.Min(1.0f, _activeCurriculumT + CurriculumStep), GD.Randf());
+        }
+
+        // Rehearsal over everything already cleared, so competence at earlier levels is not traded
+        // away while the frontier is being learned.
+        return Mathf.Lerp(_activeCurriculumT, 1.0f, GD.Randf());
+    }
+
+    /// <summary>
+    /// Whether a start pose sits in the band the curriculum is currently trying to clear, and so
+    /// counts toward the advance decision. Rehearsal and standing-refresher episodes are excluded:
+    /// they are drawn from levels already passed, so letting them vote measures the past.
+    /// </summary>
+    private bool IsFrontierPose(float poseT)
+        => poseT < 1.0f && poseT <= _activeCurriculumT + CurriculumStep;
+
+    /// <summary>
+    /// Feeds one curriculum episode's outcome to the trailing window and advances the level when the
+    /// window clears CurriculumAdvanceRate.
+    ///
+    /// The window is CLEARED on advance, not slid. A slid window still holds the successes that
+    /// triggered the promotion, so it would re-trigger within an episode or two and run the level
+    /// down several steps before the policy has seen the new distribution at all. Clearing forces a
+    /// full window of fresh evidence before the next move.
+    /// </summary>
+    private void RecordCurriculumOutcome(bool succeeded)
+    {
+        if (_activeCurriculumT <= 0.0f)
+        {
+            return;
+        }
+
+        _curriculumHistory.Enqueue(succeeded);
+        while (_curriculumHistory.Count > CurriculumWindow)
+        {
+            _curriculumHistory.Dequeue();
+        }
+
+        if (_curriculumHistory.Count < CurriculumWindow)
+        {
+            return;
+        }
+
+        int wins = 0;
+        foreach (bool outcome in _curriculumHistory)
+        {
+            if (outcome) { wins++; }
+        }
+
+        int considered = _curriculumHistory.Count;
+        if ((float)wins / considered < CurriculumAdvanceRate)
+        {
+            return;
+        }
+
+        float previous = _activeCurriculumT;
+        _activeCurriculumT = Mathf.Max(0.0f, _activeCurriculumT - CurriculumStep);
+        _curriculumHistory.Clear();
+
+        // Printed even on headless instances, unlike the per-episode line: this is the run's actual
+        // progress signal, it fires a handful of times per session at most, and a curriculum that
+        // silently stops advancing is the thing worth noticing early.
+        GD.Print(
+            $"[RagdollRLBridge] Curriculum advanced {previous:F2} -> {_activeCurriculumT:F2} "
+            + $"({wins}/{considered} at the previous level, episode {EpisodeCount})");
+    }
+
+    /// <summary>
     /// Called by the GDScript adapter's reset() override. Physically resets the ragdoll and clears
     /// this bridge's per-episode state.
     /// </summary>
@@ -686,6 +925,14 @@ public partial class RagdollRLBridge : Node
             LastEpisodeReward = _episodeRewardTotal;
             LastEpisodeDurationSeconds = EpisodeElapsedSeconds;
             LastEpisodeEndReason = _doneReason;
+
+            // Only FRONTIER episodes vote - see IsFrontierPose. Letting rehearsal or refresher
+            // episodes count is what let the first run's floor descend to 0.955 while pose_0.955
+            // itself scored 0.000.
+            if (IsFrontierPose(_startPoseT))
+            {
+                RecordCurriculumOutcome(_doneReason == "Standing");
+            }
         }
         EpisodeCount++;
 
@@ -699,9 +946,16 @@ public partial class RagdollRLBridge : Node
         }
         // DropToProne's own per-call print would spam the console every few seconds once training
         // is running; the single consolidated line below covers both halves of a reset instead.
-        _startedStanding = GD.Randf() < StandingStartProbability;
-        _effectiveMaxEpisodeSeconds = _startedStanding ? MaxEpisodeSeconds : ProneMaxEpisodeSeconds;
-        Ragdoll?.StartReinforcementLearning(silent: true, startStanding: _startedStanding);
+        _startPoseT = SampleStartPose();
+        _startedStanding = _startPoseT >= 1.0f;
+
+        // The window scales with the pose, not with a standing/prone flag. A start halfway up needs
+        // more than the standing window (there is a rise to perform first) and less than the prone
+        // one (most of the rise is already done), and giving every non-standing pose the full 8 s
+        // would spend most of the curriculum's samples on episodes that ended long before the timer.
+        _effectiveMaxEpisodeSeconds = Mathf.Lerp(ProneMaxEpisodeSeconds, MaxEpisodeSeconds, _startPoseT);
+
+        Ragdoll?.StartReinforcementLearning(silent: true, startPoseT: _startPoseT);
 
         // One process logs, not all 32 - see IsPrimaryInstance for why it is keyed on the port
         // rather than on having a display.

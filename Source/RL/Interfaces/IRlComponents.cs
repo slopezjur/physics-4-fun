@@ -153,6 +153,25 @@ public interface IRlTerminationDiagnostics
     IReadOnlyDictionary<string, float> EpisodeConditionRates { get; }
 }
 
+/// <summary>
+/// Optional reporting for a perturbation source (currently the ball gun).
+///
+/// Separate from the obs/action/reward/termination components because a perturbation source is NOT
+/// one of them: it is an additive scene node the bridge does not otherwise know exists, and nothing
+/// about it reaches the policy. This interface exists purely so its effect can be MEASURED.
+///
+/// Why it is needed at all: a shot can miss. With randomised firing direction and aim jitter, a
+/// good balance score is ambiguous without a hit count - "recovered from the impact" and "was never
+/// hit" look identical in every other metric. BallGun already guards the related failure (it sets
+/// ContinuousCd because the ball otherwise tunnels through thin limbs and the hit "silently never
+/// happens"), but nothing measured whether that guard holds at a given mass and speed.
+/// </summary>
+public interface IRlPerturbationDiagnostics
+{
+    /// <summary>Per-episode perturbation counts, keyed by name (shots fired, shots that connected).</summary>
+    IReadOnlyDictionary<string, float> EpisodePerturbationStats { get; }
+}
+
 /// <summary>Decides when an episode ends, and why (the reason surfaces in logs and the HUD).</summary>
 public interface IRlTerminationCondition
 {

@@ -1,4 +1,4 @@
-using Godot;
+﻿using Godot;
 using Physics4Fun.Ragdoll;
 using Physics4Fun.Ragdoll.Interfaces;
 using Physics4Fun.RL;
@@ -27,6 +27,16 @@ public partial class RagdollTelemetryHud : PanelContainer
     private Label _recStatusLabel = null!;
     private ProgressBar _progressBar = null!;
 
+    /// <summary>
+    /// Point size for the telemetry text, and the basis for the panel padding.
+    ///
+    /// 11 rather than the original 13: the RL block grew several lines (episode, start pose,
+    /// curriculum floor, per-episode reward) and the panel started running off the bottom of the
+    /// screen during recording, when the extra status line appears. Exported so a scene that shows
+    /// more can go smaller still without changing the others - the perturbation arena uses 10.
+    /// </summary>
+    [Export] public int FontSize { get; set; } = 11;
+
     public override void _Ready()
     {
         MouseFilter = MouseFilterEnum.Ignore;
@@ -44,10 +54,11 @@ public partial class RagdollTelemetryHud : PanelContainer
 
         var margin = new MarginContainer();
         margin.MouseFilter = MouseFilterEnum.Ignore;
-        margin.AddThemeConstantOverride("margin_left", 14);
-        margin.AddThemeConstantOverride("margin_top", 12);
-        margin.AddThemeConstantOverride("margin_right", 14);
-        margin.AddThemeConstantOverride("margin_bottom", 12);
+        int pad = Mathf.RoundToInt(FontSize * 0.9f);
+        margin.AddThemeConstantOverride("margin_left", pad);
+        margin.AddThemeConstantOverride("margin_top", pad);
+        margin.AddThemeConstantOverride("margin_right", pad);
+        margin.AddThemeConstantOverride("margin_bottom", pad);
         AddChild(margin);
 
         var vbox = new VBoxContainer();
@@ -56,13 +67,13 @@ public partial class RagdollTelemetryHud : PanelContainer
 
         _telemetryLabel = new Label();
         _telemetryLabel.MouseFilter = MouseFilterEnum.Ignore;
-        _telemetryLabel.AddThemeFontSizeOverride("font_size", 13);
+        _telemetryLabel.AddThemeFontSizeOverride("font_size", FontSize);
         _telemetryLabel.AddThemeColorOverride("font_color", new Color(0.9f, 0.95f, 1.0f));
         vbox.AddChild(_telemetryLabel);
 
         _recStatusLabel = new Label();
         _recStatusLabel.MouseFilter = MouseFilterEnum.Ignore;
-        _recStatusLabel.AddThemeFontSizeOverride("font_size", 13);
+        _recStatusLabel.AddThemeFontSizeOverride("font_size", FontSize);
         _recStatusLabel.AddThemeColorOverride("font_color", new Color(1.0f, 0.35f, 0.35f));
         _recStatusLabel.Visible = false;
         vbox.AddChild(_recStatusLabel);
@@ -128,8 +139,10 @@ public partial class RagdollTelemetryHud : PanelContainer
             (Ragdoll.CurrentState == RagdollState.PushUpDrill ? $"Push-Up Rep: {Ragdoll.DrillCycleNormalized:F2} (0=bottom, 1=lockout)\n" : string.Empty) +
             (Ragdoll.CurrentState == RagdollState.ReinforcementLearning && RLBridge != null
                 ? $"--- RL EPISODE ---\n" +
-                  $"Episode: {RLBridge.EpisodeCount} ({(RLBridge.StartedStanding ? "STANDING" : "PRONE")} start) | " +
+                  $"Episode: {RLBridge.EpisodeCount} | " +
                   $"Elapsed: {RLBridge.EpisodeElapsedSeconds:F1}s / {RLBridge.EffectiveMaxEpisodeSeconds:F1}s\n" +
+                  $"Start Pose: {RLBridge.StartPoseT:F2} ({DescribeStartPose(RLBridge.StartPoseT)}) | " +
+                  $"Curriculum Floor: {RLBridge.ActiveCurriculumT:F2}\n" +
                   $"Reward (live): {RLBridge.CurrentAccumulatedReward:F2}\n" +
                   $"Last Episode: {RLBridge.LastEpisodeEndReason} | reward={RLBridge.LastEpisodeReward:F2} | {RLBridge.LastEpisodeDurationSeconds:F1}s\n" +
                   $"Policy Active: {(Ragdoll.ReinforcementLearningPolicyActive ? "YES" : "NO (idling)")}\n"
@@ -159,4 +172,18 @@ public partial class RagdollTelemetryHud : PanelContainer
                   $"--- DEBUG CONTROLS ---\n" +
                   $"Ragdoll keys disabled during RL episodes\n");
     }
+
+    /// <summary>
+    /// Words for the 0 = prone, 1 = standing start-pose scale, so the HUD reads as a pose rather
+    /// than a bare number. Boundaries are descriptive only - nothing branches on them.
+    /// </summary>
+    private static string DescribeStartPose(float poseT) => poseT switch
+    {
+        >= 1.0f => "STANDING",
+        >= 0.75f => "leaning",
+        >= 0.5f => "half-risen",
+        >= 0.25f => "low",
+        > 0.0f => "near-prone",
+        _ => "PRONE",
+    };
 }

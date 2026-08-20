@@ -58,7 +58,7 @@ $GodotExe    = Resolve-GodotExe
 #   "perturbation" - a ball gun fires at the dummy every 3 s; learn to keep balance.
 # Picks the export preset, the exported binary, and (via the preset's feature tag)
 # which scene the build boots. Change this one line to switch tasks.
-$Task        = "getup"
+$Task        = "perturbation"
 
 # --- Training scale ----------------------------------------------------------
 # MEASURED on this 7800X3D (8 cores / 16 threads), headless, 180s per point:
@@ -95,13 +95,16 @@ $Timesteps   = 80000000
 # Wall-clock cap in seconds. Training stops at whichever comes first, this or $Timesteps.
 # Use this when you want a run of a known DURATION - throughput is not predictable enough to
 # express "15 minutes" as a step count, especially with a visible instance.
-# 0 = no time limit.   900 = 15 minutes.
-$MaxSeconds  = 1800
+# 0 = no time limit.
+# 300 = 5 minutes.
+# 900 = 15 minutes.
+# 7200 = 2 hours.
+$MaxSeconds  = 300
 
 # --- Run identity ------------------------------------------------------------
 # Bump this for each new experiment. TensorBoard auto-appends _1, _2, ... so runs
 # never collide, and each run gets its own checkpoint folder.
-$ExperimentName = "getup_v4"
+$ExperimentName = "perturbation_v1"
 
 # --- Checkpointing -----------------------------------------------------------
 # Wall-clock seconds between saves. A crash costs at most this much work.

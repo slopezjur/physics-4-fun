@@ -102,13 +102,14 @@ The `tensorboard.ps1` wrapper takes the path from `$ExperimentDir` in `config.ps
 same variable the training scripts pass as `--experiment_dir` - so the two can never disagree.
 
 - `start_prone/success` - **the get-up.** This is the headline number now.
-- `rollout/ep_rew_mean` - only readable while `StandingStartProbability` is 0 or 1. In between it
-  is a mixture of two tasks of very different difficulty and will mislead you.
-- `rollout/ep_len_mean` - with a 50/50 start split and windows of 4 s / 8 s, expect roughly
-  `0.5*60 + 0.5*120 = 90` when nothing is succeeding. A standing start that succeeds ends near
-  2.1 s (~32 steps) instead of the 60-step cap, so the range to expect in practice is **77-90**,
-  falling as `start_standing/success` rises. Dropping below that means episodes are ending early,
-  i.e. reaching `Standing` (good) or `Inverted` (bad).
+- `rollout/ep_rew_mean` - **not readable at all** under the reverse curriculum. It is an average over
+  a spread of start poses of very different difficulty, and it *falls* as the curriculum advances
+  because harder levels succeed less often. Falling reward here is the curriculum working, not a
+  regression. Judge on `pose_<level>/success` at the current floor instead.
+- `rollout/ep_len_mean` - the episode window is interpolated with the start pose,
+  `Lerp(8 s, 4 s, poseT)`, so this moves with the curriculum too. While the floor is near 1.0 nearly
+  every episode gets ~4 s (60 steps); it lengthens toward 120 as the floor descends. A drop means
+  episodes are ending early, i.e. reaching `Standing` (good) or `Inverted` (bad).
 
 To watch a trained policy in-engine with Python closed: set the `Sync` node's `control_mode = 2`
 (Onnx Inference) and point `onnx_model_path` at your `.onnx`, then press Play.
@@ -262,9 +263,13 @@ the record cannot drift from the code that produced it.
 | `standing/{grounded,head,tilt,speed,icp,all}` | fraction of ticks each success sub-condition held |
 | `standing/act_saturation` | fraction of action components pinned at a joint bound |
 | `standing/started_standing` | fraction of episodes begun standing (see RSI below) |
+| `standing/start_pose_t` | mean start pose drawn, on the 0 = prone → 1 = standing scale |
+| `standing/curriculum_t` | the curriculum floor: hardest level currently being sampled |
 | `episode_end/<reason>` | fraction of episodes ending for each reason |
-| `start_prone/success`, `start_standing/success` | success rate split by start pose |
-| `start_prone/episodes`, `start_standing/episodes` | episode counts behind those rates |
+| `start_standing/*` | began at exactly upright — the refresher |
+| `start_prone/*` | began exactly flat. **The get-up.** Definition unchanged since the first run, so the whole history stays comparable |
+| `curriculum/*` | everything strictly between the two endpoints |
+| `pose_0.97/success` … | per-level, two decimals. Says *which rung* the agent is stuck on |
 
 `reward/*` summing to `reward/total` is a real cross-check, not an identity: the total is
 accumulated independently in the bridge.
@@ -273,10 +278,108 @@ Useful calibration for `act_saturation`: an untrained Gaussian policy sits at **
 (= P(|x| ≥ 0.95) for N(0,1)). A value near that means the policy has not learned to modulate
 effort yet, regardless of what the reward curve is doing.
 
+### Reverse curriculum (start-pose continuum)
+
+The start pose is no longer one of two options. `HumanoidRagdoll.TeleportToGetUpPose(t)` places the
+body anywhere on a continuum where **t = 0 is prone and t = 1 is standing**, and both endpoints
+reproduce the old poses exactly — `t=1` is the identity transform, `t=0` is `DropToProne`'s −90°
+pitch plus its 0.5 m lift. It generalises the two rather than adding a third convention.
+
+**Why a continuum at all.** Prone-start training scored 0% over 63M steps in one run and 32M in
+another. The reward's shaping term telescopes to `10 × (height gained)`, so an episode that never
+rises earns nothing regardless of what it attempted — there was no gradient anywhere between the two
+poses the project had.
+
+**Why it runs backwards.** The curriculum starts at the *goal* and walks toward prone, because the
+get-up's terminal state is the one thing already learned. Standing reached 87% on a 1.5 s hold at
+32M steps; at 36% it would not have been solid enough to build on.
+
+**Why the interpolation is a rigid whole-body transform.** Driving it from `ProneRecoveryTrajectory`
+would give anatomically real intermediates — an actual half-kneel instead of a tilted body — but that
+trajectory returns **joint angles only**. It says nothing about where the pelvis ends up in the
+world, which is the half of the pose that separates lying down from kneeling. Recovering the root
+needs forward kinematics over the bone hierarchy, and an FK error there produces a self-intersecting
+pose the solver resolves explosively. A rigid transform moves every bone by the same matrix, so all
+relative joint geometry is preserved exactly — the property that already makes `DropToProne` safe.
+
+#### The wall is brittleness, not geometry
+
+Measured at 32.6M steps, one rung apart:
+
+| level | tilt | success |
+|---|---|---|
+| `pose_1.00` | 0.0° | 0.857 |
+| `pose_0.99` | 0.9° | 0.799 |
+| `pose_0.98` | 1.8° | **0.385** |
+| `pose_0.97` | 2.7° | **0.081** |
+| `pose_0.96` | 3.6° | 0.005 |
+
+A support-polygon argument predicts the tipping point at `asin(0.15 / 0.90) = 9.6°`, i.e. t ≈ 0.893.
+**The real cliff is at 1.8–2.7°**, where the CoM has moved 0.03–0.04 m against a 0.15 m allowance —
+nowhere near the geometric limit.
+
+So the limit is the policy, not the body. After 32M steps starting from one identical pose at zero
+velocity it learned something close to an open-loop trajectory rather than a feedback controller, and
+2° of tilt is already out of distribution. This is also why the arena shows it toppling after 1–2 s,
+and why "87% success" overstated the skill. Brittleness is learnable; a physical limit would not be.
+
+#### Frontier sampling — the part that is easy to get wrong
+
+`CurriculumStep` is **0.01**, not 0.1: at 0.1 the very first rung lands past the cliff, and since a
+level only advances *on success*, the curriculum freezes there for the whole run while looking
+healthy.
+
+More subtly, **only frontier episodes may vote.** Sampling is uniform over `[floor, 1]`, so with the
+floor at 0.955 the mean draw is 0.978 — the advance window fills with easy rehearsal episodes and
+clears the 70% gate while the frontier itself is at zero. That is not hypothetical; it is what the
+first curriculum run did:
+
+```
+floor descended 0.990 -> 0.955     while   pose_0.96 = 0.005,  pose_0.95 = 0.000
+```
+
+The floor had walked past levels the agent could not do at all. Two changes fix it:
+
+* `CurriculumFrontierShare` (**0.5**) draws half of curriculum episodes from `[floor, floor+step]`.
+  This also keeps the decision rate constant as the range widens — under uniform sampling the
+  frontier's share shrinks from 22% at floor 0.955 to 2% at floor 0.5, so voting would have crawled
+  exactly when the levels got interesting.
+* Only poses inside that band count toward the advance. Rehearsal and refresher episodes measure the
+  past.
+
+Verified against the same checkpoint and wall-clock: the floor now settles at 0.970 and **holds**
+instead of drifting, and `pose_0.97` climbed 0.081 → 0.270 within two minutes purely from the extra
+frontier samples.
+
+The advance window is **cleared** on promotion, not slid — a slid window still holds the successes
+that triggered it and would re-fire immediately, running several levels down before the policy has
+seen the new distribution.
+
+#### What this does not do
+
+It will not produce a get-up. Expect the floor to stall somewhere in the 0.90s, because a rigid tilt
+cannot express a **change of support** — feet, to hands and knees, back to feet — which is what an
+actual get-up is. Getting past that needs start poses with real support configurations, which means
+snapshotting the procedural get-up (run it, record bone transforms at N points, teleport to a stored
+snapshot) rather than interpolating a transform. Those are guaranteed valid because simulation
+produced them.
+
+What it *does* buy is robustness, and the table above shows how badly that is needed.
+
 ### Reference State Initialization
 
-`RagdollRLBridge.StandingStartProbability` (now **0.5**) is the fraction of episodes that begin
-already standing rather than prone. A policy that only ever starts prone never observes a standing
+`RagdollRLBridge.StandingStartProbability` (now **0.2**) is the fraction of episodes that begin at
+exactly upright. Since the reverse curriculum above took over start-pose selection, this is no longer
+the standing/prone split — it is a **refresher** that keeps the goal state alive no matter how far
+the curriculum has walked, and its episodes are excluded from the advance vote. Set it to 0 to hand
+every episode to the curriculum.
+
+Watch it: when the curriculum introduces harder poses, `start_standing/success` drops (0.87 → 0.68
+over two minutes in one measurement) as the policy trades a memorised pose for a general one. That is
+expected. A slide past ~0.5 that does not recover is catastrophic forgetting, and this is the dial.
+
+The original rationale still holds for why standing starts exist at all. A policy that only ever
+starts prone never observes a standing
 state at all, so it cannot learn "stay up" — DeepMimic's ablation reports the agent "never
 discovers such high reward states" without this.
 
@@ -284,18 +387,16 @@ It ran at 1.0 for the first 22.6M steps and reached a 94% success rate — but o
 which 0.75 s is the mandatory hold, i.e. it learned *"don't fall over in the first third of a
 second"*, never a get-up. 0.5 reintroduces the prone start.
 
-Half by **episode** is far more than half by **sample**, which is what trains: a standing episode is
-~16 decision steps and a prone one ~120, so a 50/50 episode split puts ~88% of samples on the prone
-task. That is also why the episode window is per-start-pose — `MaxEpisodeSeconds` (4.0 s) for
-standing starts, `ProneMaxEpisodeSeconds` (8.0 s) for prone. A get-up cannot complete in the
-standing window, so one shared constant would make the prone task unsolvable by construction.
+Share by **episode** is not share by **sample**, which is what trains: episode length scales with the
+start pose, so easy poses contribute far fewer samples than their episode count suggests. Under the
+old 50/50 standing/prone split a standing episode was ~30 decision steps against a prone one's 120,
+putting ~80% of samples on the prone half despite an even episode split. The same asymmetry now
+applies across the continuum, since the window is `Lerp(8 s, 4 s, poseT)` — see **Episode length**.
 
-Raising `StandingHoldSeconds` to 1.5 s shifts that sample split, and the shift is the non-obvious
-cost of the change. Standing episodes grow from ~20 to ~32 decision steps on success and 60 on
-failure, so the standing task's share of **samples** roughly doubles, ~14% to ~28%, taken directly
-from prone. That is intended — a policy that can actually stand is a prerequisite for a get-up that
-terminates in standing — but `StandingStartProbability` was left at 0.5 rather than lowered to
-compensate, so the reallocation is real and deliberate.
+That interpolation is why one shared window constant cannot serve: a start halfway up needs more time
+than a standing one (there is a rise to perform first) and less than a prone one (most of the rise is
+already done), and giving every non-standing pose the full 8 s would spend most of the curriculum's
+samples on episodes that ended long before the timer.
 
 **Once this is below 1.0, `ep_rew_mean` is a mixture of two tasks** with very different difficulty
 and stops being readable on its own. Judge on `start_prone/success` — that is the get-up.

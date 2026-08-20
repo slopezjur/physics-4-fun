@@ -51,7 +51,16 @@ def summarise(folder):
 
     rows = read_recovery(path)
     if not rows:
-        print(f"--- {folder} --- no Recovering rows")
+        # Say what the file DOES contain rather than just "nothing here". This summary only covers
+        # the Recovering segment, so an RL or balance dump - where State reads
+        # ReinforcementLearning throughout - legitimately has no rows, and reporting that as a bare
+        # "no Recovering rows" reads like a broken recording.
+        states = {}
+        with open(path, "r", newline="") as handle:
+            for row in csv.DictReader(handle):
+                states[row["State"]] = states.get(row["State"], 0) + 1
+        summary = ", ".join(f"{k}={v}" for k, v in sorted(states.items(), key=lambda kv: -kv[1]))
+        print(f"--- {folder} --- no Recovering rows; states present: {summary or 'none'}")
         return
 
     start, mid, end = rows[0], rows[len(rows) // 2], rows[-1]

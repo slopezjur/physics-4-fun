@@ -45,19 +45,24 @@ script = ExtResource("3_aicontroller")
 bridge = NodePath("../RLBridge")
 reset_after = 100000
 
-[node name="RLBridge" type="Node" parent="." node_paths=PackedStringArray("Ragdoll", "AiController")]
+[node name="RLBridge" type="Node" parent="." node_paths=PackedStringArray("Ragdoll", "AiController", "PerturbationSource")]
 script = ExtResource("2_bridge")
 Ragdoll = NodePath("../ActiveRagdoll")
 AiController = NodePath("../AIController")
+PerturbationSource = NodePath("../BallGun")
 
 [node name="BallGun" type="Node3D" parent="." node_paths=PackedStringArray("Target", "Bridge")]
 script = ExtResource("8_ballgun")
 Target = NodePath("../ActiveRagdoll")
 Bridge = NodePath("../RLBridge")
 IntervalSeconds = 3.0
-FirstShotDelaySeconds = 1.5
-LaunchSpeed = 9.0
-BallMass = 3.0
+FirstShotDelaySeconds = 1.0
+LaunchSpeed = 6.0
+BallMass = 1.5
+SmallBallProbability = 0.5
+SmallBallMass = 0.2
+SmallBallRadius = 0.06
+SmallBallSpeed = 6.0
 
 [node name="Sync" type="Node" parent="."]
 script = ExtResource("4_sync")
@@ -70,3 +75,4 @@ onnx_model_path = "res://Models/policy.onnx"
 script = ExtResource("5_telemetry")
 Ragdoll = NodePath("../../ActiveRagdoll")
 RLBridge = NodePath("../../RLBridge")
+FontSize = 10

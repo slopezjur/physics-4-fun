@@ -20,6 +20,35 @@ namespace Physics4Fun.RL.Termination;
 /// </summary>
 public sealed class GetUpTermination : IRlTerminationCondition, IRlTerminationDiagnostics
 {
+    /// <summary>
+    /// Whether reaching the standing criterion ENDS the episode (and pays StandingBonus).
+    ///
+    /// True for the get-up: success there is a one-off achievement, and making it absorbing is what
+    /// distinguishes "stood up" from "stood up then fell over at t=7.9 s".
+    ///
+    /// False for the balance/perturbation task, where it is actively wrong. That task fires a ball
+    /// at the dummy and asks it to stay upright; if success absorbed, the episode would end at
+    /// roughly 0.6 s of settling plus StandingHoldSeconds - i.e. BEFORE the first ball lands at
+    /// 1.0 s - and the perturbation would never be experienced at all. Worse, with a ball arriving
+    /// every N seconds each hit resets the hold counter, so "hold 1.5 s continuously" and "get hit
+    /// every 2 s" fight each other by construction and success becomes unreachable no matter how
+    /// good the policy is.
+    ///
+    /// With this false the episode always runs its full window and the reward's per-tick upright
+    /// term does the scoring, which is the honest expression of "stayed up through the hit".
+    /// StandingBonus is then never paid - EvaluateTerminal only pays on reason "Standing" - so the
+    /// return becomes upright + shaping - effort, bounded by UprightWeight * MaxEpisodeSeconds.
+    /// </summary>
+    private readonly bool _endEpisodeOnSuccess;
+
+    /// <param name="endEpisodeOnSuccess">
+    /// False for perturbation/balance training. See <see cref="_endEpisodeOnSuccess"/>.
+    /// </param>
+    public GetUpTermination(bool endEpisodeOnSuccess = true)
+    {
+        _endEpisodeOnSuccess = endEpisodeOnSuccess;
+    }
+
     /// <summary>Head height (m) above which the body counts as standing.</summary>
     private const float StandingHeadHeight = 1.35f;
 
@@ -102,7 +131,7 @@ public sealed class GetUpTermination : IRlTerminationCondition, IRlTerminationDi
     public string Describe() =>
         $"GetUpTermination(standHead={StandingHeadHeight}m, standTilt={StandingTiltDeg}deg, "
         + $"standSpeed={StandingMaxSpeed}m/s, standIcpEscape={StandingMaxIcpEscape}m, "
-        + $"bothFeetGrounded, hold={StandingHoldSeconds}s, "
+        + $"bothFeetGrounded, hold={StandingHoldSeconds}s, endOnSuccess={_endEpisodeOnSuccess}, "
         + $"fallenHeight={FallenPelvisHeight}m, fallenTilt={FallenTiltDeg}deg)";
 
     public void Reset()
@@ -117,10 +146,13 @@ public sealed class GetUpTermination : IRlTerminationCondition, IRlTerminationDi
 
     public bool IsTerminal(in RlContext context, out string reason)
     {
+        // IsStanding is evaluated either way, never short-circuited: the standing/* diagnostics are
+        // how "which sub-condition is blocking" stays answerable, and they are just as useful for
+        // the balance task as for the get-up even when success no longer ends anything.
         if (IsStanding(context))
         {
             _standingHeldSeconds += context.Delta;
-            if (_standingHeldSeconds >= StandingHoldSeconds)
+            if (_endEpisodeOnSuccess && _standingHeldSeconds >= StandingHoldSeconds)
             {
                 reason = "Standing";
                 return true;
