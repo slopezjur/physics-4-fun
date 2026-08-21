@@ -110,9 +110,19 @@ $Timesteps   = 80000000
 $MaxSeconds  = 300
 
 # --- Run identity ------------------------------------------------------------
-# Bump this for each new experiment. TensorBoard auto-appends _1, _2, ... so runs
-# never collide, and each run gets its own checkpoint folder.
-$ExperimentName = "perturbation_v8"
+# LEAVE EMPTY. The name is derived below as "<task>_v<next unused>" by scanning
+# rl/runs, so it can never disagree with $Task and can never go stale.
+#
+# Hand-maintaining this caused two separate failures in one day. First, $Task was
+# switched to a new experiment while the name still read "perturbation_v3", so
+# three runs wrote into one directory and mixed two lineages. Second, the name
+# was left on an old version, so a resume silently appended to a finished run.
+# Both are invisible until you read the event files and wonder why the numbers
+# do not line up.
+#
+# Set it explicitly ONLY to deliberately continue an existing lineage in place -
+# for example to append more steps to perturbation_v8 rather than starting v9.
+$ExperimentName = ""
 
 # --- Checkpointing -----------------------------------------------------------
 # Wall-clock seconds between saves. A crash costs at most this much work.
@@ -144,6 +154,37 @@ if ($Task -eq "perturbation") {
 }
 # Absolute on purpose: every script (training AND tensorboard) must agree on one location.
 $ExperimentDir = "$ProjectPath/rl/runs"
+
+# Next unused experiment version for a task, by scanning the run directories.
+#
+# Matches "<task>_v<N>" with SB3's optional "_<run id>" suffix, so perturbation_v7_0
+# yields 7 and the next name is perturbation_v8. A task with no runs yet starts at v1.
+function Get-NextExperimentName {
+    param(
+        [Parameter(Mandatory = $true)][string] $Task,
+        [Parameter(Mandatory = $true)][string] $RunsDir
+    )
+
+    $highest = 0
+    if (Test-Path -LiteralPath $RunsDir) {
+        $pattern = "^{0}_v(\d+)(_\d+)?$" -f [regex]::Escape($Task)
+        foreach ($dir in (Get-ChildItem -LiteralPath $RunsDir -Directory -ErrorAction SilentlyContinue)) {
+            if ($dir.Name -match $pattern) {
+                $version = [int] $Matches[1]
+                if ($version -gt $highest) { $highest = $version }
+            }
+        }
+    }
+
+    return ("{0}_v{1}" -f $Task, ($highest + 1))
+}
+
+if ([string]::IsNullOrWhiteSpace($ExperimentName)) {
+    $ExperimentName = Get-NextExperimentName -Task $Task -RunsDir $ExperimentDir
+    Write-Host "[config] Task '$Task' -> experiment '$ExperimentName' (next unused)." -ForegroundColor DarkGray
+} else {
+    Write-Host "[config] Task '$Task' -> experiment '$ExperimentName' (pinned in config.ps1)." -ForegroundColor Yellow
+}
 $Python      = "$ProjectPath/rl/.venv/Scripts/python.exe"
 $TrainScript = "$ProjectPath/rl/train.py"
 $BuildExe    = "$ProjectPath/build/$BuildName"
