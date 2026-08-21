@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using Godot;
 using Physics4Fun.Ragdoll;
 
@@ -200,5 +200,55 @@ public interface IRlTerminationCondition
     bool IsTerminal(in RlContext context, out string reason);
 
     /// <summary>Description including thresholds, for the run manifest. See IRlObservationBuilder.Describe.</summary>
+    string Describe();
+}
+
+/// <summary>Outcome of feeding one frontier episode to the curriculum.</summary>
+public readonly struct CurriculumAdvance
+{
+    public CurriculumAdvance(bool advanced, float previousFloor, float newFloor, int wins, int considered)
+    {
+        Advanced = advanced;
+        PreviousFloor = previousFloor;
+        NewFloor = newFloor;
+        Wins = wins;
+        Considered = considered;
+    }
+
+    public static CurriculumAdvance None => default;
+
+    public bool Advanced { get; }
+    public float PreviousFloor { get; }
+    public float NewFloor { get; }
+    public int Wins { get; }
+    public int Considered { get; }
+}
+
+/// <summary>
+/// Chooses how hard each episode starts, and decides when the policy has earned a harder level.
+///
+/// Behind an interface for the same reason reward, termination, observation and action are: it is a
+/// policy decision with its own state that the bridge should be able to swap without being edited.
+/// A forward curriculum, a fixed distribution, or no curriculum at all are all valid alternatives,
+/// and the get-up task is currently the only one that needs this one.
+/// </summary>
+public interface IRlStartPoseCurriculum
+{
+    /// <summary>Lowest (hardest) start pose unlocked so far. 1.0 is standing, 0.0 is flat.</summary>
+    float Floor { get; }
+
+    /// <summary>Restores a floor recovered from a previous run, so a resume does not relearn it.</summary>
+    void RestoreFloor(float floor);
+
+    /// <summary>Draws a start pose from the unlocked range.</summary>
+    float SampleStartPose();
+
+    /// <summary>Whether a pose counts toward the advance decision, rather than being rehearsal.</summary>
+    bool IsFrontierPose(float poseT);
+
+    /// <summary>Records one frontier episode's outcome and reports whether the level advanced.</summary>
+    CurriculumAdvance RecordOutcome(bool succeeded);
+
+    /// <summary>Self-description for the run manifest, so provenance cannot drift from the code.</summary>
     string Describe();
 }
