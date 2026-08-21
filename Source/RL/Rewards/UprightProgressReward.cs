@@ -141,9 +141,21 @@ public sealed class UprightProgressReward : IRlRewardFunction, IRlRewardDiagnost
         $"UprightProgressReward(progress={ProgressWeight}, upright={UprightWeight}, "
         + $"effort={_effortWeight}, standingBonus={StandingBonus}, potentialHeadHeight={PotentialReferenceHeadHeight})";
 
-    public float EvaluateTerminal(in RlContext context, string reason)
+    public float EvaluateTerminal(in RlContext context, string reason, bool succeeded)
     {
-        float bonus = reason == "Standing" ? StandingBonus : 0.0f;
+        // Keyed on the success FLAG, not on the reason string. Reason "Standing" only exists when
+        // the termination is configured to make success absorbing, so the old test paid nothing on
+        // the balance task - where success deliberately does not end the episode - and the agent
+        // trained for 5.3M steps against a reward whose largest term could not fire.
+        //
+        // Ending on a fall still forfeits it, even if the criterion was met earlier in the episode.
+        // Without that guard "hold 1.5 s, bank 20, then collapse" scores identically to staying up,
+        // and this reward has already been gamed once in exactly that shape - see the note on
+        // UprightTermination.StandingHoldSeconds, where a 0.75 s hold produced start_standing/success
+        // 0.96 from a policy that fell over immediately afterwards. A balance episode that survives
+        // reaches the time limit; one that does not ends as "Fallen".
+        bool payable = succeeded && reason != "Fallen";
+        float bonus = payable ? StandingBonus : 0.0f;
         _componentTotals["terminal"] += bonus;
         return bonus;
     }

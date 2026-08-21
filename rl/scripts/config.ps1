@@ -107,7 +107,7 @@ $Timesteps   = 80000000
 # 300 = 5 minutes.
 # 900 = 15 minutes.
 # 7200 = 2 hours.
-$MaxSeconds  = 3600
+$MaxSeconds  = 300
 
 # --- Run identity ------------------------------------------------------------
 # LEAVE EMPTY. The name is derived below as "<task>_v<next unused>" by scanning

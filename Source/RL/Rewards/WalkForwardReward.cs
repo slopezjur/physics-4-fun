@@ -197,7 +197,11 @@ public sealed class WalkForwardReward : IRlRewardFunction, IRlRewardDiagnostics,
         + $"form=velocity*upright(product), heading={HeadingWeight}, "
         + $"effort={_effortWeight}, fallPenalty={FallPenalty})";
 
-    public float EvaluateTerminal(in RlContext context, string reason)
+    /// <param name="succeeded">
+    /// Unused: walking has no success criterion, so WalkTermination reports false unconditionally.
+    /// This reward pays only a failure penalty, which the reason string alone identifies.
+    /// </param>
+    public float EvaluateTerminal(in RlContext context, string reason, bool succeeded)
     {
         if (reason != "Fallen")
         {

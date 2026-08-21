@@ -25,6 +25,14 @@ public interface IBalanceTelemetryProvider
     /// <summary>Horizontal distance from the ICP to the support center (yaw-level frame), as computed for stepping.</summary>
     float IcpEscapeDistance { get; }
 
+    /// <summary>
+    /// Whether <see cref="IcpEscapeDistance"/> means anything this tick - false when no foot is
+    /// grounded, because there is then no base of support to measure escape from. Callers MUST
+    /// check this before treating a small distance as good balance; 0.0 is also what an airborne
+    /// body reports.
+    /// </summary>
+    bool IsIcpValid { get; }
+
     /// <summary>Current swing phase progress [0..1], 0 when in double support.</summary>
     float SwingProgressNormalized { get; }
 

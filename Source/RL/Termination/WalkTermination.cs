@@ -107,6 +107,13 @@ public sealed class WalkTermination : IRlTerminationCondition, IRlTerminationDia
         $"WalkTermination(fallenHead={FallenHeadHeight}m, fallenTilt={FallenTiltDeg}deg, "
         + $"settle={SettleSeconds}s, movingSpeed={MovingSpeedThreshold}m/s, noSuccessCondition)";
 
+    /// <summary>
+    /// Always false: walking has no terminal success criterion, as Describe already advertises with
+    /// noSuccessCondition. Distance covered is scored continuously by WalkForwardReward rather than
+    /// being a goal the episode can reach, so there is no moment at which the task is "done".
+    /// </summary>
+    public bool SucceededThisEpisode => false;
+
     public void Reset()
     {
         _totalTicks = 0;

@@ -52,7 +52,7 @@ AiController = NodePath("../AIController")
 TaskKind = 1
 MaxEpisodeSeconds = 6.0
 StandingStartProbability = 1.0
-InitialForwardSpeed = 0.8
+InitialForwardSpeed = 0.4
 
 [node name="Sync" type="Node" parent="."]
 script = ExtResource("4_sync")

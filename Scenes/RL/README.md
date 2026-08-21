@@ -60,9 +60,32 @@ Each task has both, and they are not interchangeable:
   measuring a behaviour the moment an episode ends. Press **R** to reset manually — it calls
   `Bridge.ResetEpisode()`, so the start pose is re-sampled properly.
 
-Every arena pins its own `PromotedModelPath`. Without that, `PolicyAutoLoader` falls back to the
-newest `.onnx` anywhere under `rl/runs`, and a night of walk training silently repointed the
-perturbation arena at a walking policy — the dummy fell before the ball ever reached it.
+**An arena never trains.** `PolicyAutoLoader` sets `Sync.control_mode` to `ONNX_INFERENCE` before
+Sync reads it — which is why no arena scene carries a `control_mode` line, and why grepping the
+`.tscn` for one is misleading. If no policy is found it drops to `HUMAN` instead and prints
+`No trained policy found - idling`. Either way no socket is opened and no learning happens; the
+banner it prints on load says so explicitly.
+
+Each arena selects its own policy through `BrainRunPrefixes` — the newest `.onnx` under any
+`rl/runs/<dir>` whose name starts with one of them:
+
+| arena | `BrainRunPrefixes` |
+|---|---|
+| Stand | `stand` |
+| GetUp | `getup` |
+| Perturbation | `perturbation` |
+| Walk | `walk` |
+
+This replaced a hand-pinned `PromotedModelPath` on every arena, which is still supported as an
+override when a specific policy is wanted but is no longer how the arenas are configured. Both
+mechanisms exist because "newest `.onnx` anywhere" is actively wrong here: a night of walk training
+once silently repointed the perturbation arena at a walking policy, and the dummy fell before the
+ball ever reached it.
+
+The prefix is a plain `StartsWith`, so **run directories must not borrow another brain's prefix**.
+A run named `perturbation_smoke_0` matches `perturbation` and, being newer, outranks the real
+`perturbation_v11_0` — a five-minute throwaway becomes what the arena shows. Name scratch runs with
+their own leading token (`smoke_perturbation_0`), not by suffixing a real one.
 
 Arena start poses are set to match how each policy was trained. The perturbation arena inherited the
 0.2 default once and spawned the dummy at a 1–2° tilt 80% of the time, inside the exact brittleness

@@ -264,12 +264,26 @@ class RewardDecompositionCallback(BaseCallback):
             if reason is not None:
                 self._reasons[str(reason)] = self._reasons.get(str(reason), 0) + 1
 
+                # Success comes from the environment's own flag, NOT from the end reason.
+                #
+                # reason == "Standing" is only emitted when the termination is configured to make
+                # success absorbing, which the perturbation task deliberately turns off so a ball
+                # can land after the criterion is met. Deriving success from the string therefore
+                # reported 0.000 for every perturbation episode no matter what the policy did -
+                # 470 consecutive logged points of it across perturbation_v10 - and the same zero
+                # fed the curriculum's advance vote, freezing its floor at 0.99.
+                #
+                # Falls back to the old test so checkpoints from builds predating the flag still
+                # log a meaningful get-up success rate rather than a silent zero.
+                raw_success = info.get("episode_success")
+                won = bool(float(raw_success)) if raw_success is not None else str(reason) == "Standing"
+
                 # Per-task success, so mixed training is falsifiable. An aggregate rate hides the
                 # exact failure mixing exists to prevent - one task improving while another rots.
                 if task is not None:
                     bucket = self._by_task.setdefault(str(task), {"episodes": 0, "successes": 0})
                     bucket["episodes"] += 1
-                    if str(reason) == "Standing":
+                    if won:
                         bucket["successes"] += 1
 
                 # Bucket on the CONTINUOUS start pose, not on started_standing.
@@ -298,7 +312,6 @@ class RewardDecompositionCallback(BaseCallback):
                     # "pose_1.0" bucket, so the per-level breakdown - the whole point of it, since
                     # it says WHICH rung the agent is stuck on - reads as one flat line. Only levels
                     # actually sampled get a tag, so this stays sparse rather than emitting 100.
-                    won = str(reason) == "Standing"
                     for key in (bucket, f"pose_{round(pose, 2):.2f}"):
                         counts = self._by_start.setdefault(key, {"episodes": 0, "successes": 0})
                         counts["episodes"] += 1

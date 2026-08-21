@@ -230,14 +230,27 @@ public partial class BallGun : Node3D, IRlPerturbationDiagnostics
     /// The two are different disturbances, not two sizes of one. The heavy ball is 0.44 m across
     /// and does not bounce off, so it stays in contact and keeps pushing - a sustained shove whose
     /// scale is set by kinetic energy. The small ball is brief contact at speed, so momentum
-    /// transfer dominates: 0.2 kg at 6 m/s moves an 80.6 kg body by 0.018 m/s, shifting the capture
-    /// point about 0.005 m against the 0.15 m allowance in UprightTermination - under 4% of the
-    /// balance budget. Globally that is a poke; locally it snaps a limb, which is the point.
+    /// transfer dominates.
+    ///
+    /// The figures this paragraph used to quote - "0.2 kg at 6 m/s ... under 4% of the balance
+    /// budget" - were left behind by the mass-ratio work recorded on SmallBallMass, which raised
+    /// the mass by more than an order of magnitude to stop the solver amplifying light contacts.
+    /// They described a ball that has not been fired since. At the mass that is ACTUALLY fired,
+    /// the same linear model reads: 3.0 kg at 6 m/s carries 18 N.s, moves an 80.6 kg body by
+    /// 0.223 m/s and shifts the capture point roughly 0.062 m against the 0.15 m allowance in
+    /// UprightTermination - about 41% of the balance budget, not 4%. This is a shove, not a poke,
+    /// and it should be read as one when tuning.
+    ///
+    /// Note also that the ball does not appear in BodyStateObservation. The policy cannot see the
+    /// shot coming and can only react to contact, so the disturbance has to stay inside what a
+    /// purely reactive recovery can absorb.
     ///
     /// 6 m/s rather than the 12 it was first written at, and the SPEED was cut rather than the mass
     /// because the complaint was that it looked too fast - halving mass would have left it just as
     /// fast on screen. It now travels at the same speed as the heavy ball, so the two read as
-    /// different sizes rather than as different weapons.
+    /// different sizes rather than as different weapons. Speed is also the only safe difficulty
+    /// knob here: momentum is linear in it, while mass is pinned from below by the solver's
+    /// contact-ratio limit.
     ///
     /// Fired from ONE gun rather than a second gun node, deliberately. Two guns on independent
     /// clocks would put several balls in the air at once, and the reason the training interval
@@ -270,6 +283,16 @@ public partial class BallGun : Node3D, IRlPerturbationDiagnostics
     /// the physical value for this ball (about 19 J at 6.22 m/s) the diagnosis holds; if it stays
     /// in the hundreds, the mass ratio is not the mechanism and BallImpactImpulse below will say so
     /// directly rather than by inference.
+    ///
+    /// The value settled at 3.0 rather than the 1.0 this note argues for, and the note was not
+    /// updated. 3.0 kg is further from the solver's bad regime, not closer, so it is safe in the
+    /// direction this investigation cared about - but it is also 3x the disturbance the paragraph
+    /// above sizes, which matters when reading the balance budget.
+    ///
+    /// Do NOT tune difficulty downward through this field. The whole point of the sequence above is
+    /// that lowering mass drove the mass ratio toward the regime where the solver injected 1000x to
+    /// 8000x the ball's own energy, and the symptom tracked the intervention backwards for five
+    /// iterations. SmallBallSpeed is the knob: momentum is linear in it and it has no such floor.
     /// </summary>
     [Export] public float SmallBallMass { get; set; } = 3.0f;
     /// <summary>
@@ -291,7 +314,17 @@ public partial class BallGun : Node3D, IRlPerturbationDiagnostics
     /// reason, because mass is the knob that matters.
     /// </summary>
     [Export] public float SmallBallRadius { get; set; } = 0.06f;
-    [Export] public float SmallBallSpeed { get; set; } = 8.0f;
+
+    /// <summary>
+    /// 6 m/s, down from 8. The documented intent for this ball has always been "same speed as the
+    /// heavy ball" (see SmallBallProbability, and LaunchSpeed = 6.0); 8 was never reconciled with
+    /// that and made the small ball the harder of the two disturbances by a third.
+    ///
+    /// Momentum drops 24 -> 18 N.s, taking the capture-point shift from roughly 55% of the
+    /// UprightTermination balance allowance to 41%. Chosen over cutting mass because mass has a
+    /// solver floor and speed does not - see SmallBallMass.
+    /// </summary>
+    [Export] public float SmallBallSpeed { get; set; } = 6.0f;
 
     /// <summary>
     /// Fractional spread on the small ball's launch speed, applied per shot. 0.25 means +/-25%.

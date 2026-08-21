@@ -82,6 +82,18 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
     public float CurrentTiltAngleDeg { get; private set; } = 0.0f;
     public float BalanceStrengthNow { get; private set; } = 0.0f;
     public float IcpEscapeDistance { get; private set; } = 0.0f;
+
+    /// <summary>
+    /// Whether <see cref="IcpEscapeDistance"/> was computable this tick - i.e. at least one foot is
+    /// bearing load, so there is a base of support to measure escape FROM.
+    ///
+    /// Exists because the distance alone is ambiguous at 0.0: that is both "the capture point sits
+    /// exactly over the support centre" and "there was nothing to compare it against". Consumers
+    /// that treat the two alike will read an airborne body as perfectly balanced, which is why
+    /// UprightTermination previously had to demand BOTH feet grounded before trusting the number -
+    /// a requirement that also outlawed the protective step it was trying to measure.
+    /// </summary>
+    public bool IsIcpValid { get; private set; }
     public Vector3 PelvisStabilizerTorque => _pelvisStabilization.LastTorque;
     public Vector3 CenterOfMassVelocity { get; private set; } = Vector3.Zero;
 
@@ -200,6 +212,7 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
         CurrentTiltAngleDeg = 0.0f;
         BalanceStrengthNow = 0.0f;
         IcpEscapeDistance = 0.0f;
+        IsIcpValid = false;
         _pelvisStabilization.ClearTorque();
         CenterOfMassVelocity = Vector3.Zero;
 
@@ -334,25 +347,52 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
     /// <summary>
     /// Horizontal distance from the Instantaneous Capture Point to the support center,
     /// expressed in a yaw-level pelvis frame (mirrors the stepping module's ICP computation).
+    ///
+    /// The support centre comes from the feet that are actually GROUNDED, not from both feet
+    /// unconditionally. Averaging a foot that bears no load puts the reference point halfway
+    /// toward open air, so the escape distance was wrong precisely during single support - the one
+    /// phase where a protective step is happening and the answer matters most.
+    ///
+    /// KNOWN DEBT: BuildBalanceContext computes baseOfSupportCenter with the same both-feet
+    /// average and still has this bug. It is left alone deliberately, because that value feeds
+    /// DynamicSteppingModule and changing it alters tuned procedural stepping behaviour that
+    /// nothing here can re-verify. The two ICP computations were deliberately aligned once before
+    /// (they disagreed on CoM height); they are now knowingly divergent on support centre, and
+    /// that should be closed by fixing the context rather than by reverting this.
     /// </summary>
     private void UpdateIcpEscapeDistance()
     {
-        if (_footL == null || _footR == null || !GodotObject.IsInstanceValid(_footL) || !GodotObject.IsInstanceValid(_footR))
+        bool footLValid = _footL != null && GodotObject.IsInstanceValid(_footL);
+        bool footRValid = _footR != null && GodotObject.IsInstanceValid(_footR);
+        bool useL = footLValid && IsGroundedL;
+        bool useR = footRValid && IsGroundedR;
+
+        if (!useL && !useR)
         {
+            // No base of support. Reported as 0.0 for continuity with existing telemetry columns,
+            // but IsIcpValid is what callers must branch on - see that property.
             IcpEscapeDistance = 0.0f;
+            IsIcpValid = false;
             return;
         }
 
         // Ground-relative CoM height, matching DynamicSteppingModule's ICP computation exactly
         // (previously this used absolute pelvis height, a latent inconsistency between the two).
-        float groundY = (GroundPointL.Y + GroundPointR.Y) * 0.5f;
+        // Averaged only over grounded feet for the same reason as the support centre: a raised
+        // foot's probe reports the floor beneath wherever it currently hangs.
+        float groundY = useL && useR ? (GroundPointL.Y + GroundPointR.Y) * 0.5f
+                      : useL ? GroundPointL.Y
+                      : GroundPointR.Y;
         Vector3 icp = BiomechanicalKinematics.ComputeInstantaneousCapturePoint(CenterOfMass, _pelvis.LinearVelocity, CenterOfMass.Y - groundY);
-        Vector3 supportCenter = (_footL.GlobalPosition + _footR.GlobalPosition) * 0.5f;
+        Vector3 supportCenter = useL && useR ? (_footL!.GlobalPosition + _footR!.GlobalPosition) * 0.5f
+                              : useL ? _footL!.GlobalPosition
+                              : _footR!.GlobalPosition;
 
         // Yaw-level frame: flatten pelvis axes onto the ground plane
         Basis levelBasis = BiomechanicalKinematics.ComputeLevelBasis(_pelvis.GlobalTransform.Basis);
         Vector3 localOffset = levelBasis.Inverse() * (icp - supportCenter);
         IcpEscapeDistance = new Vector2(localOffset.X, localOffset.Z).Length();
+        IsIcpValid = true;
     }
 
     private void ClassifyOrientation()

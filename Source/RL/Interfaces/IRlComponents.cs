@@ -101,14 +101,23 @@ public interface IRlRewardFunction
     float Evaluate(in RlContext context);
 
     /// <summary>
-    /// One-off reward applied when the episode ends, given the termination reason.
+    /// One-off reward applied when the episode ends, given the termination reason and whether the
+    /// task's success criterion was met.
     ///
     /// Separate from <see cref="Evaluate"/> because a per-tick reward cannot see WHY an episode
     /// stopped, and "reached the goal" versus "ran out of time" must be paid differently. Without
     /// this, ending early on success silently forfeits the remaining per-tick reward, which pays
     /// the agent to avoid succeeding.
+    ///
+    /// <paramref name="succeeded"/> is passed IN ADDITION to the reason rather than being inferred
+    /// from it, because the two stopped being the same thing once success became non-absorbing.
+    /// A balance episode that survives its hit meets the criterion and then keeps running to the
+    /// time limit, so its reason is "TimeLimit" and any reward keyed on the reason string alone
+    /// pays nothing - which is exactly how StandingBonus went dark for 5.3M steps while
+    /// task_perturbation/success read 0.000. See
+    /// <see cref="IRlTerminationCondition.SucceededThisEpisode"/>.
     /// </summary>
-    float EvaluateTerminal(in RlContext context, string reason);
+    float EvaluateTerminal(in RlContext context, string reason, bool succeeded);
 
     /// <summary>Description including weights, for the run manifest. See IRlObservationBuilder.Describe.</summary>
     string Describe();
@@ -198,6 +207,22 @@ public interface IRlTerminationCondition
     void Reset();
 
     bool IsTerminal(in RlContext context, out string reason);
+
+    /// <summary>
+    /// Whether this episode met the task's success criterion, REGARDLESS of whether meeting it
+    /// ended the episode.
+    ///
+    /// Exists because "succeeded" and "terminated with reason X" are independent once success is
+    /// non-absorbing. The perturbation task deliberately runs its full window after the criterion
+    /// is met - a ball must be able to land afterwards - so it never terminates with reason
+    /// "Standing", and every consumer that inferred success from that string (the terminal bonus,
+    /// the per-task success metric, the curriculum's advance vote) silently read zero forever.
+    ///
+    /// Latched for the episode rather than sampled at the end: the criterion is a hold that a
+    /// later disturbance resets, so "was it true at the final tick" answers a different and much
+    /// less useful question than "was it ever achieved".
+    /// </summary>
+    bool SucceededThisEpisode { get; }
 
     /// <summary>Description including thresholds, for the run manifest. See IRlObservationBuilder.Describe.</summary>
     string Describe();

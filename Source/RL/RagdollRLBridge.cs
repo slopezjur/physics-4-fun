@@ -311,6 +311,16 @@ public partial class RagdollRLBridge : Node
     /// whole body. Seeding only the pelvis would leave the limbs behind and have the joints fight
     /// the discrepancy for the first few ticks, which reads as a shove rather than as walking onto
     /// the scene at speed.
+    ///
+    /// KEEP THIS AT OR BELOW WalkForwardReward.TargetSpeed. The scenes carried 0.8 for three runs
+    /// after TargetSpeed was cut 1.0 -> 0.4, so every episode launched the body at 1.2x to 2x the
+    /// speed it was paid for, into a speed factor that saturates at 0.4 - excess momentum earning
+    /// nothing and costing balance. walk_v3 shows the result over 19M steps: walk/fell pinned at
+    /// 1.000 for all 2326 logged points, walk/forward_speed 0.375 (BELOW the 0.48 m/s floor of the
+    /// launch, i.e. decelerating all episode), walk/distance 0.94 m of pure coast, and
+    /// standing/grounded DECLINING 0.818 -> 0.769 as the gait became more ballistic rather than
+    /// less. Posture was never the problem - standing/upright held 0.999 throughout - the body
+    /// simply ran out of runway 2.2 s in, every single time.
     /// </summary>
     [Export] public float InitialForwardSpeed { get; set; } = 0.0f;
 
@@ -430,6 +440,16 @@ public partial class RagdollRLBridge : Node
 
     private bool _done;
     private string _doneReason = "None";
+
+    /// <summary>
+    /// Whether the episode that just ended met its success criterion, latched at termination.
+    ///
+    /// Distinct from _doneReason because the two diverge on every non-absorbing task: a balance
+    /// episode that survives its hit succeeds AND ends as "TimeLimit". See
+    /// IRlTerminationCondition.SucceededThisEpisode.
+    /// </summary>
+    private bool _episodeSucceeded;
+
     private bool _resetPending;
 
     /// <summary>Which pose the current episode began from - reported so runs stay interpretable.</summary>
@@ -708,9 +728,14 @@ public partial class RagdollRLBridge : Node
             _done = true;
             _doneReason = reason;
 
+            // Captured here rather than read back later, mirroring _doneReason: the termination's
+            // per-episode state is cleared by _termination.Reset() in ResetEpisode, and both the
+            // info dict and the curriculum vote are consumed after that point.
+            _episodeSucceeded = _termination.SucceededThisEpisode;
+
             // Paid once, here, rather than per tick - UpdateDone returns early while _done is
             // already set, so this cannot double-pay within an episode.
-            float terminalReward = _reward.EvaluateTerminal(context, reason);
+            float terminalReward = _reward.EvaluateTerminal(context, reason, _episodeSucceeded);
             _accumulatedReward += terminalReward;
             _episodeRewardTotal += terminalReward;
         }
@@ -837,6 +862,12 @@ public partial class RagdollRLBridge : Node
 
             info["rew_total"] = _episodeRewardTotal;
             info["episode_end_reason"] = _doneReason;
+
+            // Success as its own channel rather than something the trainer re-derives from the end
+            // reason. That derivation is what broke: train.py counted reason == "Standing", a string
+            // the perturbation task never emits, so every per-task and per-pose success rate read
+            // 0.000 across whole runs regardless of what the policy actually did.
+            info["episode_success"] = _episodeSucceeded ? 1.0f : 0.0f;
             // Which task this episode was. The whole point of mixing is that no task degrades while
             // another trains, and that is only checkable if success is reported PER TASK - an
             // aggregate rate cannot distinguish "all three improving" from "balance improving while
@@ -1135,7 +1166,10 @@ public partial class RagdollRLBridge : Node
             // itself scored 0.000.
             if (_curriculum.IsFrontierPose(_startPoseT))
             {
-                CurriculumAdvance advance = _curriculum.RecordOutcome(_doneReason == "Standing");
+                // Votes on the success FLAG, not the end reason. Under the old string test the
+                // perturbation task could never cast a winning vote, so the floor sat frozen at
+                // 0.99 for the whole of v10 - a curriculum that cannot observe success cannot move.
+                CurriculumAdvance advance = _curriculum.RecordOutcome(_episodeSucceeded);
                 if (advance.Advanced)
                 {
                     // Printed even on headless instances, unlike the per-episode line: this is the
@@ -1198,6 +1232,7 @@ public partial class RagdollRLBridge : Node
         _episodeRewardTotal = 0.0f;
         _done = false;
         _doneReason = "None";
+        _episodeSucceeded = false;
         EpisodeElapsedSeconds = 0.0f;
         for (int i = 0; i < _pendingOffsets.Length; i++)
         {

@@ -62,7 +62,7 @@ SmallBallProbability = 1.0
 SmallBallMass = 3.0
 SmallBallRadius = 0.06
 SmallBallSpawnDistance = 2.0
-SmallBallSpeed = 8.0
+SmallBallSpeed = 6.0
 
 [node name="Sync" type="Node" parent="."]
 script = ExtResource("4_sync")

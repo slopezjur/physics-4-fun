@@ -39,8 +39,14 @@ public sealed class UprightTermination : IRlTerminationCondition, IRlTermination
     ///
     /// With this false the episode always runs its full window and the reward's per-tick upright
     /// term does the scoring, which is the honest expression of "stayed up through the hit".
-    /// StandingBonus is then never paid - EvaluateTerminal only pays on reason "Standing" - so the
-    /// return becomes upright + shaping - effort, bounded by UprightWeight * MaxEpisodeSeconds.
+    ///
+    /// It does NOT stop StandingBonus being paid. It used to: EvaluateTerminal keyed the bonus off
+    /// reason "Standing", which only this flag can produce, so turning absorption off silently
+    /// removed the largest term in the reward and left the agent with no gradient at all toward the
+    /// criterion it was being scored on. Measured over 5.3M steps of perturbation_v10:
+    /// reward/terminal 0.000 at every one of 470 logged points, standing/all +0.009, and 82% of the
+    /// reward gain coming from the shaping potential while standing/tilt DEGRADED. The bonus is now
+    /// keyed off <see cref="SucceededThisEpisode"/>, which is independent of this flag.
     ///
     /// Settable per EPISODE rather than fixed per scene, because mixed-task training varies it: a
     /// perturbation episode and a stand episode run in the same process minutes apart and need
@@ -153,10 +159,35 @@ public sealed class UprightTermination : IRlTerminationCondition, IRlTermination
 
     private float _standingHeldSeconds;
 
+    /// <summary>
+    /// Latched once <see cref="StandingHoldSeconds"/> of continuous standing is reached, whether or
+    /// not <see cref="EndEpisodeOnSuccess"/> lets that end the episode.
+    ///
+    /// This is the honest success signal for the balance task. Note the timing that makes it
+    /// meaningful there rather than trivially true: the hold is 1.5 s and the first ball lands at
+    /// 1.0 s, so the criterion CANNOT be satisfied before the impact. On a perturbation episode a
+    /// latched true therefore means "was knocked, recovered, and then stood stably for 1.5 s
+    /// continuous" - which is the behaviour the task exists to train.
+    /// </summary>
+    private bool _standingAchieved;
+
+    /// <inheritdoc />
+    public bool SucceededThisEpisode => _standingAchieved;
+
+    /// <summary>
+    /// Set once the body leaves the standing envelope on tilt or ICP, after the settle grace.
+    ///
+    /// "Got knocked out of shape at some point", as distinct from "ended up on the floor". It is
+    /// the missing half of the recovery question: v11 could report that 58.6% of episodes held the
+    /// criterion, but not whether those episodes were ever actually troubled.
+    /// </summary>
+    private bool _wasDisturbed;
+
     /// <summary>Ticks this episode on which each success sub-condition held, plus the tick count.</summary>
     private readonly Dictionary<string, int> _conditionTicks = new()
     {
         ["grounded"] = 0,
+        ["both_grounded"] = 0,
         ["head"] = 0,
         ["tilt"] = 0,
         ["speed"] = 0,
@@ -178,6 +209,14 @@ public sealed class UprightTermination : IRlTerminationCondition, IRlTermination
             {
                 _conditionRates[entry.Key] = entry.Value / denominator;
             }
+
+            // Per-episode FLAGS, not tick rates - deliberately not divided by the tick count. They
+            // ride this dictionary because the bridge already forwards every entry as stand_<key>
+            // and the trainer averages those across the rollout's episodes, which turns a 0/1 flag
+            // into exactly the rate wanted: "what fraction of episodes were disturbed / recovered".
+            // Adding a parallel channel for two booleans would duplicate that plumbing for nothing.
+            _conditionRates["disturbed"] = _wasDisturbed ? 1.0f : 0.0f;
+            _conditionRates["recovered"] = _wasDisturbed && _standingAchieved ? 1.0f : 0.0f;
             return _conditionRates;
         }
     }
@@ -185,7 +224,7 @@ public sealed class UprightTermination : IRlTerminationCondition, IRlTermination
     public string Describe() =>
         $"UprightTermination(standHead={StandingHeadHeight}m, standTilt={StandingTiltDeg}deg, "
         + $"standSpeed={StandingMaxSpeed}m/s, standIcpEscape={StandingMaxIcpEscape}m, "
-        + $"bothFeetGrounded, hold={StandingHoldSeconds}s, endOnSuccess={EndEpisodeOnSuccess}, "
+        + $"eitherFootGrounded, hold={StandingHoldSeconds}s, endOnSuccess={EndEpisodeOnSuccess}, "
         + $"endOnFall={EndEpisodeOnFall}, fallenHead={FallenHeadHeight}m, "
         + $"fallenStandingTilt={FallenStandingTiltDeg}deg, settle={SettleSeconds}s, "
         + $"fallenHeight={FallenPelvisHeight}m, fallenTilt={FallenTiltDeg}deg)";
@@ -193,8 +232,15 @@ public sealed class UprightTermination : IRlTerminationCondition, IRlTermination
     public void Reset()
     {
         _standingHeldSeconds = 0.0f;
+        _standingAchieved = false;
+        _wasDisturbed = false;
         _totalTicks = 0;
-        foreach (string key in new[] { "grounded", "head", "tilt", "speed", "icp", "all" })
+
+        // Iterates the dictionary's own keys rather than a hand-written list, which is what let
+        // "both_grounded" be added above without a second edit here - and what stops the next
+        // addition from silently carrying counts across episodes. Keys are buffered because the
+        // indexer assignment mutates the collection being enumerated.
+        foreach (string key in new List<string>(_conditionTicks.Keys))
         {
             _conditionTicks[key] = 0;
         }
@@ -208,10 +254,18 @@ public sealed class UprightTermination : IRlTerminationCondition, IRlTermination
         if (IsStanding(context))
         {
             _standingHeldSeconds += context.Delta;
-            if (EndEpisodeOnSuccess && _standingHeldSeconds >= StandingHoldSeconds)
+            if (_standingHeldSeconds >= StandingHoldSeconds)
             {
-                reason = "Standing";
-                return true;
+                // Latched BEFORE the absorption check, so the criterion is recorded identically
+                // whether or not it also ends the episode. Reversing these two - which is what the
+                // code did while the flag lived inside the EndEpisodeOnSuccess branch - makes
+                // success unobservable on exactly the task that needs it measured.
+                _standingAchieved = true;
+                if (EndEpisodeOnSuccess)
+                {
+                    reason = "Standing";
+                    return true;
+                }
             }
         }
         else
@@ -267,20 +321,34 @@ public sealed class UprightTermination : IRlTerminationCondition, IRlTermination
         }
 
         // Every sub-condition is evaluated and counted, rather than short-circuited, so the rates
-        // reported through IRlTerminationDiagnostics say WHICH check is blocking success. Ground
-        // contact is still required for the ICP test to mean anything: IcpEscapeDistance is 0.0
-        // both when the capture point sits exactly over the support centre and when it cannot be
-        // computed at all (UpdateIcpEscapeDistance bails to 0 without valid feet). Those two cases
-        // are indistinguishable downstream, so an airborne body would otherwise read as perfectly
-        // balanced and collect the standing bonus.
-        bool grounded = context.Balance.IsGroundedL && context.Balance.IsGroundedR;
+        // reported through IRlTerminationDiagnostics say WHICH check is blocking success.
+        //
+        // ONE foot is enough, matching WalkTermination for the reason given there: requiring both
+        // reports single support as failure, and single support is half of every stride - and all
+        // of every protective step. Demanding both feet made a step break the criterion and reset
+        // the hold timer, so the only reachable success was standing rigid through the impact.
+        // Measured consequence over v10+v11: standing/grounded 0.966 and DECLINING, a policy
+        // optimising toward never moving its feet.
+        //
+        // The airborne exploit that the both-feet rule used to guard against is now closed at the
+        // source instead. IcpEscapeDistance reads 0.0 both for "perfectly balanced" and for "no
+        // base of support"; BalanceController.IsIcpValid separates them, so the ICP test can be
+        // trusted during single support rather than disabled by it.
+        bool bothGrounded = context.Balance.IsGroundedL && context.Balance.IsGroundedR;
+        bool grounded = context.Balance.IsGroundedL || context.Balance.IsGroundedR;
         bool headOk = head.GlobalPosition.Y >= StandingHeadHeight;
         bool tiltOk = context.Balance.CurrentTiltAngleDeg <= StandingTiltDeg;
         bool speedOk = context.Balance.CenterOfMassVelocity.Length() <= StandingMaxSpeed;
-        bool icpOk = grounded && context.Balance.IcpEscapeDistance <= StandingMaxIcpEscape;
+        bool icpOk = context.Balance.IsIcpValid
+                     && context.Balance.IcpEscapeDistance <= StandingMaxIcpEscape;
 
         _totalTicks++;
         if (grounded) { _conditionTicks["grounded"]++; }
+        // Reported alongside, not instead: every run before this one measured "grounded" as BOTH
+        // feet, and without this column the 0.96-0.97 history becomes silently incomparable to the
+        // near-1.0 the relaxed test will produce. It is also the direct read on whether the agent
+        // has started stepping at all.
+        if (bothGrounded) { _conditionTicks["both_grounded"]++; }
         if (headOk) { _conditionTicks["head"]++; }
         if (tiltOk) { _conditionTicks["tilt"]++; }
         if (speedOk) { _conditionTicks["speed"]++; }
@@ -288,6 +356,16 @@ public sealed class UprightTermination : IRlTerminationCondition, IRlTermination
 
         bool standing = grounded && headOk && tiltOk && speedOk && icpOk;
         if (standing) { _conditionTicks["all"]++; }
+
+        // Disturbance latch: the body left the standing envelope on an axis a shove acts through,
+        // after the reset transient has settled. This is what separates "recovered" from "was
+        // never troubled" - without it, success and survival are the same number, which is exactly
+        // what v11 measured (conditional success given survival = 1.03 across every sextile).
+        if (context.EpisodeElapsedSeconds >= SettleSeconds && (!tiltOk || !icpOk))
+        {
+            _wasDisturbed = true;
+        }
+
         return standing;
     }
 }
