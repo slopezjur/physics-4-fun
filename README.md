@@ -40,6 +40,7 @@ Pure RL over the same rig: a 106-dim observation, 36 continuous joint targets, P
 
 * **[docs/RL-TRAINING.md](docs/RL-TRAINING.md)** — how to run it: setup, the PowerShell scripts, what every TensorBoard metric means and how to read it.
 * **[docs/RL-DESIGN-NOTES.md](docs/RL-DESIGN-NOTES.md)** — why it is built this way: measured findings, the reward and termination design, and the framework-level bugs found and worked around.
+* **[docs/RL-SESSION-INVARIANTS.md](docs/RL-SESSION-INVARIANTS.md)** — what makes a training session valid: the pre-flight checks, the mistakes that invalidate a run outright, and the physics sanity table to read off a 10 s arena dump. Read before starting a long run.
 
 Both are written up honestly, including the things that did not work and the measurements that proved it.
 

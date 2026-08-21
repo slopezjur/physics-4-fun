@@ -1033,6 +1033,11 @@ public partial class RagdollRLBridge : Node
         if (_termination is UprightTermination upright)
         {
             upright.EndEpisodeOnSuccess = EndEpisodeOnStandingSuccess && !perturbation;
+
+            // Failure terminates whenever the episode began upright, independently of whether
+            // success does. A prone get-up start is below the fall thresholds by definition, so it
+            // must not arm this or every get-up episode would end on its first tick.
+            upright.EndEpisodeOnFall = _startedStanding;
         }
 
         // Touched ONLY when mixing is on. Otherwise the scene owns its own gun, and writing to it

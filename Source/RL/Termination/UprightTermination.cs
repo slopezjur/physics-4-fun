@@ -48,6 +48,17 @@ public sealed class UprightTermination : IRlTerminationCondition, IRlTermination
     /// </summary>
     public bool EndEpisodeOnSuccess { get; set; } = true;
 
+    /// <summary>
+    /// Whether a fall ends the episode. Set per-episode by the bridge to whether this episode
+    /// started standing, because the same component also serves the prone get-up task.
+    ///
+    /// Separate from <see cref="EndEpisodeOnSuccess"/> on purpose: the perturbation task turns
+    /// success OFF - a hit must be able to arrive after the success criterion is met - while
+    /// needing failure very much ON. Conflating the two is what left every perturbation episode
+    /// running its full window face-down on the floor.
+    /// </summary>
+    public bool EndEpisodeOnFall { get; set; }
+
     /// <param name="endEpisodeOnSuccess">
     /// False for perturbation/balance training. See <see cref="EndEpisodeOnSuccess"/>.
     /// </param>
@@ -104,6 +115,42 @@ public sealed class UprightTermination : IRlTerminationCondition, IRlTermination
     /// <summary>Pelvis tilt (deg) beyond which the body is inverted.</summary>
     private const float FallenTiltDeg = 170.0f;
 
+    /// <summary>
+    /// Head height (m) below which an episode that STARTED STANDING counts as fallen.
+    ///
+    /// The inversion test above requires the pelvis under 0.12 m AND tilt past 170 deg - upside
+    /// down with its hips on the floor - and a normal topple ends at roughly 0.25 m and 90 deg, so
+    /// it never fired. Every standing episode therefore ran the full window: measured ep_len_mean
+    /// sat at 75.6 steps against a 75.6-step cap, dead flat, with the back half of each failure
+    /// spent lying on the ground producing samples that teach nothing.
+    ///
+    /// 1.00 m against a standing head height near 1.40 m, matching WalkTermination for the same
+    /// reason it chose that value: far enough below a deep crouch that a legitimate low posture is
+    /// not a failure, high enough that the body is not paid for the second half of its own fall.
+    /// </summary>
+    private const float FallenHeadHeight = 1.00f;
+
+    /// <summary>
+    /// Torso tilt (deg) beyond which a standing-start episode counts as fallen, independent of
+    /// height - a body pitched past this is not coming back on this rig.
+    ///
+    /// 60 rather than WalkTermination's 50, because this task is specifically about surviving an
+    /// impact: a ball can put the torso past 45 deg and still be caught. It leaves a 30 deg band
+    /// between StandingTiltDeg and here in which the episode is neither succeeding nor failed,
+    /// which is exactly the region a recovery has to pass through.
+    /// </summary>
+    private const float FallenStandingTiltDeg = 60.0f;
+
+    /// <summary>
+    /// Grace period (s) at episode start during which a fall cannot be declared.
+    ///
+    /// The reset teleports every bone into the start pose with zero velocity and the body needs a
+    /// few ticks to settle onto its feet. Without this a transient on tick one ends the episode
+    /// before the policy has acted at all, which shows up as a mass of near-zero-length episodes
+    /// and makes every per-episode average meaningless.
+    /// </summary>
+    private const float SettleSeconds = 0.25f;
+
     private float _standingHeldSeconds;
 
     /// <summary>Ticks this episode on which each success sub-condition held, plus the tick count.</summary>
@@ -139,6 +186,8 @@ public sealed class UprightTermination : IRlTerminationCondition, IRlTermination
         $"UprightTermination(standHead={StandingHeadHeight}m, standTilt={StandingTiltDeg}deg, "
         + $"standSpeed={StandingMaxSpeed}m/s, standIcpEscape={StandingMaxIcpEscape}m, "
         + $"bothFeetGrounded, hold={StandingHoldSeconds}s, endOnSuccess={EndEpisodeOnSuccess}, "
+        + $"endOnFall={EndEpisodeOnFall}, fallenHead={FallenHeadHeight}m, "
+        + $"fallenStandingTilt={FallenStandingTiltDeg}deg, settle={SettleSeconds}s, "
         + $"fallenHeight={FallenPelvisHeight}m, fallenTilt={FallenTiltDeg}deg)";
 
     public void Reset()
@@ -178,6 +227,24 @@ public sealed class UprightTermination : IRlTerminationCondition, IRlTermination
         {
             reason = "Inverted";
             return true;
+        }
+
+        // Falling, for an episode that started upright. Gated on EndEpisodeOnFall rather than
+        // applied unconditionally because the get-up task starts prone: it begins below both
+        // thresholds by design, and an ungated check would end every get-up episode on tick one.
+        if (EndEpisodeOnFall && context.EpisodeElapsedSeconds >= SettleSeconds)
+        {
+            ActiveBone? fallenHead = context.Ragdoll.Head;
+            bool headDown = fallenHead != null
+                            && GodotObject.IsInstanceValid(fallenHead)
+                            && fallenHead.GlobalPosition.Y < FallenHeadHeight;
+            bool pitchedOver = context.Balance.CurrentTiltAngleDeg > FallenStandingTiltDeg;
+
+            if (headDown || pitchedOver)
+            {
+                reason = "Fallen";
+                return true;
+            }
         }
 
         if (context.EpisodeElapsedSeconds >= context.MaxEpisodeSeconds)
