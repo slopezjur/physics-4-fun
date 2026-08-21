@@ -42,7 +42,9 @@ Pure RL over the same rig: a 106-dim observation, 36 continuous joint targets, P
 * **[docs/RL-DESIGN-NOTES.md](docs/RL-DESIGN-NOTES.md)** — why it is built this way: measured findings, the reward and termination design, and the framework-level bugs found and worked around.
 * **[docs/RL-SESSION-INVARIANTS.md](docs/RL-SESSION-INVARIANTS.md)** — what makes a training session valid: the pre-flight checks, the mistakes that invalidate a run outright, and the physics sanity table to read off a 10 s arena dump. Read before starting a long run.
 
-Both are written up honestly, including the things that did not work and the measurements that proved it.
+* **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — the layout of both control tracks, the strategy contracts each is built on, and a recorded list of the known architectural debt rather than a claim that there is none.
+
+All of them are written up honestly, including the things that did not work and the measurements that proved it.
 
 ## Requirements
 

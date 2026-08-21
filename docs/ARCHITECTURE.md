@@ -29,6 +29,8 @@ Physics4Fun.Ragdoll/
 │   ├── StandingBalanceTrajectory.cs     # Default grounded standing posture
 │   ├── SupineRecoveryTrajectory.cs      # 4-phase get-up trajectory from back
 │   ├── ProneRecoveryTrajectory.cs       # 4-phase get-up trajectory from front
+│   ├── PushUpDrillTrajectory.cs        # Scripted push-up drill for actuator validation
+│   ├── IPhasedRecoveryTrajectory.cs    # Contract for trajectories driven by GetUpPhaseController
 │   └── ReactiveMotionTrajectories.cs   # Impact stumbling and flailing trajectories
 ├── Diagnostics/
 │   └── RagdollTelemetryRecorder.cs     # Time-series telemetry logger & CSV export
@@ -51,6 +53,71 @@ Physics4Fun.Ragdoll/
 * Telemetry consumers (`RagdollTelemetryRecorder`, HUDs) bind to `IBalanceTelemetryProvider`, isolating diagnostics and UI from mutable physics controllers.
 * High-level controllers depend on abstractions (`IBiomechanicalReflex`, `IBalanceStrategy`, `IMotionTrajectory`, `IBalanceTelemetryProvider`) rather than concrete monolithic physics blocks.
 * `BalanceController` composes the two pipelines and owns bone wiring, telemetry, and per-tick sensing; the state machine (`RagdollStateMachine`), ground sensing (`GroundContactModule`), and shared kinematics math (`BiomechanicalKinematics`) are each extracted into their own single-purpose classes rather than living inline in the coordinator.
+
+---
+
+## 1b. Reinforcement learning layer
+
+A second, independent control track. It shares the body (`HumanoidRagdoll`, `ActiveBone`) and
+nothing else: `HumanoidRagdoll.UpdateBoneTargetRotations` returns early in the RL state, so a policy
+owns the pose completely rather than nudging a procedural one.
+
+```
+Physics4Fun.RL/
+├── Interfaces/
+│   └── IRlComponents.cs                # Every contract below, plus the optional diagnostics pairs
+├── Actions/
+│   └── JointLimitedActionSpace.cs      # [-1,1] per axis mapped into that joint's measured limits
+├── Observations/
+│   └── BodyStateObservation.cs         # 106 floats: root-relative quaternions, CoM, ICP, contacts
+├── Rewards/
+│   ├── UprightProgressReward.cs        # Potential-based head height + upright + effort
+│   └── WalkForwardReward.cs            # Product-form velocity x uprightness (NOT additive)
+├── Termination/
+│   ├── UprightTermination.cs           # Held-standing success, fall failure, per-episode flags
+│   └── WalkTermination.cs              # Fall failure only - walking has no goal state
+├── Curriculum/
+│   └── ReverseStartPoseCurriculum.cs   # Start-pose floor that walks down as the policy clears it
+├── Perturbation/
+│   └── BallGun.cs                      # Analytic-impulse projectile (see RL-DESIGN-NOTES)
+├── PolicyAutoLoader.cs                 # Arena playback; resolves the newest policy for its brain
+└── RagdollRLBridge.cs                  # Godot/godot_rl_agents seam and episode lifecycle
+```
+
+### Design conventions
+
+* Five strategy contracts — `IRlActionSpace`, `IRlObservationBuilder`, `IRlRewardFunction`,
+  `IRlTerminationCondition`, `IRlStartPoseCurriculum` — mirror the procedural track's
+  `IBalanceStrategy` / `IBiomechanicalReflex` / `IMotionTrajectory`. A new task is new classes, not
+  edits to the bridge.
+* Diagnostics are **separate optional interfaces** (`IRlRewardDiagnostics`,
+  `IRlTerminationDiagnostics`, `IRlActionDiagnostics`, `IRlPerturbationDiagnostics`,
+  `IRlWalkDiagnostics`) so a component works without them. Each exists because a scalar alone could
+  not answer "why did it produce that", and every one was added after a specific measurement failed.
+* Every component implements `Describe()`, and the bridge writes those strings into the run
+  manifest. Provenance therefore cannot drift from the code that produced the run.
+* Scenes are grouped by **shared-weight compatibility**, not by conceptual function — see
+  `Scenes/RL/README.md`. Upright (stand, get-up, perturbation) and Locomotion (walk) are separate
+  brains because their objectives conflict numerically.
+
+---
+
+## 1c. Known architectural debt
+
+Recorded rather than silently carried. Ordered by how likely each is to cause a real defect.
+
+| # | Where | Issue | Why it matters |
+|---|---|---|---|
+| 1 | `RagdollTelemetryRecorder` | The CSV column list is written **twice** — once building the header, once building the row — with a hand-maintained `BoneColumnCount` that must match. | Fails **silently**: header/row drift misaligns every column after the mistake, and the file still parses. Adding columns already required editing three places in sync. A single column definition consumed by both would remove the failure mode. |
+| 2 | `HumanoidRagdoll` | Keyboard handling lives in `_UnhandledInput` *and* in `RagdollDebugInput`. | Two classes own ragdoll input, so which key does what is not answerable from one place. |
+| 3 | `HumanoidRagdoll` | ~7 responsibilities in 776 lines: bone registry, state transitions, pose authoring, actuator driving, support-load distribution, debug input, telemetry orchestration. | `UpdateSupportLoadDistribution` is a physics policy (`totalMass / plantedLimbs.Count`, which over-counts a support limb's own mass) embedded in the body class rather than behind a contract. |
+| 4 | `ActiveBone` | ~5 responsibilities in 776 lines: rigid body, SPD actuator, gravity/support feed-forward, force-velocity limit, joint-limit querying. | The actuator is ~250 lines and cannot be exercised without a scene tree. Extracting it would make the SPD and Hill maths testable in isolation — the same argument that moved the curriculum out of the bridge. |
+| 5 | `BalanceContext` | 27 members; every module receives the whole body. | ISP smell. Deliberately **not** fixed: per-module contexts would add real complexity for a struct that is cheap to pass, and no defect has been traced to it. |
+| 6 | `RagdollRLBridge` | Still ~7 responsibilities after the curriculum extraction; `GetStepInfo` is 130 lines. | Cohesive dictionary assembly, so splitting it adds indirection without clarity. The `TaskKind` switch is closed for extension — the right moment to add a registry is when a third brain appears, not before. |
+
+`ActiveBone.IsTargetWithinJointLimits` is also known-broken (Euler YXZ cannot represent the ±2.6 rad
+limits four axes on this rig have) and its own doc comment says so. It is diagnostic-only; the RL
+action path scales into the limits by construction and does not depend on it.
 
 ---
 
