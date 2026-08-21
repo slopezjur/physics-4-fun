@@ -1,4 +1,4 @@
-using Godot;
+﻿using Godot;
 
 namespace Physics4Fun.RL;
 
@@ -22,10 +22,32 @@ public partial class PolicyAutoLoader : Node3D
     /// <summary>Bridge to switch into continuous playback (no episode resets).</summary>
     [Export] public RagdollRLBridge? Bridge { get; set; }
 
-    /// <summary>Checked first; a policy promoted here wins over anything found in the run folders.</summary>
-    [Export] public string PromotedModelPath { get; set; } = "res://Models/policy.onnx";
+    /// <summary>
+    /// Optional hard pin. Empty by default, which is the normal case - an arena should follow its
+    /// own brain's latest training rather than a path someone has to remember to update.
+    ///
+    /// Set it only to freeze an arena on one specific checkpoint, for a comparison against a known
+    /// policy. A pinned path that exists beats BrainRunPrefixes.
+    /// </summary>
+    [Export] public string PromotedModelPath { get; set; } = string.Empty;
 
-    /// <summary>Scanned for the newest *.onnx when no promoted model exists.</summary>
+    /// <summary>
+    /// Run-directory name prefixes belonging to this arena's brain. The newest .onnx under any
+    /// matching directory is loaded.
+    ///
+    /// This exists because "newest .onnx anywhere" is actively wrong on this project. Runs for
+    /// different brains share one folder, and a night of walk training silently repointed the
+    /// perturbation arena at a walking policy - the dummy fell before the ball ever arrived and it
+    /// looked like a training regression rather than the wrong file. Pinning exact paths fixed that
+    /// and created a slower failure: the pins go stale, and the perturbation arena was still loading
+    /// a 61M-step policy from perturbation_v1_0 long after v7 existed.
+    ///
+    /// Filtering by prefix keeps the isolation without the staleness. Empty means "any run", which
+    /// restores the old unsafe behaviour and should not be used on a rig with more than one brain.
+    /// </summary>
+    [Export] public string[] BrainRunPrefixes { get; set; } = System.Array.Empty<string>();
+
+    /// <summary>Scanned for the newest matching *.onnx.</summary>
     [Export] public string RunsDirectory { get; set; } = "res://rl/runs";
 
     /// <summary>Sync.ControlModes.HUMAN - no policy, no server, no training.</summary>
@@ -122,10 +144,13 @@ public partial class PolicyAutoLoader : Node3D
         return $"{steps:N0} steps{note}";
     }
 
-    /// <summary>Promoted model if present, else the most recently modified .onnx under the runs directory.</summary>
+    /// <summary>
+    /// The pinned model if one is set and exists, else the most recently modified .onnx in a run
+    /// directory belonging to this arena's brain.
+    /// </summary>
     private string? ResolveNewestPolicy()
     {
-        if (Godot.FileAccess.FileExists(PromotedModelPath))
+        if (!string.IsNullOrEmpty(PromotedModelPath) && Godot.FileAccess.FileExists(PromotedModelPath))
         {
             return PromotedModelPath;
         }
@@ -141,6 +166,11 @@ public partial class PolicyAutoLoader : Node3D
 
         foreach (string runDir in runs.GetDirectories())
         {
+            if (!MatchesBrain(runDir))
+            {
+                continue;
+            }
+
             string path = $"{RunsDirectory}/{runDir}";
             using DirAccess? files = DirAccess.Open(path);
             if (files == null)
@@ -166,5 +196,30 @@ public partial class PolicyAutoLoader : Node3D
         }
 
         return newest;
+    }
+
+    /// <summary>
+    /// Whether a run directory belongs to this arena's brain.
+    ///
+    /// Prefix match on the directory name, which is exactly the experiment name plus SB3's numeric
+    /// suffix (perturbation_v7_0), so "perturbation" selects the whole lineage and nothing else.
+    /// </summary>
+    private bool MatchesBrain(string runDirectoryName)
+    {
+        if (BrainRunPrefixes == null || BrainRunPrefixes.Length == 0)
+        {
+            return true;
+        }
+
+        foreach (string prefix in BrainRunPrefixes)
+        {
+            if (!string.IsNullOrEmpty(prefix)
+                && runDirectoryName.StartsWith(prefix, System.StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

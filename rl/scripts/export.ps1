@@ -1,4 +1,4 @@
-# Rebuilds the standalone binary that training runs against.
+﻿# Rebuilds the standalone binary that training runs against.
 #
 # Training NEVER uses the open editor - it launches this exported build. So any C# or scene change
 # must be re-exported first, or you will silently train stale code.
@@ -16,8 +16,8 @@
 #
 # The replacement is a feature-tagged project setting. project.godot declares both:
 #
-#     run/main_scene="res://Scenes/RL/RagdollRLArena.tscn"
-#     run/main_scene.training="res://Scenes/RL/RagdollRLTraining.tscn"
+#     run/main_scene="res://Scenes/RL/Upright/RagdollPerturbationArena.tscn"
+#     run/main_scene.stand="res://Scenes/RL/Upright/RagdollStandTraining.tscn"
 #
 # and export_presets.cfg sets custom_features="training". Godot resolves "<setting>.<feature>"
 # against the active feature tags, so the editor boots the Arena and the exported build boots the
@@ -25,7 +25,8 @@
 . "$PSScriptRoot/config.ps1"
 
 Write-Host "Exporting '$ExportPreset' -> $BuildExe" -ForegroundColor Cyan
-Write-Host "  (main scene comes from run/main_scene.training via the 'training' feature tag)" -ForegroundColor DarkGray
+$FeatureTag = @{ "Windows Stand" = "stand"; "Windows GetUp" = "getup"; "Windows Upright" = "upright"; "Windows Perturbation" = "perturbation"; "Windows Walk" = "walk" }[$ExportPreset]
+Write-Host "  (main scene comes from run/main_scene.$FeatureTag via the '$FeatureTag' feature tag)" -ForegroundColor DarkGray
 
 & $GodotExe --headless --path $ProjectPath --export-release $ExportPreset $BuildExe
 if ($LASTEXITCODE -ne 0) {

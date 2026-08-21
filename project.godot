@@ -11,11 +11,14 @@ config_version=5
 [application]
 
 config/name="Physics4Fun"
-run/main_scene="res://Scenes/RL/RagdollPerturbationArena.tscn"
+run/main_scene="res://Scenes/RL/Upright/RagdollPerturbationArena.tscn"
 config/features=PackedStringArray("4.7", "C#", "Forward Plus")
 config/icon="res://icon.svg"
-run/main_scene.training="res://Scenes/RL/RagdollRLTraining.tscn"
-run/main_scene.perturbation="res://Scenes/RL/RagdollPerturbationTraining.tscn"
+run/main_scene.perturbation="res://Scenes/RL/Upright/RagdollPerturbationTraining.tscn"
+run/main_scene.walk="res://Scenes/RL/Locomotion/RagdollWalkTraining.tscn"
+run/main_scene.getup="res://Scenes/RL/Upright/RagdollGetUpTraining.tscn"
+run/main_scene.upright="res://Scenes/RL/Upright/RagdollUprightTraining.tscn"
+run/main_scene.stand="res://Scenes/RL/Upright/RagdollStandTraining.tscn"
 
 [display]
 

@@ -190,7 +190,7 @@ BoneName = "Spine"
 ParentBone = NodePath("../Pelvis")
 ProportionalGain = 600.0
 DerivativeGain = 18.0
-MaxTorque = 300.0
+MaxTorque = 350.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Spine"]
 shape = SubResource("Shape_Spine")
@@ -272,7 +272,7 @@ BoneName = "Head"
 ParentBone = NodePath("../Chest")
 ProportionalGain = 120.0
 DerivativeGain = 12.0
-MaxTorque = 250.0
+MaxTorque = 60.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Head"]
 shape = SubResource("Shape_Head")
@@ -325,7 +325,7 @@ BoneName = "UpperArm_L"
 ParentBone = NodePath("../Chest")
 ProportionalGain = 120.0
 DerivativeGain = 10.0
-  MaxTorque = 200.0
+  MaxTorque = 150.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="UpperArm_L"]
 shape = SubResource("Shape_UpperArm")
@@ -361,7 +361,7 @@ BoneName = "Forearm_L"
 ParentBone = NodePath("../UpperArm_L")
 ProportionalGain = 100.0
 DerivativeGain = 8.0
-  MaxTorque = 150.0
+  MaxTorque = 100.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Forearm_L"]
 shape = SubResource("Shape_Forearm")
@@ -402,7 +402,7 @@ BoneName = "UpperArm_R"
 ParentBone = NodePath("../Chest")
 ProportionalGain = 120.0
 DerivativeGain = 10.0
-  MaxTorque = 200.0
+  MaxTorque = 150.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="UpperArm_R"]
 shape = SubResource("Shape_UpperArm")
@@ -438,7 +438,7 @@ BoneName = "Forearm_R"
 ParentBone = NodePath("../UpperArm_R")
 ProportionalGain = 100.0
 DerivativeGain = 8.0
-  MaxTorque = 150.0
+  MaxTorque = 100.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Forearm_R"]
 shape = SubResource("Shape_Forearm")
@@ -480,7 +480,7 @@ BoneName = "Thigh_L"
 ParentBone = NodePath("../Pelvis")
 ProportionalGain = 1600.0
 DerivativeGain = 32.0
-MaxTorque = 1600.0
+MaxTorque = 400.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Thigh_L"]
 shape = SubResource("Shape_Thigh")
@@ -516,7 +516,7 @@ BoneName = "Shin_L"
 ParentBone = NodePath("../Thigh_L")
 ProportionalGain = 1800.0
 DerivativeGain = 36.0
-MaxTorque = 1800.0
+MaxTorque = 400.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Shin_L"]
 shape = SubResource("Shape_Shin")
@@ -558,7 +558,7 @@ BoneName = "Foot_L"
 ParentBone = NodePath("../Shin_L")
 ProportionalGain = 1200.0
 DerivativeGain = 6.0
-MaxTorque = 800.0
+MaxTorque = 250.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Foot_L"]
 shape = SubResource("Shape_Foot")
@@ -600,7 +600,7 @@ BoneName = "Thigh_R"
 ParentBone = NodePath("../Pelvis")
 ProportionalGain = 1600.0
 DerivativeGain = 32.0
-MaxTorque = 1600.0
+MaxTorque = 400.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Thigh_R"]
 shape = SubResource("Shape_Thigh")
@@ -636,7 +636,7 @@ BoneName = "Shin_R"
 ParentBone = NodePath("../Thigh_R")
 ProportionalGain = 1800.0
 DerivativeGain = 36.0
-MaxTorque = 1800.0
+MaxTorque = 400.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Shin_R"]
 shape = SubResource("Shape_Shin")
@@ -678,7 +678,7 @@ BoneName = "Foot_R"
 ParentBone = NodePath("../Shin_R")
 ProportionalGain = 1200.0
 DerivativeGain = 6.0
-MaxTorque = 800.0
+MaxTorque = 250.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Foot_R"]
 shape = SubResource("Shape_Foot")
@@ -744,7 +744,7 @@ BoneName = "Hand_L"
 ParentBone = NodePath("../Forearm_L")
 ProportionalGain = 60.0
 DerivativeGain = 6.0
-MaxTorque = 50.0
+MaxTorque = 25.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Hand_L"]
 shape = SubResource("Shape_Hand")
@@ -776,7 +776,7 @@ BoneName = "Hand_R"
 ParentBone = NodePath("../Forearm_R")
 ProportionalGain = 60.0
 DerivativeGain = 6.0
-MaxTorque = 50.0
+MaxTorque = 25.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Hand_R"]
 shape = SubResource("Shape_Hand")

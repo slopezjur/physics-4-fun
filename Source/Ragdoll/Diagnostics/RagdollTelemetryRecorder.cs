@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -38,10 +38,44 @@ public class RagdollTelemetryRecorder
     };
 
     /// <summary>Per-bone CSV columns emitted by <see cref="RecordFrame"/>, used for the absent-bone filler.</summary>
-    private const int BoneColumnCount = 15;
+    private const int BoneColumnCount = 18;
 
     /// <summary>Filler for a bone that is absent from the rig, keeping the row aligned to the header.</summary>
     private static readonly string EmptyBoneColumns = string.Concat(Enumerable.Repeat(",0", BoneColumnCount));
+
+    /// <summary>Gravity (m/s^2) used for the potential-energy column; matches ActiveBone.</summary>
+    private const float GravityForEnergy = 9.81f;
+
+    private int _ballCount;
+    private float _ballSpeed;
+    private string _ballImpactBone = "-";
+    private float _ballImpactImpulse;
+    private float _ballMassRatio;
+    private float _ballMassActual;
+
+    /// <summary>
+    /// Latest projectile state, pushed each physics tick by whatever perturbation source is armed.
+    ///
+    /// Pushed rather than pulled because this recorder lives on the ragdoll, and the ragdoll must
+    /// not acquire a dependency on the RL layer's ball gun to be able to describe itself.
+    ///
+    /// BallImpactImpulse is the momentum the ball MEASURABLY lost in a tick where it was touching a
+    /// bone (mass * |dv|), which by Newton's third law is what the bone received. It exists because
+    /// the launch momentum only says what the ball should deliver; five rounds of chasing a
+    /// "shotgun" impact went by without anyone able to state what it actually delivered.
+    /// BallMassRatio is the struck bone's mass over the ball's - the quantity a sequential-impulse
+    /// solver degrades on, and the one that got worse every time the ball was made lighter.
+    /// </summary>
+    public void ReportProjectile(int count, float speed, string impactBone, float impulse,
+                                float massRatio, float massActual)
+    {
+        _ballMassActual = massActual;
+        _ballCount = count;
+        _ballSpeed = speed;
+        _ballImpactBone = string.IsNullOrEmpty(impactBone) ? "-" : impactBone;
+        _ballImpactImpulse = impulse;
+        _ballMassRatio = massRatio;
+    }
 
     /// <summary>Angular speed (rad/s) below which a direction reversal is treated as noise, not chatter.</summary>
     private const float ChatterAngVelFloor = 0.05f;
@@ -114,9 +148,30 @@ public class RagdollTelemetryRecorder
         // against how close it came instead of being inferred.
         sb.Append("GroundDatumY,ChestClearance,PelvisClearance,LeadFootComDist,HandsPlanted,LeadFootPlanted,TrailFootPlanted,LeadSide,PhaseElapsed,PhaseTimedOut,JointLimitViolations");
 
+        // Whole-body energy bookkeeping. A torque ceiling bounds FORCE, not POWER: an actuator held
+        // at its ceiling while the joint spins at Jolt's 47.12 rad/s angular-velocity clamp delivers
+        // tau*omega watts, and nothing in this rig limits that product. Without these columns the
+        // only evidence of energy injection was the body ending up faster than anything that hit it,
+        // which is a conclusion three steps removed from a measurement. SystemEnergy should fall
+        // during contact and rise only by roughly ActuatorPowerW * Delta; any tick where it gains
+        // far more than the actuators could have supplied is the solver manufacturing energy.
+        // ActuatorPowerInW sums only joints doing POSITIVE work - the actuator driving the joint,
+        // which is the only term that can add mechanical energy. The previous single column summed
+        // |tau.omega| and so counted braking as power too, which made a limit that only bounds
+        // driving look like it had failed. Absorption is reported separately rather than discarded,
+        // because a body that stops absorbing is also a body about to fall over.
+        sb.Append(",SystemKE,SystemPE,SystemEnergy,ActuatorPowerInW,ActuatorPowerOutW,PeakJointPowerInW,PeakJointPowerBone");
+        sb.Append(",BallCount,BallSpeed,BallImpactBone,BallImpactImpulse,BallMassRatio,BallMassActual");
+
         foreach (string name in BoneNames)
         {
             sb.Append($",{name}_PosY,{name}_Strength,{name}_TorqueMag,{name}_TorqueX,{name}_TorqueY,{name}_TorqueZ,{name}_EulerX,{name}_EulerY,{name}_EulerZ,{name}_AngVelX,{name}_AngVelY,{name}_AngVelZ,{name}_TrackingErrorDeg,{name}_PdTorqueMag,{name}_LoadTorqueMag");
+
+            // LinVelMag: per-bone linear speed was absent entirely, so per-bone kinetic energy could
+            // not be computed and only the CoM aggregate was visible - which cancels exactly the
+            // internal flailing that matters here. PowerW: this joint's tau*omega, the term the
+            // torque ceiling does not bound.
+            sb.Append($",{name}_LinVelMag,{name}_PowerW,{name}_FvScale");
         }
 
         _csvRows.Add(sb.ToString());
@@ -250,6 +305,60 @@ public class RagdollTelemetryRecorder
         sb.Append($"{(criteria.HandsPlanted ? 1 : 0)},{(criteria.LeadFootPlanted ? 1 : 0)},{(criteria.TrailFootPlanted ? 1 : 0)},{leadSide},");
         sb.Append($"{getUpPhases.PhaseElapsed.ToString("F3", _inv)},{(getUpPhases.LastAdvanceWasTimeout ? 1 : 0)},{jointLimitViolations}");
 
+        // 5c. Energy bookkeeping - see the header comment for why torque ceilings do not bound this.
+        // Rotational energy uses CapturedInertia (a scalar about the bone's stiffest axis) rather
+        // than the full tensor, so it is an estimate; it is accurate enough to separate a joule from
+        // a hundred joules, which is the question being asked.
+        float systemKe = 0.0f;
+        float systemPe = 0.0f;
+        float actuatorPowerIn = 0.0f;
+        float actuatorPowerOut = 0.0f;
+        float peakJointPowerIn = 0.0f;
+        string peakJointPowerBone = "-";
+        foreach (var energyBone in bones)
+        {
+            if (!GodotObject.IsInstanceValid(energyBone))
+            {
+                continue;
+            }
+
+            systemKe += (0.5f * energyBone.Mass * energyBone.LinearVelocity.LengthSquared())
+                        + (0.5f * energyBone.CapturedInertia * energyBone.AngularVelocity.LengthSquared());
+            systemPe += energyBone.Mass * GravityForEnergy * energyBone.GlobalPosition.Y;
+
+            // Power is measured against the joint's RELATIVE angular velocity, because that is the
+            // rate the actuator's own degree of freedom is moving. Using absolute angular velocity
+            // would credit a whole limb carried along by its parent as work this joint performed.
+            Vector3 relativeAngVel = energyBone.ParentBone != null
+                                     && GodotObject.IsInstanceValid(energyBone.ParentBone)
+                ? energyBone.AngularVelocity - energyBone.ParentBone.AngularVelocity
+                : energyBone.AngularVelocity;
+
+            // Signed: positive means the actuator is driving the joint and adding energy, negative
+            // means it is braking and removing it. Only the first can explain energy appearing.
+            float jointPower = energyBone.LastAppliedTorque.Dot(relativeAngVel);
+            if (jointPower > 0.0f)
+            {
+                actuatorPowerIn += jointPower;
+                if (jointPower > peakJointPowerIn)
+                {
+                    peakJointPowerIn = jointPower;
+                    peakJointPowerBone = energyBone.BoneName;
+                }
+            }
+            else
+            {
+                actuatorPowerOut -= jointPower;
+            }
+        }
+
+        sb.Append($",{systemKe.ToString("F1", _inv)},{systemPe.ToString("F1", _inv)},{(systemKe + systemPe).ToString("F1", _inv)}");
+        sb.Append($",{actuatorPowerIn.ToString("F1", _inv)},{actuatorPowerOut.ToString("F1", _inv)}");
+        sb.Append($",{peakJointPowerIn.ToString("F1", _inv)},{peakJointPowerBone}");
+        sb.Append($",{_ballCount},{_ballSpeed.ToString("F2", _inv)},{_ballImpactBone}");
+        sb.Append($",{_ballImpactImpulse.ToString("F4", _inv)},{_ballMassRatio.ToString("F1", _inv)}");
+        sb.Append($",{_ballMassActual.ToString("F4", _inv)}");
+
         // 6. Per-bone columns
         foreach (string name in BoneNames)
         {
@@ -269,6 +378,13 @@ public class RagdollTelemetryRecorder
                 sb.Append($",{angVel.X.ToString("F2", _inv)},{angVel.Y.ToString("F2", _inv)},{angVel.Z.ToString("F2", _inv)}");
                 sb.Append($",{b.LastTrackingErrorDeg.ToString("F2", _inv)}");
                 sb.Append($",{b.LastPdTorque.Length().ToString("F2", _inv)},{b.LastLoadCompensationTorque.Length().ToString("F2", _inv)}");
+
+                Vector3 boneRelativeAngVel = b.ParentBone != null && GodotObject.IsInstanceValid(b.ParentBone)
+                    ? angVel - b.ParentBone.AngularVelocity
+                    : angVel;
+                sb.Append($",{b.LinearVelocity.Length().ToString("F2", _inv)}");
+                sb.Append($",{torque.Dot(boneRelativeAngVel).ToString("F1", _inv)}");
+                sb.Append($",{b.LastForceVelocityScale.ToString("F3", _inv)}");
             }
             else
             {

@@ -148,6 +148,36 @@ def _embed_onnx_weights(path: str) -> None:
         os.remove(path + ".data")
 
 
+def _last_curriculum_floor(checkpoint_path: str):
+    """Deepest curriculum floor the run behind `checkpoint_path` ever reached, or None.
+
+    The floor lives in the Godot process, the policy lives in the checkpoint, and only the second
+    of those survives a resume. Without restoring it, every session re-descended from the scene
+    constant and threw away the previous session's progress - getup_v4_2 reached 0.908 and went
+    back to 0.990, which is why start_prone/success sat at 0.000 for 46.7M steps.
+
+    Read from the run's own event file rather than tracked separately, so there is one source of
+    truth and it cannot drift from what TensorBoard shows.
+
+    MINIMUM, not last: RecordCurriculumOutcome only ever lowers the floor within a session, so the
+    smallest value is the real high-water mark. The last value is frequently a fresh reset - a
+    restarted session logs CurriculumPoseT before it has advanced at all.
+    """
+    run_dir = os.path.dirname(os.path.abspath(checkpoint_path))
+    try:
+        from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+
+        accumulator = EventAccumulator(run_dir, size_guidance={"scalars": 0})
+        accumulator.Reload()
+        if "standing/curriculum_t" not in accumulator.Tags()["scalars"]:
+            return None
+        values = [e.value for e in accumulator.Scalars("standing/curriculum_t")]
+        return min(values) if values else None
+    except Exception as exc:  # noqa: BLE001 - never let provenance reading kill a run
+        print(f"warning: could not read curriculum floor from {run_dir}: {exc}")
+        return None
+
+
 class RewardDecompositionCallback(BaseCallback):
     """Logs each reward term separately, so a flat total curve is diagnosable.
 
@@ -186,9 +216,12 @@ class RewardDecompositionCallback(BaseCallback):
         self._terms: dict[str, list[float]] = {}
         self._stand: dict[str, list[float]] = {}
         self._balls: dict[str, list[float]] = {}
+        self._walk: dict[str, list[float]] = {}
         self._reasons: dict[str, int] = {}
         # start pose -> {"episodes": n, "successes": n}
         self._by_start: dict[str, dict[str, int]] = {}
+        # task name -> {"episodes": n, "successes": n}
+        self._by_task: dict[str, dict[str, int]] = {}
 
     def _on_step(self) -> bool:
         for info in self.locals.get("infos", []):
@@ -210,9 +243,24 @@ class RewardDecompositionCallback(BaseCallback):
                 # every balance metric and is invisible in all of them.
                 elif key.startswith("ball_"):
                     self._balls.setdefault(key[5:], []).append(float(value))
+                # Walking measurements, in metres and m/s. Own namespace because they carry UNITS
+                # rather than being reward terms or [0,1] rates - "walked 0.4 m" and "walked 4 m"
+                # is the whole question for that task, and neither of the other two channels can
+                # express it without lying about what its numbers mean.
+                elif key.startswith("walk_"):
+                    self._walk.setdefault(key[5:], []).append(float(value))
+            task = info.get("episode_task")
             reason = info.get("episode_end_reason")
             if reason is not None:
                 self._reasons[str(reason)] = self._reasons.get(str(reason), 0) + 1
+
+                # Per-task success, so mixed training is falsifiable. An aggregate rate hides the
+                # exact failure mixing exists to prevent - one task improving while another rots.
+                if task is not None:
+                    bucket = self._by_task.setdefault(str(task), {"episodes": 0, "successes": 0})
+                    bucket["episodes"] += 1
+                    if str(reason) == "Standing":
+                        bucket["successes"] += 1
 
                 # Bucket on the CONTINUOUS start pose, not on started_standing.
                 #
@@ -262,10 +310,21 @@ class RewardDecompositionCallback(BaseCallback):
         for term, values in self._balls.items():
             if values:
                 self.logger.record(f"ball/{term}", sum(values) / len(values))
+
+        for term, values in self._walk.items():
+            if values:
+                self.logger.record(f"walk/{term}", sum(values) / len(values))
         shots = self._balls.get("shots")
         hits = self._balls.get("hits")
         if shots and hits and sum(shots):
             self.logger.record("ball/hit_rate", sum(hits) / sum(shots))
+        # hit_rate only asks whether the ball touched the ragdoll at all, so a shot aimed at a
+        # forearm that sails past and clips a shin scores the same as one that connects. aim_hit_rate
+        # asks whether it hit the bone it was aimed at, which is the metric that would have caught
+        # the gun firing flat under gravity and landing every shot ~0.5 m low.
+        aim_hits = self._balls.get("aim_hits")
+        if shots and aim_hits and sum(shots):
+            self.logger.record("ball/aim_hit_rate", sum(aim_hits) / sum(shots))
         small = self._balls.get("small_shots")
         if shots and small and sum(shots):
             self.logger.record("ball/small_share", sum(small) / sum(shots))
@@ -278,6 +337,11 @@ class RewardDecompositionCallback(BaseCallback):
 
         # Emitted per bucket rather than as one ratio so that "no prone episodes ran at all" reads
         # as a missing/zero episode count rather than silently as a 0% success rate.
+        for name, counts in self._by_task.items():
+            if counts["episodes"]:
+                self.logger.record(f"task_{name}/success", counts["successes"] / counts["episodes"])
+                self.logger.record(f"task_{name}/episodes", counts["episodes"])
+
         for bucket, counts in self._by_start.items():
             if counts["episodes"]:
                 self.logger.record(f"{bucket}/success", counts["successes"] / counts["episodes"])
@@ -286,8 +350,10 @@ class RewardDecompositionCallback(BaseCallback):
         self._terms.clear()
         self._stand.clear()
         self._balls.clear()
+        self._walk.clear()
         self._reasons.clear()
         self._by_start.clear()
+        self._by_task.clear()
 
 
 class RunManifestCallback(BaseCallback):
@@ -548,6 +614,13 @@ def main() -> None:
     _default_runs = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runs")
     parser.add_argument("--experiment_dir", default=_default_runs)
     parser.add_argument("--experiment_name", default="ragdoll")
+    parser.add_argument(
+        "--curriculum_start",
+        type=float,
+        default=None,
+        help="Curriculum floor to start from. Defaults to the deepest floor the restored run "
+             "reached; pass explicitly to override, or on a fresh run to skip ahead.",
+    )
     parser.add_argument("--n_steps", type=int, default=256, help="PPO rollout length per env.")
     # 2048, not 256. With n_steps=256 across 40 envs a rollout holds 10,240 samples, so a
     # 256-sample batch means 40 minibatches x 10 epochs = 400 gradient steps over the SAME data.
@@ -624,12 +697,23 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # Restored from the previous run unless overridden. GodotEnv forwards unknown kwargs to each
+    # process as --key=value, so this arrives as --curriculum_start=<t> on the Godot command line.
+    curriculum_start = args.curriculum_start
+    if curriculum_start is None and args.restore:
+        curriculum_start = _last_curriculum_floor(args.restore)
+    env_kwargs = {}
+    if curriculum_start is not None:
+        env_kwargs["curriculum_start"] = f"{curriculum_start:.6f}"
+        print(f"curriculum floor carried forward: {curriculum_start:.4f}")
+
     env = SelectivelyVisibleGodotEnv(
         env_path=args.env_path,
         n_parallel=args.n_parallel,
         speedup=args.speedup,
         seed=args.seed,
         visible_count=1 if args.viz else 0,
+        **env_kwargs,
     )
     # Order matters: the truncation fix sits INSIDE VecMonitor so that ep_rew_mean is measured on
     # the environment's own reward, before PPO adds the bootstrap term to it.

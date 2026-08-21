@@ -172,6 +172,25 @@ public interface IRlPerturbationDiagnostics
     IReadOnlyDictionary<string, float> EpisodePerturbationStats { get; }
 }
 
+/// <summary>
+/// Optional reporting for the walking task: how far and how fast, in metres.
+///
+/// Separate from <see cref="IRlRewardDiagnostics"/> because that interface carries a hard
+/// invariant - its values are signed reward terms that must sum to the episode reward - and
+/// distance travelled is not a reward term. Folding metres into that dictionary would break the
+/// one property that makes the reward decomposition checkable rather than merely suggestive.
+///
+/// Separate from <see cref="IRlTerminationDiagnostics"/> because those are RATES in [0,1], and the
+/// central question for this task is "how many metres", which no fraction can express. The rate
+/// channel does carry the walking sub-conditions (upright, grounded, moving); this one carries the
+/// quantities that have units.
+/// </summary>
+public interface IRlWalkDiagnostics
+{
+    /// <summary>Per-episode walking measurements, keyed by name (metres, m/s, or a 0/1 flag).</summary>
+    IReadOnlyDictionary<string, float> EpisodeWalkStats { get; }
+}
+
 /// <summary>Decides when an episode ends, and why (the reason surfaces in logs and the HUD).</summary>
 public interface IRlTerminationCondition
 {

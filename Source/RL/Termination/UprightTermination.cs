@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using Godot;
 using Physics4Fun.Ragdoll;
 using Physics4Fun.RL.Interfaces;
@@ -6,8 +6,11 @@ using Physics4Fun.RL.Interfaces;
 namespace Physics4Fun.RL.Termination;
 
 /// <summary>
-/// Termination for the get-up task: succeed on standing stably, fail on inversion, time out as a
+/// Termination for the upright tasks: succeed on standing stably, fail on inversion, time out as a
 /// backstop.
+///
+/// Shared by stand, get-up and perturbation. The perturbation task passes endEpisodeOnSuccess:false
+/// so that success stops being absorbing - see that flag for why it must.
 ///
 /// The success condition matters as much as the reward. Without one, an episode always runs the
 /// full timer, so the agent has no way to distinguish "stood up" from "stood up then fell over at
@@ -18,7 +21,7 @@ namespace Physics4Fun.RL.Termination;
 /// the threshold and collapse - that momentarily satisfies a height check while being the opposite
 /// of the intended behaviour.
 /// </summary>
-public sealed class GetUpTermination : IRlTerminationCondition, IRlTerminationDiagnostics
+public sealed class UprightTermination : IRlTerminationCondition, IRlTerminationDiagnostics
 {
     /// <summary>
     /// Whether reaching the standing criterion ENDS the episode (and pays StandingBonus).
@@ -38,15 +41,19 @@ public sealed class GetUpTermination : IRlTerminationCondition, IRlTerminationDi
     /// term does the scoring, which is the honest expression of "stayed up through the hit".
     /// StandingBonus is then never paid - EvaluateTerminal only pays on reason "Standing" - so the
     /// return becomes upright + shaping - effort, bounded by UprightWeight * MaxEpisodeSeconds.
+    ///
+    /// Settable per EPISODE rather than fixed per scene, because mixed-task training varies it: a
+    /// perturbation episode and a stand episode run in the same process minutes apart and need
+    /// opposite answers. The bridge assigns it in ResetEpisode.
     /// </summary>
-    private readonly bool _endEpisodeOnSuccess;
+    public bool EndEpisodeOnSuccess { get; set; } = true;
 
     /// <param name="endEpisodeOnSuccess">
-    /// False for perturbation/balance training. See <see cref="_endEpisodeOnSuccess"/>.
+    /// False for perturbation/balance training. See <see cref="EndEpisodeOnSuccess"/>.
     /// </param>
-    public GetUpTermination(bool endEpisodeOnSuccess = true)
+    public UprightTermination(bool endEpisodeOnSuccess = true)
     {
-        _endEpisodeOnSuccess = endEpisodeOnSuccess;
+        EndEpisodeOnSuccess = endEpisodeOnSuccess;
     }
 
     /// <summary>Head height (m) above which the body counts as standing.</summary>
@@ -63,7 +70,7 @@ public sealed class GetUpTermination : IRlTerminationCondition, IRlTerminationDi
     ///
     /// 1.5 s, up from 0.75 s. The shorter window was satisfiable by a policy that falls over
     /// immediately afterwards, and it was: at 22.7M steps start_standing/success read 0.96 while
-    /// the same policy watched in RagdollRLArena - which runs PlaybackMode, so UpdateDone returns
+    /// the same policy watched in RagdollStandArena - which runs PlaybackMode, so UpdateDone returns
     /// early and nothing ever terminates or resets - stayed up for 1-2 s and then went down. The
     /// 0.96 was real but measured nothing beyond t = 0.75 s, because success ends the episode
     /// there. reward/terminal was 9.38 of an ep_rew_mean of 9.02, so this bonus is effectively the
@@ -129,9 +136,9 @@ public sealed class GetUpTermination : IRlTerminationCondition, IRlTerminationDi
     }
 
     public string Describe() =>
-        $"GetUpTermination(standHead={StandingHeadHeight}m, standTilt={StandingTiltDeg}deg, "
+        $"UprightTermination(standHead={StandingHeadHeight}m, standTilt={StandingTiltDeg}deg, "
         + $"standSpeed={StandingMaxSpeed}m/s, standIcpEscape={StandingMaxIcpEscape}m, "
-        + $"bothFeetGrounded, hold={StandingHoldSeconds}s, endOnSuccess={_endEpisodeOnSuccess}, "
+        + $"bothFeetGrounded, hold={StandingHoldSeconds}s, endOnSuccess={EndEpisodeOnSuccess}, "
         + $"fallenHeight={FallenPelvisHeight}m, fallenTilt={FallenTiltDeg}deg)";
 
     public void Reset()
@@ -152,7 +159,7 @@ public sealed class GetUpTermination : IRlTerminationCondition, IRlTerminationDi
         if (IsStanding(context))
         {
             _standingHeldSeconds += context.Delta;
-            if (_endEpisodeOnSuccess && _standingHeldSeconds >= StandingHoldSeconds)
+            if (EndEpisodeOnSuccess && _standingHeldSeconds >= StandingHoldSeconds)
             {
                 reason = "Standing";
                 return true;

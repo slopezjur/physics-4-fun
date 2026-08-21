@@ -55,7 +55,7 @@ Both are written up honestly, including the things that did not work and the mea
 2. Build the C# solution.
 3. Open `Scenes/ActiveRagdoll.tscn` or run `AutomatedTest.cs` to watch the active ragdoll balance, react to impulses, and attempt physical recoveries.
 
-For the RL side, start with [docs/RL-TRAINING.md](docs/RL-TRAINING.md). `Scenes/RL/RagdollRLArena.tscn` plays back a trained policy continuously with no episode resets, which is the honest way to see what a policy actually does.
+For the RL side, start with [docs/RL-TRAINING.md](docs/RL-TRAINING.md). `Scenes/RL/Upright/RagdollStandArena.tscn` plays back a trained policy continuously with no episode resets, which is the honest way to see what a policy actually does.
 
 ## Third-party code
 

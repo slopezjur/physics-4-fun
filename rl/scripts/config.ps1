@@ -1,4 +1,4 @@
-# ============================================================================
+﻿# ============================================================================
 #  EDIT THIS FILE to change how training runs. Every script reads these values.
 # ============================================================================
 
@@ -54,8 +54,16 @@ then open a NEW terminal.
 $GodotExe    = Resolve-GodotExe
 
 # --- Which task to train -----------------------------------------------------
-#   "getup"        - start standing / prone, learn to stand up. No perturbation.
+#   "stand"        - start upright, learn to stay upright. Carries the reverse-curriculum
+#                    machinery, which is why start poses spread slightly below vertical.
 #   "perturbation" - a ball gun fires at the dummy every 3 s; learn to keep balance.
+#   "getup"        - start prone, learn to stand up. Owns the reverse curriculum: the floor
+#                    starts at 0.99 (almost upright, where a stand policy already succeeds)
+#                    and walks back toward flat. RESUME IT FROM A STAND CHECKPOINT.
+#   "upright"      - MIXED: stand + getup + perturbation sampled per episode, one brain. This is
+#                    the one to train for the Upright group; the three single-task scenes exist
+#                    for focused work and for measuring one skill in isolation.
+#   "walk"         - start standing, walk forward in a straight line. No perturbation.
 # Picks the export preset, the exported binary, and (via the preset's feature tag)
 # which scene the build boots. Change this one line to switch tasks.
 $Task        = "perturbation"
@@ -104,7 +112,7 @@ $MaxSeconds  = 300
 # --- Run identity ------------------------------------------------------------
 # Bump this for each new experiment. TensorBoard auto-appends _1, _2, ... so runs
 # never collide, and each run gets its own checkpoint folder.
-$ExperimentName = "perturbation_v1"
+$ExperimentName = "perturbation_v8"
 
 # --- Checkpointing -----------------------------------------------------------
 # Wall-clock seconds between saves. A crash costs at most this much work.
@@ -119,11 +127,20 @@ $ProjectPath = (Resolve-Path "$PSScriptRoot/../..").Path
 if ($Task -eq "perturbation") {
     $ExportPreset = "Windows Perturbation"
     $BuildName    = "RagdollPerturbationTraining.exe"
+} elseif ($Task -eq "stand") {
+    $ExportPreset = "Windows Stand"
+    $BuildName    = "RagdollStandTraining.exe"
 } elseif ($Task -eq "getup") {
-    $ExportPreset = "Windows Desktop"
-    $BuildName    = "RagdollRLTraining.exe"
+    $ExportPreset = "Windows GetUp"
+    $BuildName    = "RagdollGetUpTraining.exe"
+} elseif ($Task -eq "upright") {
+    $ExportPreset = "Windows Upright"
+    $BuildName    = "RagdollUprightTraining.exe"
+} elseif ($Task -eq "walk") {
+    $ExportPreset = "Windows Walk"
+    $BuildName    = "RagdollWalkTraining.exe"
 } else {
-    throw "Unknown `$Task '$Task'. Use 'getup' or 'perturbation'."
+    throw "Unknown `$Task '$Task'. Use 'stand', 'getup', 'upright', 'perturbation' or 'walk'."
 }
 # Absolute on purpose: every script (training AND tensorboard) must agree on one location.
 $ExperimentDir = "$ProjectPath/rl/runs"

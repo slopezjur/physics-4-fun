@@ -17,12 +17,12 @@ expression, not a command, and without it the `--` flags fail with "Token 'headl
 # 1. Export
 & "<godot>/Godot_v4.7.1-stable_mono_win64/Godot_v4.7.1-stable_mono_win64_console.exe" `
   --headless --path "<project>/physics-4-fun" `
-  --export-release "Windows Desktop" `
-  "<project>/physics-4-fun/build/RagdollRLArena.exe"
+  --export-release "Windows Stand" `
+  "<project>/physics-4-fun/build/RagdollStandTraining.exe"
 
 # 2. Train (run from the project root)
 rl/.venv/Scripts/python.exe rl/train.py `
-  --env_path=build/RagdollRLArena.exe `
+  --env_path=build/RagdollStandTraining.exe `
   --n_parallel=40 --speedup=16 --timesteps=10000000 `
   --experiment_name=getup_v1 `
   --save_model_path=rl/getup_v1.zip `
@@ -39,11 +39,11 @@ command only works from inside the project folder.
 "<godot>/Godot_v4.7.1-stable_mono_linux_x86_64/Godot_v4.7.1-stable_mono_linux.x86_64" \
   --headless --path "<project>/physics-4-fun" \
   --export-release "Linux" \
-  "<project>/physics-4-fun/build/RagdollRLArena.x86_64"
+  "<project>/physics-4-fun/build/RagdollStandTraining.x86_64"
 
 # 2. Train
 rl/.venv/bin/python rl/train.py \
-  --env_path=build/RagdollRLArena.x86_64 \
+  --env_path=build/RagdollStandTraining.x86_64 \
   --n_parallel=40 --speedup=16 --timesteps=10000000 \
   --experiment_name=getup_v1 \
   --save_model_path=rl/getup_v1.zip \
@@ -57,18 +57,18 @@ rl/.venv/bin/python rl/train.py \
 "<godot>/Godot_mono.app/Contents/MacOS/Godot" \
   --headless --path "<project>/physics-4-fun" \
   --export-release "macOS" \
-  "<project>/physics-4-fun/build/RagdollRLArena.zip"
+  "<project>/physics-4-fun/build/RagdollStandTraining.zip"
 
 # 2. Train
 rl/.venv/bin/python rl/train.py \
-  --env_path=build/RagdollRLArena.zip \
+  --env_path=build/RagdollStandTraining.zip \
   --n_parallel=40 --speedup=16 --timesteps=10000000 \
   --experiment_name=getup_v1 \
   --save_model_path=rl/getup_v1.zip \
   --onnx_export_path=rl/getup_v1.onnx
 ```
 
-**Note:** `export_presets.cfg` currently defines **only** the `Windows Desktop` preset. Linux and
+**Note:** `export_presets.cfg` currently defines only Windows presets (`Windows Stand`, `Windows Perturbation`, `Windows Walk`). Linux and
 macOS need their preset added once via the editor (Project -> Export -> Add), and their export
 templates installed, before the commands above will work. The venv path also differs:
 `rl/.venv/Scripts/python.exe` on Windows, `rl/.venv/bin/python` elsewhere.
@@ -209,11 +209,15 @@ rewriting anything:
 
 ```ini
 # project.godot
-run/main_scene="res://Scenes/RL/RagdollRLArena.tscn"
-run/main_scene.training="res://Scenes/RL/RagdollRLTraining.tscn"
+run/main_scene="res://Scenes/RL/Upright/RagdollPerturbationArena.tscn"
+run/main_scene.stand="res://Scenes/RL/Upright/RagdollStandTraining.tscn"
+run/main_scene.perturbation="res://Scenes/RL/Upright/RagdollPerturbationTraining.tscn"
+run/main_scene.walk="res://Scenes/RL/Locomotion/RagdollWalkTraining.tscn"
 
-# export_presets.cfg
-custom_features="training"
+# export_presets.cfg - one preset per task, each with its own feature tag
+custom_features="stand"           # "Windows Stand"
+custom_features="perturbation"    # "Windows Perturbation"
+custom_features="walk"            # "Windows Walk"
 ```
 
 Godot resolves `<setting>.<feature>` against the build's active feature tags, so the editor gets
@@ -226,6 +230,280 @@ encoding twice per export, and `Set-Content -Encoding utf8` on Windows PowerShel
 into the literal text `Ã¯Â»Â¿` prefixed to `config_version`; Godot then preserved that as a quoted
 key on its next save. The Project Manager began reporting *"The project uses an unknown version of
 Godot."* If you ever need to machine-edit `project.godot`, write bytes - never `Set-Content`.
+
+---
+
+## Tasks
+
+Three tasks share one rig, one observation vector and one action space. Set `$Task` in
+`rl/scripts/config.ps1`; it picks the export preset, which picks the scene via the feature tag.
+
+| `$Task` | Scene | Reward / termination | Window | Starts |
+|---|---|---|---|---|
+| `stand` | `RagdollStandTraining` | `GetUpProgressReward` / `GetUpTermination` | 4 s | always upright (t = 1.0) |
+| `getup` | `RagdollGetUpTraining` | same pair | 4 s standing, 8 s prone | reverse curriculum, floor starts 0.99 |
+| `perturbation` | `RagdollPerturbationTraining` | same pair, `EndEpisodeOnStandingSuccess = false` | 5 s | always standing |
+| `walk` | `RagdollWalkTraining` | `WalkForwardReward` / `WalkTermination` | 6 s | standing, moving at 0.48–0.8 m/s |
+
+`stand` and `getup` are the same components with different start distributions, and that is the
+point: get-up is not a separate problem, it is *standing from progressively worse starting
+positions*. They connect two ways - a get-up run **resumes from a stand checkpoint**, and its
+curriculum begins at t = 0.99 (almost upright, where a stand policy already succeeds) and walks
+the floor back toward flat. Train stand first; it is the reference get-up is bootstrapped from.
+
+**The observation and action widths never change between them.** That is load-bearing, not
+incidental: the widths are published to Python at handshake and baked into every checkpoint, so
+changing them turns a resume into a from-scratch run. Because they are fixed at 106 and 36, a
+policy trained on one task can be restored onto another — which is the only reason walking is
+trainable in a couple of hours at all. It starts from a standing policy rather than from noise.
+
+Only the reward and termination vary, selected by the `TaskKind` export on the bridge
+(`RlTaskKind.GetUp` / `.Walk`). Perturbation is not a separate `TaskKind`: it is the get-up pair
+with success-absorption switched off, so it needs no components of its own.
+
+### Perturbation (balance under impact)
+
+A `BallGun` fires at the dummy on a fixed interval — 10 s in training (longer than the 5 s window,
+which is how "exactly one ball per episode" is expressed without a shot counter) and 3 s in the
+arena, where the point is to watch repeated recoveries. Two profiles, chosen per shot:
+
+| | mass | radius | speed | aimed at |
+|---|---|---|---|---|
+| heavy | 1.5 kg | 0.22 m | 6 m/s | chest, falling back to pelvis |
+| small | 0.2 kg | 0.06 m | 6 m/s | a uniformly random bone of twelve |
+
+`EndEpisodeOnStandingSuccess` **must** be false here. With it true the episode ends at roughly
+0.6 s of settling plus `StandingHoldSeconds`, i.e. *before the first ball lands at 1.0 s*, so the
+perturbation would never be experienced. Worse, a ball arriving every N seconds resets the hold
+counter, so "hold 1.5 s continuously" and "get hit repeatedly" fight by construction.
+
+Consequence: `StandingBonus` is never paid, and the return is `upright + shaping - effort`. It is
+**negative** — around -3.6 — and that is correct, not a bug. Shaping telescopes to
+`10 × (head_end − head_start)`, and from a standing start head height can only go down.
+
+#### Ball strength is not the lever
+
+Measured 2026-08-21 on `perturbation_v1_0`, resumed from the 46.7M-step get-up policy:
+`reward/shaping` -7.07 with `ball/hits` 0.922, and `0.922 × -7.7 + 0.078 × 0 = -7.1` closes exactly.
+Every hit put the body on the floor, every miss left it standing, recovery rate zero.
+
+The tempting read is "the ball is too strong". The numbers say otherwise. Half those shots were the
+*small* ball, which delivers about **0.023 J** of transferred energy against the **6.74 J** needed
+to tip this rig — 0.3% of it — and flattened the body just as reliably. A disturbance three orders
+of magnitude under the passive tipping threshold is not what is knocking it over. The policy is: it
+had never experienced a disturbance in 46.7M steps, so it holds a knife-edge balance that any
+contact ends. This is the same brittleness that walled the get-up curriculum at 1.8–2.7°.
+
+> **Units trap.** Comparing the ball's own kinetic energy (27 J at these settings) against the
+> body's tipping energy is meaningless — almost none of a 1.5 kg ball's energy transfers to an
+> 80.6 kg body. The table in `BallGun.LaunchSpeed` is *transferred* energy. Mixing the two makes an
+> already-gentle shot look like a 4× overshoot, and did.
+
+Ball strength remains the natural axis for a difficulty curriculum later — the frontier machinery in
+`RagdollRLBridge` would drive impulse instead of start pose unchanged — but raising it before the
+policy can survive a 0.023 J poke would be sequencing it backwards.
+
+#### The 2-hour run: a clean negative result
+
+Run to 61.3M steps (14.1M added). Every task metric degraded monotonically across all six segments
+of the run, while the policy's own action noise *rose*:
+
+| segment | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|
+| `standing/all` | 0.480 | 0.479 | 0.472 | 0.465 | 0.457 | 0.459 |
+| `reward/shaping` | −6.873 | −6.825 | −6.867 | −6.871 | −6.990 | −7.010 |
+| `train/std` | 0.567 | 0.574 | 0.581 | 0.588 | 0.593 | **0.599** |
+
+`train/std` is the diagnostic. A rising Gaussian policy std means PPO is finding no direction that
+improves reward, so the entropy bonus is the only force acting and the policy diffuses — slowly
+degrading the standing behaviour it inherited. This is not "needs more time"; it is 14.1M steps of
+monotone evidence that the task has no usable gradient **as configured**.
+
+The cause is the missing primitive. Ankle and hip strategy cannot recover a capture point that has
+left the support polygon — only a step can — and every ball contact pushes it out. The same wall
+stopped the get-up curriculum at `pose_0.91`. Balance-under-impact is therefore blocked *behind*
+walking, not parallel to it, and the next perturbation run should resume from a policy that can
+step rather than from this one.
+
+### Walking
+
+`WalkForwardReward` is structured differently from the get-up reward on purpose. Getting up is a
+one-off transition to a goal state, so shaping on a potential is right. Walking is a *sustained
+periodic* behaviour with no goal state, so the dominant term is a **rate** — forward speed. A
+potential on distance travelled would telescope to total displacement and pay identically for
+walking 6 m and for falling forward 6 m.
+
+The reward is a **product**, not a weighted sum:
+
+```
+progress = 6.0 × clamp(v_forward / 1.0, 0, 1) × clamp(cos(tilt), 0, 1) × dt
+reward   = progress − 0.5·lateral_drift·dt − 0.02·effort·dt
+```
+
+| term | weight | notes |
+|---|---|---|
+| progress | 6.0 | product of speed factor and upright factor, both `[0,1]` |
+| heading | −0.5 | per metre of lateral drift per second |
+| effort | −0.02 | mean actuator capacity fraction |
+| fall | 0.0 | see below |
+
+#### How that form was arrived at (three runs)
+
+The first version was additive — `velocity + alive + upright − heading − effort` — weighted so
+walking at target speed scored 48 over a 6 s episode against 12 for standing still. Resumed from a
+policy that could already stand, it **converged to standing perfectly still inside five minutes**:
+
+| | `walk/forward_speed` | `walk/fell` |
+|---|---|---|
+| additive reward | 0.0186 → **0.0069** | 0.164 → 0.011 |
+
+It did not fail to learn. It learned the wrong thing, quickly.
+
+The 4× ratio was not the flaw. An additive alive term pays for *existing*, so standing still had a
+positive score worth protecting, and the path to walking descends before it climbs: a real step
+risks a fall while creeping forward pays almost nothing, since the velocity term scales with speed.
+
+Seeding forward momentum at episode start (`RagdollRLBridge.InitialForwardSpeed`, RSI aimed at the
+exploration barrier rather than at a start pose) was tried next. It fired — falls quadrupled on the
+first rollouts — and was then **absorbed just as cleanly**: the agent learned to plant and kill
+0.65 m/s in about 0.18 s, roughly 289 N, well inside foot friction. Any fix gets absorbed while
+standing still still pays.
+
+In product form standing still scores exactly **zero**, because the speed factor is zero. There is
+no comfortable state left to protect. Measured on the same 5-minute budget:
+
+| | start | end |
+|---|---|---|
+| `walk/forward_speed` | 0.0165 | **0.0507** |
+| `walk/distance` | 0.131 | **0.303** |
+| `reward/progress` | 0.737 | **1.548** |
+| `walk/fell` | 0.162 | 0.476 |
+
+Falls rose because the policy is now attempting motion instead of protecting a score. The two
+changes are synergistic: RSI supplies initial speed, and under the product form killing that speed
+drops the reward to zero, so the momentum becomes something to preserve rather than to damp.
+
+**The fall penalty is 0, deliberately.** It was −5. Under a product reward that is actively harmful:
+early in training the agent cannot walk, so everything scores about zero, and a negative fall
+penalty makes standing still (0) strictly better than attempting anything (risking −5) — the exact
+risk aversion the rewrite exists to remove. The real cost of falling is the forfeited remainder of
+the episode, which correctly scales with how much the agent has to lose and is near zero while it
+has nothing to lose yet.
+
+**The speed factor clamps to `[0,1]`, not `[-1,1]`.** A negative speed factor would flip the sign of
+the uprightness factor, so walking backwards while upright would score *worse* than walking
+backwards while toppling. Backward motion earns nothing; it does not earn negative.
+
+**Saturating at target speed.** The first thing a policy discovers is that diving forward produces
+speed. Capping means exceeding target buys nothing, so the only way to score higher is to *sustain*
+it — which requires not falling.
+
+#### The 2-hour run: locomotion, then a second local optimum
+
+Run to 62.1M steps. The product reward worked — the dummy genuinely moves:
+
+| | start | end |
+|---|---|---|
+| `walk/forward_speed` | 0.0165 | **0.4305 m/s** |
+| `walk/distance` | 0.131 | **0.978 m** |
+| `walk/lateral_drift` | 0.154 | **0.122** ↓ |
+| `standing/grounded` | 0.999 | 0.834 |
+
+Drift *fell* while distance rose sevenfold, so it is travelling roughly straight, and `grounded`
+dropping to 0.834 means the feet leave the ground on 17% of ticks — flight phases, i.e. real
+stepping rather than sliding.
+
+But it falls in **every** episode, surviving about 2.0 s of 6. And the segment trace shows why that
+is not simply "not finished yet":
+
+| segment | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|
+| `forward_speed` | 0.155 | 0.361 | 0.391 | 0.407 | 0.414 | 0.420 | 0.424 | 0.428 |
+| `alive_fraction` | 0.644 | 0.343 | 0.332 | 0.329 | 0.331 | 0.333 | 0.336 | 0.338 |
+| `grounded` | 0.983 | 0.931 | 0.902 | 0.885 | 0.870 | 0.856 | 0.845 | 0.834 |
+
+`alive_fraction` is flat across six segments while speed keeps creeping up and `grounded` keeps
+falling. The policy is optimising the wrong axis: it became a **2-second sprint ending in a
+guaranteed fall**, and got progressively more ballistic about it.
+
+It is a genuine barrier, not slow progress. Escaping requires going *slower* for a while — trading
+peak speed for balance — and every step in that direction loses reward immediately.
+
+The fix was `TargetSpeed` 1.0 → 0.4 m/s. Saturation was always the intended guard, but at 1.0 m/s it
+never engaged: at 0.43 m/s the speed factor was only 0.43, so faster still paid linearly. Setting
+the target *below the speed already achieved* pins the factor at 1.0, makes extra speed worth
+exactly nothing, and leaves surviving the window as the only remaining gradient. This is a
+curriculum value — raise it once a full window is sustained.
+
+**A heading penalty, because the observation has no heading.** Bone rotations in `GetUpObservation`
+are root-relative, so the policy cannot see which way it points in world terms, and nothing else in
+the reward would object to walking in circles. The forward axis is captured once at episode start
+(`-pelvisBasis.Z` projected flat, the rig convention shared with `BiomechanicalKinematics` and
+`OrientationClassifier`) and held constant — recomputing it per tick would let the agent turn to
+face wherever it is drifting and collect the velocity term for a circle.
+
+`WalkTermination` has **no success condition**, deliberately. The only meaningful success is "still
+walking when the window ended", which is what reaching `TimeLimit` already means; a threshold like
+"5 m travelled" would end the episode at the moment the agent is doing the thing being trained, and
+pay it to stop. Falling *does* end the episode, and that asymmetry carries the signal — going down
+at t = 1 s of 6 s forfeits roughly 40 reward, far more than any sane explicit penalty.
+
+Fall is `head < 1.00 m` **or** `tilt > 50°`. Height alone cannot catch a fall in progress: a body
+pitched 60° forward with its head still at 1.05 m is unrecoverable on this rig but passes the height
+check, and every tick it survives there pays alive plus a large forward-velocity term as it
+accelerates downward. A 0.25 s settle grace stops a reset transient ending the episode on tick one.
+
+Metrics land in their own `walk/` namespace (`forward_speed`, `distance`, `lateral_drift`, `fell`,
+`alive_fraction`) because they carry **units**. They are neither reward terms — which must sum to
+the episode reward, an invariant that makes the decomposition checkable — nor `[0,1]` rates. "Walked
+0.4 m" versus "walked 4 m" is the whole question, and no fraction expresses it.
+
+#### It is bounding, not walking — the next thing to fix
+
+`standing/grounded` is the fraction of ticks with at least one foot in contact. A walk has a foot
+down essentially always, so this should sit near 1.0. It does not, and it keeps getting worse:
+
+| run | `grounded` start → end |
+|---|---|
+| `walk_v2_0` (2 h) | 0.983 → 0.834 |
+| `walk_v3_0` (2.5 h) | 0.822 → 0.785 |
+
+At 21% airborne the dummy is **bounding**: it launches, covers about 0.9 m in roughly two ballistic
+strides, and crashes. `walk/fell` has been pinned at 1.000 for both runs, and `alive_fraction`
+asymptotes near 0.37 — about 2.2 s of a 6 s window — no matter what the speed terms do.
+
+The cause is a gap in the reward: **nothing in it asks for ground contact.** `progress` is
+`speed × upright`, and a ballistic leap satisfies both factors beautifully right up until landing.
+Flight is not merely tolerated, it is the most efficient way to score, because airborne travel is
+fast and the torso stays vertical.
+
+The obvious next change is a third factor on the product — a ground-contact term, so that leaving
+the floor stops paying:
+
+```
+progress = VelocityWeight × speedFactor × uprightFactor × groundedFactor × dt
+```
+
+Kept as a factor rather than an additive penalty for the same reason the rest is multiplicative: an
+additive contact bonus becomes another thing to farm while standing still, and the whole point of
+the product form is that no term can be collected without the others. It also wants to be lenient
+about brief double-flight rather than binary, or it will punish the natural moment of transfer
+between steps.
+
+This was diagnosed at 07:45 with 1 h 20 m of run left and deliberately **not** applied: a new
+variable introduced that late would be under-trained and its effect unattributable, and it would
+have forfeited the run's steady gains for an untested hypothesis. It is the first thing to try next.
+
+#### What to expect
+
+Standing took 46.7M steps to reach ~95%. Two hours is roughly 15M steps at ~2,000 steps/s, for a
+harder problem; published humanoid walking with PPO typically needs 50–200M. **A 5 s straight-line
+walk is not a two-hour result.** Grade it in tiers instead: forward displacement above baseline
+while upright (expected) → visible weight shift and one recognisable step (plausible) → two
+consecutive steps without falling (optimistic) → 5 s walk (not expected).
+
+This is not a detour from the get-up either. The get-up curriculum's hard wall at `pose_0.91` was
+diagnosed as *requires stepping*, so a stepping prior feeds directly back into it.
 
 ---
 
@@ -436,7 +714,7 @@ of samples at 3 s, 1/60 at 4 s, versus 1/30 at 2 s.
 `GetUpTermination.StandingHoldSeconds` is **1.5** (was 0.75). This is the success *specification*,
 and at 0.75 s it was under-specified: a policy that falls over immediately afterwards satisfies it.
 One did. At 22.7M steps `start_standing/success` read 0.96 while the same policy in
-`RagdollRLArena` — which sets `PlaybackMode`, so nothing ever terminates or resets — stayed up 1–2 s
+`RagdollStandArena` — which sets `PlaybackMode`, so nothing ever terminates or resets — stayed up 1–2 s
 and then went down. The 0.96 was accurate and measured nothing past t = 0.75 s, because success ends
 the episode there.
 

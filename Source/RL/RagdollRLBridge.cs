@@ -9,6 +9,28 @@ using Physics4Fun.RL.Termination;
 namespace Physics4Fun.RL;
 
 /// <summary>
+/// Which task the bridge builds its reward and termination for.
+///
+/// Only the reward and termination vary. The observation and action space are deliberately shared
+/// across every task, because that is what makes a policy trained on one task resumable on
+/// another: the tensor widths are published to Python at handshake and baked into the checkpoint,
+/// so changing them turns a resume into a from-scratch run. Walking is trained by restoring a
+/// standing policy, which is only possible because both tasks see the same 106 floats.
+///
+/// The balance/perturbation task is not listed: it uses the get-up components with
+/// <see cref="RagdollRLBridge.EndEpisodeOnStandingSuccess"/> set false, so it needs no separate
+/// value here and adding one would imply a component pair that does not exist.
+/// </summary>
+public enum RlTaskKind
+{
+    /// <summary>Stand up from prone, or stay standing. Also used for the ball-perturbation task.</summary>
+    GetUp,
+
+    /// <summary>Walk forward in a straight line from a standing start.</summary>
+    Walk,
+}
+
+/// <summary>
 /// Bridges the godot_rl_agents obs/action/reward/done contract to <see cref="HumanoidRagdoll"/>,
 /// without HumanoidRagdoll or ActiveBone knowing anything about RL exists.
 ///
@@ -77,7 +99,7 @@ public partial class RagdollRLBridge : Node
     /// complete inside a 3 s window is t = 1.5, against a policy that enters the standing region at
     /// ~0.6 s - 0.9 s of slack. An attempt entering at t = 1.6 gets truncated mid-hold and scored a
     /// failure despite being on track, and the scoring is invisible: the Inverted condition in
-    /// GetUpTermination has never once fired in this project, so falling and timing out report the
+    /// UprightTermination has never once fired in this project, so falling and timing out report the
     /// SAME terminal reason and cannot be told apart after the fact. 4 s moves that false-negative
     /// band from [1.5 s, inf) to [2.5 s, inf). Buy the margin, because there is no measurement that
     /// says whether it was needed.
@@ -174,7 +196,7 @@ public partial class RagdollRLBridge : Node
     /// 0.01, not the 0.1 this was first written with, because the pose parameter is severely
     /// non-linear in difficulty. The start pose is a rigid tilt, so the CoM moves off the support
     /// polygon as comHeight * sin(pitch); with the CoM near the 0.82 m pelvis rest height and
-    /// GetUpTermination allowing 0.15 m of ICP escape, the body is at its tipping point at
+    /// UprightTermination allowing 0.15 m of ICP escape, the body is at its tipping point at
     ///
     ///     asin(0.15 / 0.90) = 9.6 degrees, i.e. t = 0.893.
     ///
@@ -230,9 +252,78 @@ public partial class RagdollRLBridge : Node
     ///
     /// True for the get-up task. **Set false in the perturbation scene**: there the episode would
     /// otherwise end at ~2.1 s, before the first ball even lands, and the hold requirement would
-    /// fight the ball interval. See GetUpTermination for the full argument.
+    /// fight the ball interval. See UprightTermination for the full argument.
     /// </summary>
     [Export] public bool EndEpisodeOnStandingSuccess { get; set; } = true;
+
+    /// <summary>
+    /// Which reward and termination pair the bridge builds. See <see cref="RlTaskKind"/>.
+    ///
+    /// Defaults to GetUp so every existing scene keeps its current behaviour without being touched
+    /// - the walk scenes are the only ones that set it.
+    /// </summary>
+    [Export] public RlTaskKind TaskKind { get; set; } = RlTaskKind.GetUp;
+
+    /// <summary>
+    /// Chance a STANDING-START episode also fires the ball gun, making it a perturbation episode.
+    /// 0 (the default) keeps every scene single-task and unchanged.
+    ///
+    /// This is what makes one brain out of the three Upright tasks instead of three that overwrite
+    /// each other. They already share every component - the same observation, action space, reward
+    /// and termination - and differ only in start pose and whether something pushes back. What they
+    /// did NOT share was a training run, and training them in sequence measurably destroys the
+    /// earlier one: a walk run took standing/all from 0.478 to 0.170, and a perturbation run took it
+    /// from 0.480 to 0.459 while learning nothing itself.
+    ///
+    /// Sampling the task per EPISODE instead removes the problem by construction. Nothing is ever
+    /// left unpracticed for long enough to be forgotten, and the balance episodes stop degrading the
+    /// standing skill they depend on.
+    ///
+    /// Only standing starts are eligible. A ball arriving while the dummy is halfway through getting
+    /// up is a third, harder task nobody asked for, and it would make a fall impossible to attribute
+    /// to either the get-up or the impact.
+    /// </summary>
+    [Export] public float PerturbationEpisodeProbability { get; set; } = 0.0f;
+
+    /// <summary>
+    /// Maximum forward speed (m/s) the whole body is given at episode start. 0 disables.
+    ///
+    /// This is Reference State Initialization aimed at an EXPLORATION barrier rather than at a
+    /// starting pose, and it exists because the first walk run failed in a specific, measurable
+    /// way. Resumed from a policy that could already stand, the agent converged within 5 minutes
+    /// to standing perfectly still: walk/fell fell 0.164 -> 0.011 while walk/forward_speed fell
+    /// 0.0186 -> 0.0069. It did not fail to learn - it learned the wrong thing, and learned it
+    /// quickly.
+    ///
+    /// The reward weights were not the problem. Standing still scores 12 over a 6 s episode and
+    /// walking at target speed scores 48, so the destination was already four times better. The
+    /// barrier is that the PATH between them descends: taking a real step risks a fall (-5 plus the
+    /// whole remaining episode), while creeping forward pays almost nothing, since the velocity
+    /// term is proportional to speed. Raising the destination value cannot fix a barrier that
+    /// exploration never reaches, which is why VelocityWeight was left alone.
+    ///
+    /// Starting the body already moving removes the local optimum by CONSTRUCTION instead of by
+    /// re-weighting. Standing still is no longer available: the momentum has to go somewhere, and
+    /// the only ways to resolve it are to step or to fall. Stepping is then discovered because it
+    /// is necessary, not because it is worth slightly more.
+    ///
+    /// Applied uniformly to every bone via HumanoidRagdoll.GetBones, as a rigid translation of the
+    /// whole body. Seeding only the pelvis would leave the limbs behind and have the joints fight
+    /// the discrepancy for the first few ticks, which reads as a shove rather than as walking onto
+    /// the scene at speed.
+    /// </summary>
+    [Export] public float InitialForwardSpeed { get; set; } = 0.0f;
+
+    /// <summary>
+    /// Fraction of <see cref="InitialForwardSpeed"/> below which an episode never starts, so the
+    /// speed is sampled from [floor, 1] * InitialForwardSpeed rather than being a single value.
+    ///
+    /// A spread rather than a constant because a policy trained on exactly one entry speed learns a
+    /// fixed catch, and a fixed catch is not a gait. The floor stays well above zero: sampling near
+    /// zero would restore the standing-still option on those episodes and reopen the optimum this
+    /// setting exists to close.
+    /// </summary>
+    [Export] public float InitialForwardSpeedFloor { get; set; } = 0.6f;
 
     /// <summary>
     /// Optional perturbation source (the ball gun) polled for episode telemetry only.
@@ -246,7 +337,7 @@ public partial class RagdollRLBridge : Node
 
     /// <summary>
     /// Effort-penalty weight handed to the reward. Near zero during discovery; see
-    /// GetUpProgressReward's constructor for why deployment-strength regularization blocks it.
+    /// UprightProgressReward's constructor for why deployment-strength regularization blocks it.
     /// </summary>
     [Export] public float EffortWeight { get; set; } = 0.02f;
 
@@ -394,7 +485,31 @@ public partial class RagdollRLBridge : Node
         // episode starts standing, nothing is ever recorded as a curriculum outcome and the level
         // can never advance. That failure is silent - the run looks healthy and simply never
         // progresses - so it is clamped here rather than left to whoever edits the scene.
-        _activeCurriculumT = Mathf.Clamp(CurriculumPoseT, 0.0f, 1.0f - CurriculumStep);
+        // The curriculum floor is RESTORED from the trainer when resuming, not reset to the scene
+        // constant.
+        //
+        // This was the single most damaging bug in the RL track. The floor lives in the Godot
+        // process while the policy lives in the SB3 checkpoint, so every resume restored the weights
+        // and then handed all 32 fresh processes a floor of CurriculumPoseT again. Training happens
+        // in sessions, so the curriculum descended a little, the session ended, and the progress was
+        // thrown away - every time. getup_v4_2 shows it exactly: min=0.9080, max=0.9900,
+        // last=0.9900. It reached 0.908 and went back to the start.
+        //
+        // That is why start_prone/success read 0.000 across 46.7M steps. Prone was never hard; the
+        // curriculum was never allowed to REACH it. A 60-second test descends 0.99 -> 0.96 on its
+        // own, so descent rate was never the constraint either.
+        //
+        // rl/train.py passes --curriculum_start=<t> when resuming, taken from the MINIMUM floor the
+        // restored run ever reached (see _last_curriculum_floor). Minimum rather than last because
+        // the floor only ever descends within a session, so the lowest value is the honest
+        // high-water mark - and the last logged value is often a post-restart reset.
+        float? restoredFloor = ReadCmdlineFloat("curriculum_start");
+        _activeCurriculumT = Mathf.Clamp(restoredFloor ?? CurriculumPoseT, 0.0f, 1.0f - CurriculumStep);
+        if (restoredFloor.HasValue && IsPrimaryInstance())
+        {
+            GD.Print($"[RagdollRLBridge] Curriculum floor restored to {_activeCurriculumT:F3} "
+                     + $"(scene default was {CurriculumPoseT:F3}).");
+        }
 
         _pendingOffsets = new Quaternion[ControlledBoneNames.Length];
         for (int i = 0; i < _pendingOffsets.Length; i++)
@@ -412,9 +527,16 @@ public partial class RagdollRLBridge : Node
 
         _actions = new JointLimitedActionSpace(ControlledBoneNames);
         _actions.Bind(_controlledBones);
-        _observations = new GetUpObservation(ControlledBoneNames.Length);
-        _reward = new GetUpProgressReward(EffortWeight);
-        _termination = new GetUpTermination(EndEpisodeOnStandingSuccess);
+        _observations = new BodyStateObservation(ControlledBoneNames.Length);
+        // Only these two vary by task. The observation and action space above are shared on
+        // purpose - see RlTaskKind for why that is what makes cross-task resuming possible.
+        (_reward, _termination) = TaskKind switch
+        {
+            RlTaskKind.Walk => ((IRlRewardFunction)new WalkForwardReward(EffortWeight),
+                                (IRlTerminationCondition)new WalkTermination()),
+            _ => (new UprightProgressReward(EffortWeight),
+                  new UprightTermination(EndEpisodeOnStandingSuccess)),
+        };
 
         // Enters the RL state and takes the first episode's starting pose immediately - without
         // this the ragdoll would sit in RagdollState.Balanced (the project default) until the
@@ -708,6 +830,11 @@ public partial class RagdollRLBridge : Node
 
             info["rew_total"] = _episodeRewardTotal;
             info["episode_end_reason"] = _doneReason;
+            // Which task this episode was. The whole point of mixing is that no task degrades while
+            // another trains, and that is only checkable if success is reported PER TASK - an
+            // aggregate rate cannot distinguish "all three improving" from "balance improving while
+            // standing rots", which is exactly the failure mixing exists to prevent.
+            info["episode_task"] = EpisodeTask;
             info["started_standing"] = _startedStanding ? 1.0f : 0.0f;
             info["start_pose_t"] = _startPoseT;
             info["curriculum_t"] = _activeCurriculumT;
@@ -720,6 +847,16 @@ public partial class RagdollRLBridge : Node
                 foreach (var stat in perturbation.EpisodePerturbationStats)
                 {
                     info[$"ball_{stat.Key}"] = stat.Value;
+                }
+            }
+            // How far and how fast, in metres. Its own prefix because these have UNITS: they are
+            // neither reward terms (which must sum to the episode reward) nor rates in [0,1], and
+            // "walked 0.4 m" versus "walked 4 m" is the entire question for that task.
+            if (_reward is IRlWalkDiagnostics walkDiagnostics)
+            {
+                foreach (var stat in walkDiagnostics.EpisodeWalkStats)
+                {
+                    info[$"walk_{stat.Key}"] = stat.Value;
                 }
             }
             if (_actions is IRlActionDiagnostics actionDiagnostics)
@@ -761,6 +898,7 @@ public partial class RagdollRLBridge : Node
             { "curriculum_advance_rate", CurriculumAdvanceRate },
             { "curriculum_window", CurriculumWindow },
             { "curriculum_frontier_share", CurriculumFrontierShare },
+            { "task_kind", TaskKind.ToString() },
             { "end_episode_on_standing_success", EndEpisodeOnStandingSuccess },
             { "effort_weight", EffortWeight },
             { "physics_ticks_per_second", Engine.PhysicsTicksPerSecond },
@@ -820,6 +958,35 @@ public partial class RagdollRLBridge : Node
         return true;
     }
 
+    /// <summary>
+    /// Reads a float passed on the command line as --name=value, or null if absent/unparseable.
+    ///
+    /// Parsed with InvariantCulture, NOT the machine's culture, and that is not a detail. Python
+    /// writes "0.908"; this project is developed on a Spanish-locale machine where the decimal
+    /// separator is a comma, so a culture-sensitive parse either fails outright or - worse - reads
+    /// "0.908" as 908. A silently thousand-fold curriculum floor is exactly the class of bug that
+    /// looks like a physics problem for a day.
+    /// </summary>
+    private static float? ReadCmdlineFloat(string name)
+    {
+        string prefix = $"--{name}=";
+        foreach (string arg in OS.GetCmdlineArgs())
+        {
+            if (!arg.StartsWith(prefix, System.StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            return float.TryParse(
+                arg[prefix.Length..],
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out float value) ? value : null;
+        }
+
+        return null;
+    }
+
     /// <summary>Called by the GDScript adapter's get_done().</summary>
     public bool IsDone() => _done;
 
@@ -832,6 +999,97 @@ public partial class RagdollRLBridge : Node
     /// what it just learned - the policy is free to trade away competence at 0.7 while specialising
     /// on 0.5, and nothing measures the loss until the level it needs stops working.
     /// </summary>
+    /// <summary>Which of the Upright tasks this episode is, for per-task metrics.</summary>
+    public string EpisodeTask { get; private set; } = "stand";
+
+    /// <summary>
+    /// Decides whether this episode is stand, getup or perturbation, and configures the two things
+    /// that differ: whether the ball fires, and whether success ends the episode.
+    ///
+    /// Success absorption is tied to the ball rather than exported separately, because the two are
+    /// not independent. UprightTermination requires StandingHoldSeconds of CONTINUOUS success, and a
+    /// ball resets that counter on every hit - so "hold 1.5 s uninterrupted" and "get hit" are
+    /// mutually exclusive by construction, and leaving absorption on would make a perturbation
+    /// episode unwinnable no matter how good the policy is. Worse, without the ball the episode
+    /// would end at roughly 2.1 s, before the first shot at 1.0 s had any chance to matter.
+    /// </summary>
+    private void SelectEpisodeTask()
+    {
+        bool mixing = PerturbationEpisodeProbability > 0.0f;
+        bool hasGun = PerturbationSource != null && IsInstanceValid(PerturbationSource);
+
+        // With mixing OFF the gun is owned by the scene, so whether this is a perturbation episode
+        // is decided by whether the gun is armed - not by a roll that never happens. Reading it
+        // rather than assuming: the single-task perturbation scene fires on every episode and was
+        // reporting all 128 of them as task_stand, which is a metric quietly describing the wrong
+        // experiment.
+        bool gunArmed = hasGun && PerturbationSource!.Get("Enabled").AsBool();
+
+        bool perturbation = _startedStanding
+                            && (mixing ? GD.Randf() < PerturbationEpisodeProbability : gunArmed);
+
+        EpisodeTask = perturbation ? "perturbation" : (_startedStanding ? "stand" : "getup");
+
+        if (_termination is UprightTermination upright)
+        {
+            upright.EndEpisodeOnSuccess = EndEpisodeOnStandingSuccess && !perturbation;
+        }
+
+        // Touched ONLY when mixing is on. Otherwise the scene owns its own gun, and writing to it
+        // here would silently re-arm a gun a single-task scene had deliberately disabled.
+        //
+        // Set() by name rather than casting to BallGun, so the bridge stays ignorant of what
+        // perturbs it - the same reason PerturbationSource is typed as Node.
+        if (PerturbationEpisodeProbability > 0.0f
+            && PerturbationSource != null && IsInstanceValid(PerturbationSource))
+        {
+            PerturbationSource.Set("Enabled", perturbation);
+        }
+    }
+
+    /// <summary>
+    /// Gives the whole body a forward velocity at episode start. See <see cref="InitialForwardSpeed"/>.
+    ///
+    /// Uses the pelvis facing rather than world -Z so it agrees with WalkForwardReward and
+    /// WalkTermination, which capture the same axis on their first tick. If the three disagreed the
+    /// body would be launched along one axis and scored along another.
+    /// </summary>
+    private void ApplyInitialForwardVelocity()
+    {
+        if (InitialForwardSpeed <= 0.0f || Ragdoll == null)
+        {
+            return;
+        }
+
+        ActiveBone? pelvis = Ragdoll.Pelvis;
+        if (pelvis == null || !IsInstanceValid(pelvis))
+        {
+            return;
+        }
+
+        Vector3 facing = -pelvis.GlobalTransform.Basis.Z;
+        facing.Y = 0.0f;
+        if (facing.LengthSquared() <= 1e-6f)
+        {
+            return;
+        }
+
+        float speed = InitialForwardSpeed
+                      * Mathf.Lerp(Mathf.Clamp(InitialForwardSpeedFloor, 0.0f, 1.0f), 1.0f, GD.Randf());
+        Vector3 velocity = facing.Normalized() * speed;
+
+        foreach (ActiveBone bone in Ragdoll.GetBones())
+        {
+            if (IsInstanceValid(bone))
+            {
+                // Assigned, not added. StartReinforcementLearning has just teleported every bone
+                // and zeroed its velocity, so there is nothing to preserve - and adding would let a
+                // stray residual from the previous episode survive the reset.
+                bone.LinearVelocity = velocity;
+            }
+        }
+    }
+
     private float SampleStartPose()
     {
         if (GD.Randf() < StandingStartProbability)
@@ -956,6 +1214,8 @@ public partial class RagdollRLBridge : Node
         _effectiveMaxEpisodeSeconds = Mathf.Lerp(ProneMaxEpisodeSeconds, MaxEpisodeSeconds, _startPoseT);
 
         Ragdoll?.StartReinforcementLearning(silent: true, startPoseT: _startPoseT);
+        ApplyInitialForwardVelocity();
+        SelectEpisodeTask();
 
         // One process logs, not all 32 - see IsPrimaryInstance for why it is keyed on the port
         // rather than on having a display.

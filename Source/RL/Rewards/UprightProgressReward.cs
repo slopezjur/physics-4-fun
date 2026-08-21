@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using Godot;
 using Physics4Fun.Ragdoll;
 using Physics4Fun.RL.Interfaces;
@@ -6,7 +6,14 @@ using Physics4Fun.RL.Interfaces;
 namespace Physics4Fun.RL.Rewards;
 
 /// <summary>
-/// Reward for learning to get up from prone, under pure RL (no procedural reference to imitate).
+/// Reward for getting upright and staying there, under pure RL (no procedural reference to imitate).
+///
+/// Shared by THREE tasks - stand, get-up and perturbation - which is why it is named for the
+/// objective rather than for any one of them. It was called GetUpProgressReward, and that was
+/// wrong in the same way the scene names were: standing and getting up are not different problems
+/// here, they are the same objective from different start poses, and balance-under-impact is that
+/// objective with something pushing back. Only walking needs a different reward, because only
+/// walking wants the body to go somewhere.
 ///
 /// Replaces the original UprightAliveReward, which was measured flat over 500k steps. The two
 /// structural fixes:
@@ -25,7 +32,7 @@ namespace Physics4Fun.RL.Rewards;
 ///    is what keeps the motion from becoming the rigid full-torque flailing that a pure progress
 ///    reward converges to, and is the main term shaping whether the result looks human.
 /// </summary>
-public sealed class GetUpProgressReward : IRlRewardFunction, IRlRewardDiagnostics
+public sealed class UprightProgressReward : IRlRewardFunction, IRlRewardDiagnostics
 {
     /// <summary>Scales the height-progress shaping term.</summary>
     private const float ProgressWeight = 10.0f;
@@ -48,7 +55,7 @@ public sealed class GetUpProgressReward : IRlRewardFunction, IRlRewardDiagnostic
     /// Near-zero (the default) during discovery; raise toward 0.25 once a get-up exists and the
     /// goal shifts to making it smooth and economical.
     /// </param>
-    public GetUpProgressReward(float effortWeight = 0.02f)
+    public UprightProgressReward(float effortWeight = 0.02f)
     {
         _effortWeight = effortWeight;
     }
@@ -56,7 +63,7 @@ public sealed class GetUpProgressReward : IRlRewardFunction, IRlRewardDiagnostic
     /// <summary>
     /// Head height (m) that normalises the shaping potential to 1.0.
     ///
-    /// Deliberately not called "standing head height": GetUpTermination has a constant of that
+    /// Deliberately not called "standing head height": UprightTermination has a constant of that
     /// name set to 1.35, and the two are different quantities that were easy to confuse. This one
     /// is a scale factor for the potential function; that one is the success threshold. Keeping
     /// this slightly above the success height means the potential is still rising through the last
@@ -79,7 +86,7 @@ public sealed class GetUpProgressReward : IRlRewardFunction, IRlRewardDiagnostic
     /// design had. Deliberately kept well above break-even so succeeding is decisively better
     /// rather than marginally so.
     ///
-    /// The "standing at t=0" worst case is now unreachable in any event: GetUpTermination requires
+    /// The "standing at t=0" worst case is now unreachable in any event: UprightTermination requires
     /// StandingHoldSeconds = 1.5 s of continuous success before it fires, so the most an agent can
     /// forfeit is the remaining window after that, and the real margin is wider than the figure
     /// above. Raising the hold moves this in the safe direction, which is why it needed no
@@ -131,7 +138,7 @@ public sealed class GetUpProgressReward : IRlRewardFunction, IRlRewardDiagnostic
     /// itself into the Inverted state.
     /// </summary>
     public string Describe() =>
-        $"GetUpProgressReward(progress={ProgressWeight}, upright={UprightWeight}, "
+        $"UprightProgressReward(progress={ProgressWeight}, upright={UprightWeight}, "
         + $"effort={_effortWeight}, standingBonus={StandingBonus}, potentialHeadHeight={PotentialReferenceHeadHeight})";
 
     public float EvaluateTerminal(in RlContext context, string reason)

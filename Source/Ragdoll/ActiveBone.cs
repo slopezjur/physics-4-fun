@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using Godot;
 using Physics4Fun.Core.Math;
 
@@ -18,7 +18,17 @@ public partial class ActiveBone : RigidBody3D
     [Export] public float ProportionalGain { get; set; } = 450.0f;
     [Export] public float DerivativeGain { get; set; } = 40.0f;
     [Export] public float IntegralGain { get; set; } = 0.0f; // Pure PD control prevents contact windup & jitter
-    [Export] public float MaxTorque { get; set; } = 1200.0f;
+    /// <summary>
+    /// Torque ceiling (N.m) for a bone that does not override it.
+    ///
+    /// 300 rather than the 1200 this used to be, matching the 1.5x-human-peak rule the rig's
+    /// authored ceilings now follow. Every actuated bone in ActiveRagdoll.tscn sets its own value,
+    /// so the only bone left on the default is the pelvis - which is the root, has no ParentBone,
+    /// and therefore never actuates at all (its telemetry TorqueMag is 0.000 for 100% of ticks).
+    /// The old default was inert but it was a loaded gun: any bone added without an explicit
+    /// ceiling would have inherited roughly six times a human hip's peak torque.
+    /// </summary>
+    [Export] public float MaxTorque { get; set; } = 300.0f;
 
     /// <summary>
     /// Anti-windup clamp for the integral error (rad·s). Bounds the static-load feed-forward
@@ -73,6 +83,50 @@ public partial class ActiveBone : RigidBody3D
     /// <summary>Scales the gravity / support-load feed-forward torque (1.0 = full physical compensation).</summary>
     [Export] public float LoadCompensationScale { get; set; } = 1.0f;
 
+    /// <summary>
+    /// Largest share of <see cref="MaxTorque"/> the gravity feed-forward may claim, leaving the
+    /// rest for the PD term.
+    ///
+    /// Without this the feed-forward was unbounded and the only clamp was on the SUM, which
+    /// preserves the feed-forward's direction and discards the PD contribution whenever load
+    /// compensation alone exceeds the ceiling. Measured on a 10 s RL arena dump, that happened on
+    /// 23.3% of ticks at the spine and 20.0% at the chest: one tick in five, the torso stopped
+    /// tracking its target and became a pure gravity strut. Because the feed-forward grows with the
+    /// lever arm between the joint and its load, it peaks exactly when the pose is worst - so the
+    /// actuator lost authority precisely when it was needed, which is a positive feedback loop into
+    /// the fall it was trying to arrest.
+    ///
+    /// 0.5 matches the split PidController3D already applies to its own D-term for the same reason
+    /// ("so the P term always retains authority"). Median demand is around 30 N.m against ceilings
+    /// in the hundreds, so this bounds the tail without touching normal operation.
+    /// </summary>
+    [Export] public float LoadCompensationTorqueFraction { get; set; } = 0.5f;
+
+    /// <summary>
+    /// Joint angular speed (rad/s) at which this actuator can no longer produce ANY torque in the
+    /// direction it is already turning - the Hill force-velocity limit.
+    ///
+    /// A torque ceiling bounds force; it does not bound POWER, and power is what was wrong here.
+    /// Nothing stopped a joint from holding its full ceiling while spinning at Jolt's 47.12 rad/s
+    /// angular-velocity clamp, and 400 N.m x 47.12 rad/s is 18.8 kW. Measured on two arena dumps:
+    /// 24.0 kW at one thigh and 71 kW across the body, against roughly 2.6 kW for a world-class
+    /// sprinter at full output. That is the "shotgun" - a ball carrying 0.048 J triggers a joint
+    /// that then delivers 200 J in a single tick.
+    ///
+    /// Real muscle cannot do this: force falls with shortening velocity and reaches zero at the
+    /// maximum shortening velocity. Modelling that caps peak mechanical power at tau0*wMax/4
+    /// automatically, so at 15 rad/s every joint on this rig lands at human power (thigh 1.5 kW,
+    /// knee 1.5 kW, ankle 0.94 kW) without any ceiling changing.
+    ///
+    /// 15 rad/s is the low end of human peak joint angular velocity (15-20 rad/s in a fast kick).
+    /// Raising it raises peak power linearly; setting it to 0 disables the limit entirely.
+    ///
+    /// Crucially this only applies to torque that DRIVES the joint. Braking a limb that is already
+    /// moving keeps full authority - see ComputeForceVelocityScale - because that is exactly when
+    /// the actuator needs it, and because eccentric muscle is stronger than isometric, not weaker.
+    /// </summary>
+    [Export] public float MaxShorteningVelocity { get; set; } = 15.0f;
+
     public float MuscleStrength { get; set; } = 1.0f;
 
     /// <summary>
@@ -105,6 +159,16 @@ public partial class ActiveBone : RigidBody3D
 
     /// <summary>Gravity / support-load feed-forward contribution to the last applied torque, before the output clamp.</summary>
     public Vector3 LastLoadCompensationTorque { get; private set; } = Vector3.Zero;
+
+    /// <summary>
+    /// Hill force-velocity scale applied to the torque ceiling on the last tick, in [0,1].
+    ///
+    /// 1 means the joint was still or being braked and had full authority; 0 means it was already
+    /// turning at MaxShorteningVelocity in the direction the actuator was pushing and was denied
+    /// any further drive. Recorded so a run can be read for whether the limit is engaging at all,
+    /// rather than the limit being a change nobody can see the effect of.
+    /// </summary>
+    public float LastForceVelocityScale { get; private set; } = 1.0f;
 
     public float LastTrackingErrorDeg { get; private set; } = 0.0f;
 
@@ -216,16 +280,40 @@ public partial class ActiveBone : RigidBody3D
         // term only has to correct the residual instead of developing large error to generate
         // support force. This is the physical replacement for the removed 10x/100x hack.
         Vector3 loadCompensation = ComputeLoadCompensationTorque(SupportedMassShare) * MuscleStrength;
-        Vector3 totalTorque = torque + loadCompensation;
+        float maxTorque = MaxTorque * MuscleStrength;
 
+        // Record the DEMAND rather than what survives the bound below, so telemetry keeps showing
+        // how far the feed-forward overshoots. Recording the clamped value instead would hide the
+        // overflow that motivated LoadCompensationTorqueFraction in the first place.
         LastPdTorque = torque;
         LastLoadCompensationTorque = loadCompensation;
 
-        // Clamp the combined output so the feed-forward cannot exceed the actuator's limit
-        float maxTorque = MaxTorque * MuscleStrength;
-        if (maxTorque > 0.0f && totalTorque.LengthSquared() > maxTorque * maxTorque)
+        // Bound the feed-forward BEFORE summing. Clamping only the sum lets a large feed-forward
+        // crowd the PD term out of the budget entirely - see LoadCompensationTorqueFraction.
+        float maxLoadCompensation = maxTorque * LoadCompensationTorqueFraction;
+        if (maxLoadCompensation > 0.0f
+            && loadCompensation.LengthSquared() > maxLoadCompensation * maxLoadCompensation)
         {
-            totalTorque = totalTorque.Normalized() * maxTorque;
+            loadCompensation = loadCompensation.Normalized() * maxLoadCompensation;
+        }
+
+        Vector3 totalTorque = torque + loadCompensation;
+
+        // Hill force-velocity limit, applied here rather than to _pid.MaxTorque because the scale
+        // depends on the direction of the torque actually being commanded, which is not known until
+        // the PD and feed-forward terms have been summed.
+        LastForceVelocityScale = ComputeForceVelocityScale(totalTorque, relativeAngVel);
+        float velocityLimitedMax = maxTorque * LastForceVelocityScale;
+
+        // Clamp the combined output so the pair together cannot exceed what the actuator can
+        // deliver at this joint's current speed.
+        if (velocityLimitedMax > 0.0f && totalTorque.LengthSquared() > velocityLimitedMax * velocityLimitedMax)
+        {
+            totalTorque = totalTorque.Normalized() * velocityLimitedMax;
+        }
+        else if (velocityLimitedMax <= 0.0f)
+        {
+            totalTorque = Vector3.Zero;
         }
 
         LastAppliedTorque = totalTorque;
@@ -633,6 +721,43 @@ public partial class ActiveBone : RigidBody3D
         }
 
         return compensation * LoadCompensationScale;
+    }
+
+    /// <summary>
+    /// Hill-type force-velocity scale on the torque ceiling, in [0,1].
+    ///
+    /// Only the component of joint velocity ALONG the commanded torque counts as shortening. A
+    /// joint being braked - velocity opposing the torque - is an eccentric contraction, where real
+    /// muscle is stronger than isometric, so it keeps full authority here rather than being
+    /// penalised. That asymmetry is what makes this safe for balance: arresting a limb is braking,
+    /// and arresting a limb is most of what standing up consists of. What it removes is the ability
+    /// to keep driving a joint that is already spinning, which is the term that was injecting
+    /// kilowatts.
+    ///
+    /// Linear falloff rather than Hill's hyperbola. The hyperbola is the better fit to real muscle,
+    /// but the quantity being bounded here is peak power, and both forms cap it at the same order;
+    /// the linear form has no extra parameter to tune and cannot go negative.
+    /// </summary>
+    private float ComputeForceVelocityScale(Vector3 torque, Vector3 relativeAngularVelocity)
+    {
+        if (MaxShorteningVelocity <= 0.0f)
+        {
+            return 1.0f;
+        }
+
+        float torqueLengthSquared = torque.LengthSquared();
+        if (torqueLengthSquared < 1e-12f)
+        {
+            return 1.0f;
+        }
+
+        float shortening = relativeAngularVelocity.Dot(torque) / Mathf.Sqrt(torqueLengthSquared);
+        if (shortening <= 0.0f)
+        {
+            return 1.0f;
+        }
+
+        return Mathf.Max(0.0f, 1.0f - (shortening / MaxShorteningVelocity));
     }
 
     private Vector3 GetJointPivot()

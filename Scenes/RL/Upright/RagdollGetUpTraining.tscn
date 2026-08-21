@@ -2,7 +2,7 @@
 
 [ext_resource type="PackedScene" uid="uid://dp62k4a8uwns2" path="res://Scenes/ActiveRagdoll.tscn" id="1_ragdoll"]
 [ext_resource type="Script" path="res://Source/RL/RagdollRLBridge.cs" id="2_bridge"]
-[ext_resource type="Script" path="res://Scenes/RL/RagdollAIController.gd" id="3_aicontroller"]
+[ext_resource type="Script" path="res://Scenes/RL/Shared/RagdollAIController.gd" id="3_aicontroller"]
 [ext_resource type="Script" path="res://addons/godot_rl_agents/sync.gd" id="4_sync"]
 [ext_resource type="Script" path="res://Source/UI/RagdollTelemetryHud.cs" id="5_telemetry"]
 [ext_resource type="Script" path="res://Source/Camera/CameraController.cs" id="6_camera"]
@@ -13,7 +13,7 @@ size = Vector3(20, 1, 20)
 [sub_resource type="BoxMesh" id="BoxMesh_floor"]
 size = Vector3(20, 1, 20)
 
-[node name="RagdollRLTraining" type="Node3D"]
+[node name="RagdollGetUpTraining" type="Node3D"]
 
 [node name="Floor" type="StaticBody3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
@@ -44,6 +44,8 @@ reset_after = 100000
 script = ExtResource("2_bridge")
 Ragdoll = NodePath("../ActiveRagdoll")
 AiController = NodePath("../AIController")
+StandingStartProbability = 0.2
+CurriculumPoseT = 0.99
 
 [node name="Sync" type="Node" parent="."]
 script = ExtResource("4_sync")

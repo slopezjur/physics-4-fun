@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using Godot;
 using Physics4Fun.Ragdoll;
 using Physics4Fun.RL.Interfaces;
@@ -6,7 +6,18 @@ using Physics4Fun.RL.Interfaces;
 namespace Physics4Fun.RL.Observations;
 
 /// <summary>
-/// Whole-body observation for the pure-RL get-up task, replacing the minimal BasicPoseObservation used to prove the pipeline in M2.
+/// Whole-body proprioceptive observation, shared by EVERY task, replacing the minimal
+/// BasicPoseObservation used to prove the pipeline in M2.
+///
+/// Task-neutral on purpose, and load-bearing because of it: the width is published to Python at
+/// handshake and baked into every checkpoint, so a policy trained on one task can only be restored
+/// onto another while this stays identical. That is the sole reason walking can be bootstrapped
+/// from a standing policy rather than trained from noise.
+///
+/// It carries no task indicator and no goal, which is the current limit of the "one brain" idea:
+/// stand, get-up and perturbation share an objective so they need none, but a task that wants the
+/// body to go somewhere would need a goal vector added here - and adding one invalidates every
+/// existing checkpoint.
 ///
 /// Three deliberate changes from the M2 placeholder:
 ///
@@ -21,7 +32,7 @@ namespace Physics4Fun.RL.Observations;
 ///    decisive fact when pushing off the floor, and the M2 set omitted it entirely - the policy
 ///    literally could not tell whether its foot was planted.
 /// </summary>
-public sealed class GetUpObservation : IRlObservationBuilder
+public sealed class BodyStateObservation : IRlObservationBuilder
 {
     /// <summary>Bones whose contact state is reported, in order.</summary>
     private static readonly string[] ContactBoneNames =
@@ -42,12 +53,12 @@ public sealed class GetUpObservation : IRlObservationBuilder
 
     private readonly int _boneCount;
 
-    public GetUpObservation(int boneCount) => _boneCount = boneCount;
+    public BodyStateObservation(int boneCount) => _boneCount = boneCount;
 
     public int Size => RootComponents + (_boneCount * ComponentsPerBone) + ContactBoneNames.Length;
 
     public string Describe() =>
-        $"GetUpObservation(root={RootComponents}, perBone={ComponentsPerBone} [quaternion+angvel], "
+        $"BodyStateObservation(root={RootComponents}, perBone={ComponentsPerBone} [quaternion+angvel], "
         + $"bones={_boneCount}, contacts={ContactBoneNames.Length}, total={Size})";
 
     public float[] Build(in RlContext context)
