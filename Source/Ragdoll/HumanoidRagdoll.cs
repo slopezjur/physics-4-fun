@@ -57,7 +57,11 @@ public partial class HumanoidRagdoll : Node3D
     public bool ReinforcementLearningPolicyActive { get; set; }
 
     private readonly List<ActiveBone> _allBones = new();
-    private readonly List<ActiveBone> _plantedLimbs = new();
+    /// <summary>
+    /// How planted limbs share body weight. Swappable because it is a modelling decision, not a
+    /// property of the skeleton - see ISupportLoadDistribution.
+    /// </summary>
+    private readonly Interfaces.ISupportLoadDistribution _supportLoad = new Support.PlantedLimbLoadDistribution();
     private readonly Recovery.GetUpPhaseController _getUpPhases = new();
     private readonly Diagnostics.RagdollTelemetryRecorder _recorder = new();
     private float _time;
@@ -88,31 +92,6 @@ public partial class HumanoidRagdoll : Node3D
 
     /// <summary>Current get-up stage; Complete when not recovering.</summary>
     public Recovery.GetUpPhase CurrentGetUpPhase => _getUpPhases.CurrentPhase;
-
-    public override void _UnhandledInput(InputEvent @event)
-    {
-        if (@event is not InputEventKey keyEvent || !keyEvent.Pressed || keyEvent.Echo)
-        {
-            return;
-        }
-
-        // T is allowed during RL; everything else is not. Telemetry recording only READS state, so
-        // it cannot yank CurrentState out from under an active episode the way the pose keys can -
-        // and a balance run is precisely when you most want a dump, because the interesting event
-        // (a ball landing) is invisible in the aggregate metrics.
-        if (keyEvent.Keycode == Key.T)
-        {
-            StartTelemetryRecording();
-            return;
-        }
-
-        // The RL state is externally driven (see RagdollRLBridge) - a stray debug keypress must
-        // not be able to yank CurrentState out from under an active episode.
-        if (CurrentState == RagdollState.ReinforcementLearning)
-        {
-            return;
-        }
-    }
 
     public void StartTelemetryRecording(float duration = Diagnostics.RagdollTelemetryRecorder.DefaultDurationSeconds)
     {
@@ -205,7 +184,7 @@ public partial class HumanoidRagdoll : Node3D
 
         // Recompute which limbs are load-bearing before torques are generated, so the
         // load-compensation feed-forward uses this tick's contact state.
-        UpdateSupportLoadDistribution();
+        _supportLoad.Distribute(_allBones);
 
         foreach (var bone in _allBones)
         {
@@ -610,68 +589,6 @@ public partial class HumanoidRagdoll : Node3D
     }
 
 
-    /// <summary>
-    /// Limb end-effectors that can act as ground struts. When one is in contact, its whole limb
-    /// chain carries a share of body weight and needs support-load compensation, not just
-    /// gravity compensation for its own (light) distal mass.
-    /// </summary>
-    private static readonly string[] SupportEndEffectors = { "Forearm_L", "Forearm_R", "Foot_L", "Foot_R" };
-
-    /// <summary>
-    /// Distributes total body mass across whichever limbs are currently planted, so each support
-    /// chain knows how much weight it must hold up. This is what lets light arms push an 80 kg
-    /// torso off the floor without faking gains or inertia.
-    /// </summary>
-    private void UpdateSupportLoadDistribution()
-    {
-        foreach (var bone in _allBones)
-        {
-            bone.SupportedMassShare = 0.0f;
-        }
-
-        _plantedLimbs.Clear();
-        foreach (var bone in _allBones)
-        {
-            if (!IsInstanceValid(bone) || System.Array.IndexOf(SupportEndEffectors, bone.BoneName) < 0)
-            {
-                continue;
-            }
-            if (bone.IsInContactWithWorld())
-            {
-                _plantedLimbs.Add(bone);
-            }
-        }
-
-        if (_plantedLimbs.Count == 0)
-        {
-            return;
-        }
-
-        float totalMass = 0.0f;
-        foreach (var bone in _allBones)
-        {
-            totalMass += bone.Mass;
-        }
-
-        float share = totalMass / _plantedLimbs.Count;
-
-        // Assign the share up each planted limb chain, stopping at the torso: the torso is the
-        // load being carried, not a strut carrying it.
-        foreach (var endEffector in _plantedLimbs)
-        {
-            ActiveBone? cursor = endEffector;
-            int guard = 0;
-            while (cursor != null && guard++ < 32)
-            {
-                if (cursor.BoneName == "Chest" || cursor.BoneName == "Spine" || cursor.BoneName == "Pelvis")
-                {
-                    break;
-                }
-                cursor.SupportedMassShare = share;
-                cursor = cursor.ParentBone;
-            }
-        }
-    }
 
     /// <summary>Snapshot of the sensors the get-up phase machine reasons about.</summary>
     private Recovery.RecoveryContext BuildRecoveryContext()

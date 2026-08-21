@@ -37,11 +37,29 @@ public class RagdollTelemetryRecorder
         "Thigh_L", "Shin_L", "Foot_L", "Thigh_R", "Shin_R", "Foot_R"
     };
 
-    /// <summary>Per-bone CSV columns emitted by <see cref="RecordFrame"/>, used for the absent-bone filler.</summary>
-    private const int BoneColumnCount = 18;
+    /// <summary>
+    /// Per-bone column suffixes, in emission order. The single definition the header is built from
+    /// and the absent-bone filler is sized by.
+    ///
+    /// It used to be a hand-maintained count sitting next to a separately hand-written header
+    /// string, which is a duplication that fails SILENTLY: if the two drift, every column after the
+    /// mistake is misaligned and the CSV still parses, so a dump reads as valid data about the
+    /// wrong quantities. Adding the energy columns meant editing three places in sync and getting
+    /// all three right. Now the count is derived, and ValidateRowWidth below catches any remaining
+    /// header/row disagreement on the first frame rather than in an analysis a day later.
+    /// </summary>
+    private static readonly string[] BoneColumnSuffixes = {
+        "PosY", "Strength", "TorqueMag", "TorqueX", "TorqueY", "TorqueZ",
+        "EulerX", "EulerY", "EulerZ", "AngVelX", "AngVelY", "AngVelZ",
+        "TrackingErrorDeg", "PdTorqueMag", "LoadTorqueMag",
+        "LinVelMag", "PowerW", "FvScale"
+    };
+
+    private static int BoneColumnCount => BoneColumnSuffixes.Length;
 
     /// <summary>Filler for a bone that is absent from the rig, keeping the row aligned to the header.</summary>
-    private static readonly string EmptyBoneColumns = string.Concat(Enumerable.Repeat(",0", BoneColumnCount));
+    private static readonly string EmptyBoneColumns =
+        string.Concat(Enumerable.Repeat(",0", BoneColumnSuffixes.Length));
 
     /// <summary>Gravity (m/s^2) used for the potential-energy column; matches ActiveBone.</summary>
     private const float GravityForEnergy = 9.81f;
@@ -165,13 +183,14 @@ public class RagdollTelemetryRecorder
 
         foreach (string name in BoneNames)
         {
-            sb.Append($",{name}_PosY,{name}_Strength,{name}_TorqueMag,{name}_TorqueX,{name}_TorqueY,{name}_TorqueZ,{name}_EulerX,{name}_EulerY,{name}_EulerZ,{name}_AngVelX,{name}_AngVelY,{name}_AngVelZ,{name}_TrackingErrorDeg,{name}_PdTorqueMag,{name}_LoadTorqueMag");
-
-            // LinVelMag: per-bone linear speed was absent entirely, so per-bone kinetic energy could
-            // not be computed and only the CoM aggregate was visible - which cancels exactly the
-            // internal flailing that matters here. PowerW: this joint's tau*omega, the term the
-            // torque ceiling does not bound.
-            sb.Append($",{name}_LinVelMag,{name}_PowerW,{name}_FvScale");
+            // LinVelMag: per-bone linear speed was absent entirely, so per-bone kinetic energy
+            // could not be computed and only the CoM aggregate was visible - which cancels exactly
+            // the internal flailing that matters here. PowerW: this joint's tau*omega, the term the
+            // torque ceiling does not bound. FvScale: whether the Hill limit engaged.
+            foreach (string suffix in BoneColumnSuffixes)
+            {
+                sb.Append($",{name}_{suffix}");
+            }
         }
 
         _csvRows.Add(sb.ToString());
@@ -393,7 +412,9 @@ public class RagdollTelemetryRecorder
         }
 
         _deltaSum += delta;
-        _csvRows.Add(sb.ToString());
+        string row = sb.ToString();
+        ValidateRowWidth(row);
+        _csvRows.Add(row);
 
         if (ElapsedRecordingTime >= MaxDuration)
         {
@@ -445,6 +466,43 @@ public class RagdollTelemetryRecorder
         d.TorqueSum += torque;
         d.TorqueMax = Mathf.Max(d.TorqueMax, torque);
         d.TorqueVectorSum += bone.LastAppliedTorque;
+    }
+
+    /// <summary>
+    /// Fails loudly if a data row does not have the same number of columns as the header.
+    ///
+    /// Checked once per recording, on the first data row, because the failure it guards against is
+    /// structural rather than intermittent: a header and a row built by separate code paths that
+    /// have drifted. Every column after the mismatch would be attributed to the wrong name, and
+    /// nothing about the resulting file looks wrong - it parses, the values are plausible, and the
+    /// conclusions drawn from it are simply about different quantities than they claim.
+    /// </summary>
+    private void ValidateRowWidth(string row)
+    {
+        if (_csvRows.Count != 1)
+        {
+            return;
+        }
+
+        int headerColumns = CountColumns(_csvRows[0]);
+        int rowColumns = CountColumns(row);
+        if (headerColumns != rowColumns)
+        {
+            GD.PushError(
+                $"[RagdollTelemetryRecorder] Header has {headerColumns} columns but rows have "
+                + $"{rowColumns}. The dump is misaligned and must not be trusted - a column was "
+                + "added to one of RecordFrame's two build paths and not the other.");
+        }
+    }
+
+    private static int CountColumns(string line)
+    {
+        int columns = 1;
+        foreach (char character in line)
+        {
+            if (character == ',') { columns++; }
+        }
+        return columns;
     }
 
     /// <summary>

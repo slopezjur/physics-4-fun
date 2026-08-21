@@ -11,7 +11,8 @@ Physics4Fun.Ragdoll/
 ├── Interfaces/
 │   ├── IBalanceTelemetryProvider.cs    # Read-only contract for UI & diagnostics
 │   ├── IBiomechanicalReflex.cs         # Autonomous reflex strategy contract
-│   └── IBalanceStrategy.cs             # Balance strategy contract (BalanceContext + Apply)
+│   ├── IBalanceStrategy.cs             # Balance strategy contract (BalanceContext + Apply)
+│   └── ISupportLoadDistribution.cs     # How planted limbs share body weight
 ├── Modules/
 │   ├── DynamicSteppingModule.cs         # Instantaneous Capture Point (ICP) & 2-bone IK
 │   ├── WeightTransferModule.cs          # Asymmetric weight shifting & impedance scaling
@@ -32,6 +33,8 @@ Physics4Fun.Ragdoll/
 │   ├── PushUpDrillTrajectory.cs        # Scripted push-up drill for actuator validation
 │   ├── IPhasedRecoveryTrajectory.cs    # Contract for trajectories driven by GetUpPhaseController
 │   └── ReactiveMotionTrajectories.cs   # Impact stumbling and flailing trajectories
+├── Support/
+│   └── PlantedLimbLoadDistribution.cs  # Even split across planted end-effectors
 ├── Diagnostics/
 │   └── RagdollTelemetryRecorder.cs     # Time-series telemetry logger & CSV export
 ├── ActiveBone.cs                        # Biomechanical PD actuator observing Newton's 3rd Law
@@ -106,14 +109,17 @@ Physics4Fun.RL/
 
 Recorded rather than silently carried. Ordered by how likely each is to cause a real defect.
 
+Three earlier entries are retired. The telemetry column list is defined once and a row-width check
+fails loudly on the first frame if the header and row paths ever drift; ragdoll keyboard input is
+owned solely by `RagdollDebugInput`; and the support-load policy moved out of `HumanoidRagdoll`
+behind `ISupportLoadDistribution`, which also gave its known mass over-estimate a documented home
+instead of an anonymous line in the body class.
+
 | # | Where | Issue | Why it matters |
 |---|---|---|---|
-| 1 | `RagdollTelemetryRecorder` | The CSV column list is written **twice** — once building the header, once building the row — with a hand-maintained `BoneColumnCount` that must match. | Fails **silently**: header/row drift misaligns every column after the mistake, and the file still parses. Adding columns already required editing three places in sync. A single column definition consumed by both would remove the failure mode. |
-| 2 | `HumanoidRagdoll` | Keyboard handling lives in `_UnhandledInput` *and* in `RagdollDebugInput`. | Two classes own ragdoll input, so which key does what is not answerable from one place. |
-| 3 | `HumanoidRagdoll` | ~7 responsibilities in 776 lines: bone registry, state transitions, pose authoring, actuator driving, support-load distribution, debug input, telemetry orchestration. | `UpdateSupportLoadDistribution` is a physics policy (`totalMass / plantedLimbs.Count`, which over-counts a support limb's own mass) embedded in the body class rather than behind a contract. |
-| 4 | `ActiveBone` | ~5 responsibilities in 776 lines: rigid body, SPD actuator, gravity/support feed-forward, force-velocity limit, joint-limit querying. | The actuator is ~250 lines and cannot be exercised without a scene tree. Extracting it would make the SPD and Hill maths testable in isolation — the same argument that moved the curriculum out of the bridge. |
-| 5 | `BalanceContext` | 27 members; every module receives the whole body. | ISP smell. Deliberately **not** fixed: per-module contexts would add real complexity for a struct that is cheap to pass, and no defect has been traced to it. |
-| 6 | `RagdollRLBridge` | Still ~7 responsibilities after the curriculum extraction; `GetStepInfo` is 130 lines. | Cohesive dictionary assembly, so splitting it adds indirection without clarity. The `TaskKind` switch is closed for extension — the right moment to add a registry is when a third brain appears, not before. |
+| 1 | `ActiveBone` | ~5 responsibilities in 776 lines: rigid body, SPD actuator, gravity/support feed-forward, force-velocity limit, joint-limit querying. | The actuator is ~250 lines and cannot be exercised without a scene tree. Extracting it would make the SPD and Hill maths testable in isolation — the same argument that moved the curriculum out of the bridge. |
+| 2 | `BalanceContext` | 27 members; every module receives the whole body. | ISP smell. Deliberately **not** fixed: per-module contexts would add real complexity for a struct that is cheap to pass, and no defect has been traced to it. |
+| 3 | `RagdollRLBridge` | Still ~7 responsibilities after the curriculum extraction; `GetStepInfo` is 130 lines. | Cohesive dictionary assembly, so splitting it adds indirection without clarity. The `TaskKind` switch is closed for extension — the right moment to add a registry is when a third brain appears, not before. |
 
 `ActiveBone.IsTargetWithinJointLimits` is also known-broken (Euler YXZ cannot represent the ±2.6 rad
 limits four axes on this rig have) and its own doc comment says so. It is diagnostic-only; the RL

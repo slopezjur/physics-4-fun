@@ -1,4 +1,4 @@
-using Godot;
+﻿using Godot;
 
 namespace Physics4Fun.Ragdoll;
 
@@ -19,6 +19,25 @@ public partial class RagdollDebugInput : Node
             return;
         }
 
+        if (@event is not InputEventKey keyEvent || !keyEvent.Pressed || keyEvent.Echo)
+        {
+            return;
+        }
+
+        // T is handled BEFORE the RL guard below, and is the only key that is. Telemetry recording
+        // only READS state, so unlike every pose key it cannot yank CurrentState out from under an
+        // active episode - and an RL run is precisely when a dump is most wanted, because the
+        // interesting event (a ball landing) is invisible in the aggregate metrics.
+        //
+        // This lived on HumanoidRagdoll until it was the only thing left in a _UnhandledInput
+        // override there, which meant ragdoll input was owned by two classes and answerable from
+        // neither. This class already existed for exactly this, and says so in its own summary.
+        if (keyEvent.Keycode == Key.T)
+        {
+            Ragdoll.StartTelemetryRecording();
+            return;
+        }
+
         // The RL state is externally driven (see RagdollRLBridge) - a stray debug keypress must
         // not be able to yank CurrentState out from under an active episode.
         if (Ragdoll.CurrentState == RagdollState.ReinforcementLearning)
@@ -26,7 +45,6 @@ public partial class RagdollDebugInput : Node
             return;
         }
 
-        if (@event is InputEventKey keyEvent && keyEvent.Pressed && !keyEvent.Echo)
         {
             switch (keyEvent.Keycode)
             {
