@@ -161,9 +161,9 @@ only composed on top of it.
   is attributable to the policy.
 - `RagdollRLBridge` writes `TargetLocalRotation` directly (rest * action). Action range widened
   0.6 → 2.6 rad to span the real joint envelope; 4 → 12 controlled bones (36 actions).
-- `GetUpObservation` (106 floats): root-relative **quaternions** (not wrap-prone Euler), pelvis
+- `BodyStateObservation` (106 floats): root-relative **quaternions** (not wrap-prone Euler), pelvis
   up-vector, CoM offset/velocity, head height, and hand/foot **contact flags**.
-- `GetUpProgressReward`, `GetUpTermination` (success on *held* standing, not momentary).
+- `UprightProgressReward`, `UprightTermination` (success on *held* standing, not momentary).
 - Physics restored to **120 Hz** (`EnsurePhysicsTickRate`, derived from `Engine.TimeScale`);
   `action_repeat = 8` → 15 Hz control, chosen against the 40 ms actuator smoothing constant.
 
@@ -240,6 +240,108 @@ largest positive term. Add the diagnostic before forming the theory.
 
 ---
 
+# The perturbation ball was creating momentum (measured, fixed)
+
+The symptom was that a ball hitting the torso launched the dummy across the arena, and it survived
+four rounds of parameter changes that should each have fixed it. It was not a tuning problem.
+
+## What was measured
+
+Over 36 consecutive contact ticks the ball's speed rose 5.98 -> 7.11 m/s, a change fully accounted
+for by gravity, while the chest it was touching gained 74 N.s in a single tick - twelve times the
+ball's entire momentum, from a ball that lost none of it. Whole-body energy rose 380 J in one 8.3 ms
+tick while the actuators, capped at their force-velocity limit, could supply at most 4.4 J.
+
+Momentum and energy were being created, not exchanged. Nothing downstream of that is meaningful:
+every reward number from the affected runs describes a body that does not obey conservation.
+
+## Why both collision settings failed
+
+| `ContinuousCd` | failure |
+|---|---|
+| on | Godot-Jolt implements it as a linear cast that **repositions** the body rather than resolving a contact. A reposition is a position change; the follow-up overlap correction injects velocity one-way. The ball is moved, the bone is shoved, nothing balances. |
+| off | The ball crosses 0.052 m per tick. It went from not touching to buried in one step, and deep-overlap recovery is again a positional correction. |
+
+The second failure is shape-dependent, which is what made it look task-dependent. Classified across
+every recorded contact:
+
+- **Real collisions** (ball decelerates): Spine, Thigh, Shin - capsules with radius 0.07-0.12 m
+- **Ghost contacts** (ball keeps its speed, dummy gains up to 1400 J): every box-shaped bone -
+  pelvis, chest, hands, **7 of 7** - plus capsules thinner than about 0.07 m
+
+Thicker shapes give the solver two or three ticks inside the contact band to resolve properly. Flat
+box faces give it none. That is why only torso hits looked explosive.
+
+## The fix
+
+The ball is on its own collision layer (4, mask 1), invisible to the ragdoll's solver but still
+colliding with the ground. `BallGun.AgeBalls` runs a shape query against the real bone colliders and
+applies the impact directly:
+
+```
+impulse = mass * (velocity - reflected)      // reflected = bounce at BallRestitution
+bone.ApplyImpulse(impulse, ballPosition - bone.GlobalPosition)
+```
+
+The ragdoll's **response** is still entirely solver-simulated - impulse propagation through 16 bodies
+and 15 joints, the actuators fighting it, whether it recovers. Only the disturbance is specified.
+That is a boundary condition, not a physics bypass, and it is what every shipping game does for
+projectiles: rigid-body solvers are built for persistent contacts between comparable masses, and a
+6400:1 mass ratio at 0.052 m per tick is far outside that envelope.
+
+Measured result: `SystemKE` per hit 2641 J -> 190 J, fastest bone 12.90 -> 4.18 m/s, and a constant
+22-32 N.s delivered regardless of which bone is struck.
+
+## What this does not fix
+
+The solver weakness is untouched for anything else small and fast. Dummy-vs-dummy contact is
+comparable-mass and persistent, so it is inside the safe envelope; thrown objects, weapons and props
+are not, and need the same analytic treatment. The two warning signs are **mass ratio above ~100:1**
+and **per-tick travel exceeding the target's shape thickness**.
+
+---
+
+# Actuators: torque was bounded, power was not (measured, fixed)
+
+Found while wrongly suspecting the actuators of the above. The defects were real, just not that one.
+
+| | was | now | human peak |
+|---|---|---|---|
+| Thigh / Shin / Foot ceiling | 1600 / 1800 / 800 N.m | 400 / 400 / 250 | hip 250, knee 275, ankle 150 |
+| peak injected joint power | **24 kW** | 1.5 kW | sprinter ~2.6 kW **whole body** |
+
+A torque ceiling bounds force, not power. Nothing stopped a joint holding its full ceiling while
+spinning at Jolt's 47.12 rad/s default angular-velocity clamp, and 400 N.m x 47 rad/s is 18.8 kW.
+Every limb on the rig was pinned at that clamp - the engine's safety net was doing the tuning.
+
+`MaxShorteningVelocity` adds a Hill-type force-velocity limit: available torque falls linearly with
+the component of joint velocity along the commanded torque, reaching zero at 15 rad/s. Peak power is
+then capped at `tau0 * wMax / 4` automatically, which lands every joint at human scale without any
+ceiling changing. Braking keeps full authority - eccentric muscle is stronger than isometric, and
+arresting a limb is most of what standing consists of.
+
+Also bounded: the gravity feed-forward, which exceeded the actuator ceiling on **23% of ticks** at
+the spine and 20% at the chest. The clamp was on the sum, so it preserved the feed-forward direction
+and discarded the PD term entirely - one tick in five the torso stopped tracking and became a
+gravity strut, and it peaked exactly when the pose was worst.
+
+## Damping: 120 Hz sets a hard ceiling
+
+`AutoTuneDamping` at zeta = 1.0 was tried and reverted. Holding effective stiffness constant, the
+maximum achievable damping ratio at this tick rate is:
+
+| joint | zeta achievable | zeta authored | cost of forcing zeta = 1 |
+|---|---|---|---|
+| Thigh | 0.749 | 0.60 | KpEff 238 -> 140 (**-41%**) |
+| Shin | 0.697 | 0.62 | 133 -> 78 (**-42%**) |
+| Foot | 0.263 | 0.23 | 59 -> 17 (**-72%**) |
+
+The authored gains already sit within 0.03 of the frontier. The `UNDERDAMPED` flag on the feet is a
+consequence of the sample rate, not a mistuning - reading it as a defect cost 72% of the ankle
+stiffness and made the dummy fall faster. Raising the physics rate is the only real lever.
+
+---
+
 # Findings at 12M steps (`getup_v4_2`, measured)
 
 Regression over all 1,280 rollouts in the run's four event files. `t` is the slope's t-statistic;
@@ -263,7 +365,7 @@ others follow it.
 
 **Zero successes in 12M steps.** `episode_end/Standing` and `episode_end/Inverted` do not exist as
 tags — never fired once. `episode_end/TimeLimit` is 1.0000 throughout, `reward/terminal` is 0.0000.
-Both terminal conditions in `GetUpTermination` are dead in practice.
+Both terminal conditions in `UprightTermination` are dead in practice.
 
 **~90% of every episode was wasted.** `standing/all` = 0.032 is 31 of 968 ticks, and
 `StandingHoldSeconds` needs 90 *consecutive*; under RSI those 31 are at the front. `reward/shaping`

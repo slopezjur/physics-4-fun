@@ -182,7 +182,7 @@ It records:
 - **environment** — pulled live from the Godot bridge, not copied: controlled bones, action size,
   observation size, max action angle, episode length, physics Hz, and each strategy's own
   description with its constants (e.g.
-  `GetUpProgressReward(progress=10, upright=1, effort=0.25, standingBonus=20)`)
+  `UprightProgressReward(progress=10, upright=1, effort=0.25, standingBonus=20)`)
 - **code** — git commit, branch, and a `git_dirty` flag
 - **latest_metrics** — `ep_rew_mean`, `ep_len_mean`, episodes seen
 
@@ -240,9 +240,9 @@ Three tasks share one rig, one observation vector and one action space. Set `$Ta
 
 | `$Task` | Scene | Reward / termination | Window | Starts |
 |---|---|---|---|---|
-| `stand` | `RagdollStandTraining` | `GetUpProgressReward` / `GetUpTermination` | 4 s | always upright (t = 1.0) |
+| `stand` | `RagdollStandTraining` | `UprightProgressReward` / `UprightTermination` | 4 s | always upright (t = 1.0) |
 | `getup` | `RagdollGetUpTraining` | same pair | 4 s standing, 8 s prone | reverse curriculum, floor starts 0.99 |
-| `perturbation` | `RagdollPerturbationTraining` | same pair, `EndEpisodeOnStandingSuccess = false` | 5 s | always standing |
+| `perturbation` | `RagdollPerturbationTraining` | same pair, `EndEpisodeOnStandingSuccess = false` | 5 s (ends on a fall) | always standing |
 | `walk` | `RagdollWalkTraining` | `WalkForwardReward` / `WalkTermination` | 6 s | standing, moving at 0.48–0.8 m/s |
 
 `stand` and `getup` are the same components with different start distributions, and that is the
@@ -285,6 +285,21 @@ Consequence: `StandingBonus` is never paid, and the return is `upright + shaping
 
 Measured 2026-08-21 on `perturbation_v1_0`, resumed from the 46.7M-step get-up policy:
 `reward/shaping` -7.07 with `ball/hits` 0.922, and `0.922 × -7.7 + 0.078 × 0 = -7.1` closes exactly.
+
+### `ball/aim_hit_rate` vs `ball/hit_rate`
+
+`hit_rate` asks whether the ball touched the ragdoll **anywhere**; `aim_hit_rate` asks whether it hit
+the bone it was **aimed at**. The gap between them is the metric that matters, because the gun picks
+a target bone per shot and `hit_rate` cannot tell a forearm shot that connected from one that sailed
+past and grazed a shin.
+
+It exists because that distinction hid a real bug: shots were launched flat with gravity enabled and
+arrived 0.54 m low, so a head shot landed at the pelvis and a pelvis shot in the dirt, while
+`hit_rate` read a healthy 0.84 from balls clipping the body on the way down. With drop compensation
+and target leading in place, expect `hit_rate` ≈ 0.98 and `aim_hit_rate` ≈ 0.73.
+
+`ball/shots`, `ball/hits`, `ball/aim_hits` and `ball/small_share` are per-episode counts; the two
+rates are derived over the rollout.
 Every hit put the body on the floor, every miss left it standing, recovery rate zero.
 
 The tempting read is "the ball is too strong". The numbers say otherwise. Half those shots were the
@@ -435,7 +450,7 @@ the target *below the speed already achieved* pins the factor at 1.0, makes extr
 exactly nothing, and leaves surviving the window as the only remaining gradient. This is a
 curriculum value — raise it once a full window is sustained.
 
-**A heading penalty, because the observation has no heading.** Bone rotations in `GetUpObservation`
+**A heading penalty, because the observation has no heading.** Bone rotations in `BodyStateObservation`
 are root-relative, so the policy cannot see which way it points in world terms, and nothing else in
 the reward would object to walking in circles. The forward axis is captured once at episode start
 (`-pelvisBasis.Z` projected flat, the rig convention shared with `BiomechanicalKinematics` and
@@ -516,9 +531,21 @@ does not decide what the task *is*.
 | concern | interface | current implementation |
 |---|---|---|
 | what the policy can do | `IRlActionSpace` | `JointLimitedActionSpace` |
-| what the policy sees | `IRlObservationBuilder` | `GetUpObservation` (106 floats) |
-| what it is paid for | `IRlRewardFunction` | `GetUpProgressReward` |
-| when an episode ends | `IRlTerminationCondition` | `GetUpTermination` |
+| what the policy sees | `IRlObservationBuilder` | `BodyStateObservation` (106 floats) |
+| what it is paid for | `IRlRewardFunction` | `UprightProgressReward` |
+| when an episode ends | `IRlTerminationCondition` | `UprightTermination` |
+
+`UprightTermination` carries two flags the bridge sets **per episode**, not per scene, because one
+process runs several tasks minutes apart and they need opposite answers:
+
+- `EndEpisodeOnSuccess` - off for perturbation, so a hit can arrive after the success criterion is
+  met. Success must not be absorbing when surviving the impact is the point.
+- `EndEpisodeOnFall` - on whenever the episode started upright. Off for get-up, which starts prone
+  and below every fall threshold by definition.
+
+They are separate flags because perturbation needs success non-absorbing and failure absorbing at
+the same time. Conflating them left every perturbation episode running its full window face-down:
+`ep_len_mean` sat at 75.6 steps against a 75.6-step cap for the entire history of the task.
 
 Three optional companion interfaces (`IRlRewardDiagnostics`, `IRlTerminationDiagnostics`,
 `IRlActionDiagnostics`) let an implementation report *why* it produced what it did. They are kept
@@ -711,7 +738,7 @@ of samples at 3 s, 1/60 at 4 s, versus 1/30 at 2 s.
 
 ### Standing hold
 
-`GetUpTermination.StandingHoldSeconds` is **1.5** (was 0.75). This is the success *specification*,
+`UprightTermination.StandingHoldSeconds` is **1.5** (was 0.75). This is the success *specification*,
 and at 0.75 s it was under-specified: a policy that falls over immediately afterwards satisfies it.
 One did. At 22.7M steps `start_standing/success` read 0.96 while the same policy in
 `RagdollStandArena` — which sets `PlaybackMode`, so nothing ever terminates or resets — stayed up 1–2 s
@@ -769,6 +796,13 @@ It sits *inside* `VecMonitor` deliberately, so `rollout/ep_rew_mean` keeps measu
 environment reward rather than absorbing the bootstrap term.
 
 ### Comparing runs across an episode-length change
+
+`ep_rew_mean` is **not comparable** across a change to `EndEpisodeOnFall` either, and neither are
+the `standing/*` fractions. Those are per-tick rates, so they are diluted by every tick the body
+spends on the floor after failing; ending the episode on a fall removes those ticks and raises the
+number with no policy change at all. Treat the first run after a termination change as a new
+baseline rather than a comparison - see
+[RL-SESSION-INVARIANTS.md](RL-SESSION-INVARIANTS.md).
 
 `ep_rew_mean` is **not comparable** across a change to `MaxEpisodeSeconds`, in either direction:
 `reward/shaping` telescopes to `10 × (Φ_end − Φ_start)` and so gets less negative purely because

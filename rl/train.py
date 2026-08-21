@@ -88,6 +88,7 @@ class PeriodicCheckpointCallback(BaseCallback):
     def _on_training_start(self) -> None:
         self._dir = self.logger.get_dir() or "."
         self._last_save = time.time()
+        self._last_saved_timesteps = -1
 
     def save(self, tag: str) -> None:
         if not self._dir:
@@ -119,6 +120,7 @@ class PeriodicCheckpointCallback(BaseCallback):
             self.model.policy.to(device)
             self.model.policy.set_training_mode(True)
 
+        self._last_saved_timesteps = self.model.num_timesteps
         self.saved.append(os.path.basename(stem))
         print(f"checkpoint -> {stem}.zip" + (" (+.onnx)" if onnx_ok else " (.onnx FAILED)"))
 
@@ -129,6 +131,14 @@ class PeriodicCheckpointCallback(BaseCallback):
         return True
 
     def _on_training_end(self) -> None:
+        # Skip when a periodic checkpoint already captured this exact step. It happens whenever the
+        # session length is a multiple of the save interval - MaxSeconds 300 with SaveEverySeconds
+        # 300 hits it every time - and produces two files holding the same policy at the same step,
+        # which then appear as two indistinguishable entries in the resume menu. The duplicate also
+        # costs a redundant ~1.6 s onnx export at the moment the run is trying to shut down.
+        if self.model.num_timesteps == self._last_saved_timesteps:
+            print(f"final: already saved at {self.model.num_timesteps} timesteps, skipping duplicate")
+            return
         self.save("final")
 
 

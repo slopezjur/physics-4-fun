@@ -340,14 +340,12 @@ public partial class BallGun : Node3D, IRlPerturbationDiagnostics
 
     private readonly struct Ball
     {
-        public Ball(RigidBody3D body, float remaining, ActiveBone? aimBone, bool hasHit = false,
-                    Vector3 previousVelocity = default)
+        public Ball(RigidBody3D body, float remaining, ActiveBone? aimBone, bool hasHit = false)
         {
             Body = body;
             Remaining = remaining;
             AimBone = aimBone;
             HasHit = hasHit;
-            PreviousVelocity = previousVelocity;
         }
 
         public RigidBody3D Body { get; }
@@ -364,18 +362,14 @@ public partial class BallGun : Node3D, IRlPerturbationDiagnostics
         /// </summary>
         public ActiveBone? AimBone { get; }
 
-        /// <summary>Set once the ball has touched the ragdoll, so one ball counts at most one hit.</summary>
-        public bool HasHit { get; }
-
         /// <summary>
-        /// This ball's velocity at the end of the previous tick, kept so the impulse it actually
-        /// delivered can be measured as mass * |dv| rather than assumed from its launch momentum.
+        /// Set once this ball has delivered its impulse, so it can strike at most once.
         ///
-        /// That distinction is the whole point: the launch momentum is what the ball SHOULD deliver,
-        /// and the measured delta is what the solver actually did. Gravity contributes 0.082 m/s per
-        /// tick to this delta, which at any sane ball mass is negligible against a real contact.
+        /// Without it a ball still overlapping on the following tick would deliver its momentum
+        /// again, which is the same repeated-impulse runaway the contact solver used to produce -
+        /// only written by hand, which would be worse.
         /// </summary>
-        public Vector3 PreviousVelocity { get; }
+        public bool HasHit { get; }
     }
 
     private int _shotsThisEpisode;
@@ -671,11 +665,11 @@ public partial class BallGun : Node3D, IRlPerturbationDiagnostics
                 _tickImpactBone = struck.BoneName;
                 _tickImpactMassRatio = struck.Mass / Mathf.Max(1e-6f, ballMass);
 
-                _live[i] = new Ball(ball.Body, remaining, ball.AimBone, true, reflected);
+                _live[i] = new Ball(ball.Body, remaining, ball.AimBone, true);
                 continue;
             }
 
-            _live[i] = new Ball(ball.Body, remaining, ball.AimBone, ball.HasHit, velocity);
+            _live[i] = new Ball(ball.Body, remaining, ball.AimBone, ball.HasHit);
         }
     }
 
@@ -817,7 +811,7 @@ public partial class BallGun : Node3D, IRlPerturbationDiagnostics
                      + $"radius {radius:F3} m, ccd={BallContinuousCd}");
         }
 
-        _live.Add(new Ball(body, BallLifetimeSeconds, aimBone, false, launchVelocity));
+        _live.Add(new Ball(body, BallLifetimeSeconds, aimBone));
         _shotsThisEpisode++;
         if (small) { _smallShotsThisEpisode++; }
     }

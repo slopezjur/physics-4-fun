@@ -84,6 +84,22 @@ if (-not $Checkpoint) {
                      }
                  } |
                  Sort-Object Steps -Descending |
+                 Group-Object Steps |
+                 ForEach-Object {
+                     # One entry per step count. A periodic checkpoint and the end-of-run final
+                     # land on the same step whenever the session length is a multiple of the save
+                     # interval, and they hold the same policy - listing both just makes the menu
+                     # ask a question with two identical answers. Prefer final_, then interrupted_,
+                     # then checkpoint_, so the surviving name says the most about the run.
+                     $_.Group |
+                         Sort-Object @{Expression = {
+                             if ($_.Name -like 'final_*')       { 0 }
+                             elseif ($_.Name -like 'interrupted_*') { 1 }
+                             else                               { 2 }
+                         }} |
+                         Select-Object -First 1
+                 } |
+                 Sort-Object Steps -Descending |
                  Select-Object -First 2
         $options += $ckpts
     }
