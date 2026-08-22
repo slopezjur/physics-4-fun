@@ -87,6 +87,24 @@ public sealed class WalkTermination : IRlTerminationCondition, IRlTerminationDia
 
     private int _totalTicks;
 
+    /// <summary>
+    /// How this episode ended, latched on the terminal tick. All zero if it timed out.
+    ///
+    /// Exists because "Fallen" was one undifferentiated reason covering two very different
+    /// failures, and the fix for each is the opposite of the fix for the other. Measured state
+    /// before this was added: standing/upright 0.9986 and standing/head 0.9977, i.e. the body sits
+    /// inside both limits for 99.8% of ticks and then tips over in the last one or two - so the
+    /// interesting question is not "how healthy was it on average" but "which way did it go".
+    ///
+    /// Sagittal failure points at gait continuation (it never completes a stride cycle); lateral
+    /// failure points at frontal-plane balance, where bipeds actually fall and where the sagittal
+    /// plane's partial self-correction does not help.
+    /// </summary>
+    private bool _fellHead;
+    private bool _fellTilt;
+    private bool _fellLateral;
+    private bool _fellForward;
+
     /// <summary>Reused across episodes; Reset zeroes it rather than reallocating.</summary>
     private readonly Dictionary<string, float> _conditionRates = new();
 
@@ -99,6 +117,16 @@ public sealed class WalkTermination : IRlTerminationCondition, IRlTerminationDia
             {
                 _conditionRates[entry.Key] = entry.Value / denominator;
             }
+
+            // Per-episode FLAGS, not tick rates - deliberately not divided by the tick count. They
+            // ride this dictionary because the bridge forwards every entry as stand_<key> and the
+            // trainer averages those across the rollout's episodes, turning a 0/1 flag into the
+            // rate wanted: "what fraction of episodes ended this way". Same trick as
+            // UprightTermination's disturbed/recovered.
+            _conditionRates["fall_head"] = _fellHead ? 1.0f : 0.0f;
+            _conditionRates["fall_tilt"] = _fellTilt ? 1.0f : 0.0f;
+            _conditionRates["fall_lateral"] = _fellLateral ? 1.0f : 0.0f;
+            _conditionRates["fall_forward"] = _fellForward ? 1.0f : 0.0f;
             return _conditionRates;
         }
     }
@@ -119,9 +147,47 @@ public sealed class WalkTermination : IRlTerminationCondition, IRlTerminationDia
         _totalTicks = 0;
         _hasForward = false;
         _forward = Vector3.Forward;
-        foreach (string key in new[] { "upright", "head", "grounded", "moving" })
+        _fellHead = false;
+        _fellTilt = false;
+        _fellLateral = false;
+        _fellForward = false;
+
+        // Iterates the dictionary's own keys rather than a hand-written list, so adding a condition
+        // above cannot leave stale counts leaking across episodes. Keys are buffered because the
+        // indexer assignment mutates the collection being enumerated.
+        foreach (string key in new List<string>(_conditionTicks.Keys))
         {
             _conditionTicks[key] = 0;
+        }
+    }
+
+    /// <summary>
+    /// Splits the pelvis lean into "along the direction of travel" and "across it" at the moment of
+    /// failure, and latches which dominated.
+    ///
+    /// The lean vector is the pelvis up-axis flattened onto the ground plane - the direction the
+    /// body is tipping. Projected onto the episode's own forward axis rather than a world axis, so
+    /// the answer stays correct if the spawn pose ever gains a random yaw. Same yaw-level treatment
+    /// BalanceController.UpdateIcpEscapeDistance uses on the capture point.
+    /// </summary>
+    private void RecordFallDirection(in RlContext context)
+    {
+        Vector3 lean = context.Pelvis.GlobalTransform.Basis.Y;
+        lean.Y = 0.0f;
+        if (lean.LengthSquared() <= 1e-6f)
+        {
+            return;
+        }
+
+        float along = Mathf.Abs(lean.Dot(_forward));
+        float across = (lean - _forward * lean.Dot(_forward)).Length();
+        if (across >= along)
+        {
+            _fellLateral = true;
+        }
+        else
+        {
+            _fellForward = true;
         }
     }
 
@@ -138,10 +204,18 @@ public sealed class WalkTermination : IRlTerminationCondition, IRlTerminationDia
         // Diagnostics are accumulated before any early return, so a fallen episode still reports
         // which conditions held while it lasted. Skipping them on the terminal tick would bias
         // every rate toward the healthy ticks that preceded it.
-        bool fallen = RecordConditions(context);
+        bool fallen = RecordConditions(context, out bool headOk, out bool tiltOk);
 
         if (fallen && context.EpisodeElapsedSeconds >= SettleSeconds)
         {
+            // Latched here rather than inside RecordConditions: that runs every tick, and what is
+            // wanted is the state on the tick the episode actually ended, not a running tally.
+            // Both can be true at once - a body folded forward and low trips each check - which is
+            // itself worth seeing, so they are separate flags rather than one enum.
+            _fellHead = !headOk;
+            _fellTilt = !tiltOk;
+            RecordFallDirection(context);
+
             reason = "Fallen";
             return true;
         }
@@ -163,15 +237,15 @@ public sealed class WalkTermination : IRlTerminationCondition, IRlTerminationDia
     /// UprightTermination.IsStanding: the rates are how "why is it failing" stays answerable, and a
     /// short-circuit silently stops counting the conditions after the first one that fails.
     /// </summary>
-    private bool RecordConditions(in RlContext context)
+    private bool RecordConditions(in RlContext context, out bool headOk, out bool tiltOk)
     {
         ActiveBone? head = context.Ragdoll.Head;
         float headHeight = head != null && GodotObject.IsInstanceValid(head)
             ? head.GlobalPosition.Y
             : 0.0f;
 
-        bool headOk = headHeight >= FallenHeadHeight;
-        bool tiltOk = context.Balance.CurrentTiltAngleDeg <= FallenTiltDeg;
+        headOk = headHeight >= FallenHeadHeight;
+        tiltOk = context.Balance.CurrentTiltAngleDeg <= FallenTiltDeg;
 
         // One foot is enough: a walking gait spends most of its time in single support, and
         // requiring both would report a correct stride as ungrounded for half of every cycle.

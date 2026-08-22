@@ -36,6 +36,18 @@ namespace Physics4Fun.RL.Rewards;
 /// no longer a comfortable state to protect, and the only way to score at all is to move forward
 /// while upright. This is the formulation the DeepMind control suite uses for its locomotion tasks,
 /// for the same reason.
+///
+/// The product has THREE factors, not two. Speed x uprightness closed the standing-still exploit
+/// and opened another nobody looked for: with no reference to ground contact, a body gliding
+/// through the air at target speed with its torso upright scored the full 6.0/s, indistinguishable
+/// from a gait and far easier to produce. The agent found it. Over one 11-hour session
+/// standing/grounded fell 0.859 -> 0.714 while alive_fraction and distance both rose, and
+/// walk/fell never left 1.0000 - it had learned to bound and glide, and every reward constant
+/// tuned during that session was rearranging furniture inside the hole.
+///
+/// The lesson generalises past this one bug: a product reward specifies WHAT to maximise, and each
+/// factor is a constraint on HOW. Any dimension of "how" left out of the product is not neutral,
+/// it is free. See ContactGraceSeconds.
 /// </summary>
 public sealed class WalkForwardReward : IRlRewardFunction, IRlRewardDiagnostics, IRlWalkDiagnostics
 {
@@ -72,7 +84,7 @@ public sealed class WalkForwardReward : IRlRewardFunction, IRlRewardDiagnostics,
     /// sustain it for a full window, raising this is the natural next rung - and the frontier
     /// machinery in RagdollRLBridge could drive it the same way it drives start pose.
     /// </summary>
-    private const float TargetSpeed = 0.4f;
+    private const float TargetSpeed = 0.25f;
 
     // There is deliberately no alive term and no standalone upright term. Both existed in the first
     // version of this reward and both were removed after measurement - see the class summary.
@@ -88,8 +100,21 @@ public sealed class WalkForwardReward : IRlRewardFunction, IRlRewardDiagnostics,
     /// Kept small relative to the velocity term. Penalising drift hard enough to dominate would
     /// teach standing still - the drift-optimal behaviour - which is the optimum this whole
     /// function is shaped to avoid.
+    ///
+    /// ZERO for now, because this term is UNLEARNABLE as the observation currently stands. The
+    /// paragraph above says it plainly: BodyStateObservation carries no heading, so the policy
+    /// cannot perceive lateral drift. Charging it for a quantity it cannot see does not shape
+    /// behaviour, it just adds noise to the gradient - and the evidence is that the penalty was
+    /// never doing its job anyway: measured lateral_drift is 0.2675 m against 0.758 m of forward
+    /// travel, 35% sideways, WITH the penalty active at 0.5.
+    ///
+    /// Re-enable this once heading is observable, not before. Doing it properly means adding the
+    /// start-axis offset to the observation, which changes its size from 106 and invalidates every
+    /// existing walk checkpoint - a real cost that needs its own decision, not a silent bump.
+    /// Until then the circling this was meant to prevent is not reachable: the dummy manages about
+    /// 1.5 steps before falling.
     /// </summary>
-    private const float HeadingWeight = 0.5f;
+    private const float HeadingWeight = 0.0f;
 
     /// <summary>
     /// One-off penalty for ending the episode by falling. Zero, deliberately.
@@ -105,6 +130,28 @@ public sealed class WalkForwardReward : IRlRewardFunction, IRlRewardDiagnostics,
     /// the agent has to lose, and one that is correctly near zero while it has nothing to lose yet.
     /// </summary>
     private const float FallPenalty = 0.0f;
+
+    /// <summary>
+    /// How long after the last foot contact the progress term keeps paying, in seconds.
+    ///
+    /// This exists because the reward could not previously tell walking from FLYING. The product
+    /// was speed x uprightness and nothing more, so a body sailing through the air at target speed
+    /// with its torso upright collected the full 6.0/s - identical to a perfect gait, and strictly
+    /// easier, since a ballistic arc has no contact dynamics, no foot placement and no friction
+    /// loss on the forward axis.
+    ///
+    /// The agent found that and spent roughly 60M steps refining it. Measured across one 11-hour
+    /// session: standing/grounded fell 0.859 -> 0.714 monotonically while alive_fraction and
+    /// distance both ROSE - it was buying survival by gliding further, not by walking. 0.714 means
+    /// 29% of ticks with neither foot down; human walking has essentially no flight phase and even
+    /// running is about 40%.
+    ///
+    /// A grace window rather than an instantaneous test, because IsGrounded is
+    /// `soleDown && IsInContactWithWorld()` and a legitimate stride transition can show a frame or
+    /// two with neither foot registering. A hard gate would spike the reward to zero mid-step and
+    /// inject variance for nothing. 0.1 s absorbs that while still zeroing a one-second glide.
+    /// </summary>
+    private const float ContactGraceSeconds = 0.05f;
 
     private readonly float _effortWeight;
 
@@ -135,6 +182,13 @@ public sealed class WalkForwardReward : IRlRewardFunction, IRlRewardDiagnostics,
     private float _lastElapsed;
     private float _windowSeconds;
     private bool _fell;
+
+    /// <summary>Episode time of the most recent foot contact; see <see cref="ContactGraceSeconds"/>.</summary>
+    private float _lastContactSeconds;
+
+    /// <summary>Ticks the progress term actually paid on, and the tick count, for grounded_pay.</summary>
+    private int _paidTicks;
+    private int _progressTicks;
 
     private readonly Dictionary<string, float> _componentTotals = new()
     {
@@ -169,6 +223,15 @@ public sealed class WalkForwardReward : IRlRewardFunction, IRlRewardDiagnostics,
             _walkStats["alive_fraction"] = _windowSeconds > 0.0f
                 ? Mathf.Clamp(_lastElapsed / _windowSeconds, 0.0f, 1.0f)
                 : 0.0f;
+
+            // Fraction of ticks the progress term actually paid on. Deliberately separate from the
+            // termination's standing/grounded rate: that one is raw foot contact, this one is
+            // contact AS THE REWARD SAW IT, after ContactGraceSeconds. The gap between the two is
+            // exactly how much the grace window is forgiving, which is the thing to watch if the
+            // policy starts hopping through it.
+            _walkStats["grounded_pay"] = _progressTicks > 0
+                ? (float)_paidTicks / _progressTicks
+                : 0.0f;
             return _walkStats;
         }
     }
@@ -186,6 +249,13 @@ public sealed class WalkForwardReward : IRlRewardFunction, IRlRewardDiagnostics,
         _windowSeconds = 0.0f;
         _fell = false;
 
+        // Zero, not "never": the episode starts with the feet planted in the reset pose, so the
+        // settle ticks before the first contact reading are correctly inside the grace window
+        // rather than being scored as flight.
+        _lastContactSeconds = 0.0f;
+        _paidTicks = 0;
+        _progressTicks = 0;
+
         _componentTotals["progress"] = 0.0f;
         _componentTotals["heading"] = 0.0f;
         _componentTotals["effort"] = 0.0f;
@@ -194,7 +264,8 @@ public sealed class WalkForwardReward : IRlRewardFunction, IRlRewardDiagnostics,
 
     public string Describe() =>
         $"WalkForwardReward(velocity={VelocityWeight}, targetSpeed={TargetSpeed}m/s, "
-        + $"form=velocity*upright(product), heading={HeadingWeight}, "
+        + $"form=velocity*upright*grounded(product), contactGrace={ContactGraceSeconds}s, "
+        + $"heading={HeadingWeight}, "
         + $"effort={_effortWeight}, fallPenalty={FallPenalty})";
 
     /// <param name="succeeded">
@@ -255,9 +326,23 @@ public sealed class WalkForwardReward : IRlRewardFunction, IRlRewardDiagnostics,
 
         float uprightFactor = Mathf.Clamp(Mathf.Cos(Mathf.DegToRad(context.Balance.CurrentTiltAngleDeg)), 0.0f, 1.0f);
 
-        // The product. Either factor at zero scores zero, which is the whole point: standing still
-        // upright pays nothing, and sprinting while face-down pays nothing.
-        float progress = VelocityWeight * speedFactor * uprightFactor * context.Delta;
+        // One foot is enough, matching WalkTermination for the reason given there: requiring both
+        // reports a correct stride as ungrounded for half of every cycle.
+        if (context.Balance.IsGroundedL || context.Balance.IsGroundedR)
+        {
+            _lastContactSeconds = context.EpisodeElapsedSeconds;
+        }
+        bool paying = context.EpisodeElapsedSeconds - _lastContactSeconds <= ContactGraceSeconds;
+        float groundedFactor = paying ? 1.0f : 0.0f;
+
+        _progressTicks++;
+        if (paying) { _paidTicks++; }
+
+        // The product. Any factor at zero scores zero, which is the whole point: standing still
+        // upright pays nothing, sprinting while face-down pays nothing, and - since this third
+        // factor was added - sailing through the air pays nothing either. The first two were
+        // designed in; the third was a hole the agent found and exploited for 60M steps.
+        float progress = VelocityWeight * speedFactor * uprightFactor * groundedFactor * context.Delta;
 
         float heading = HeadingWeight * _lastLateral * context.Delta;
 
