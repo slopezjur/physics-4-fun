@@ -65,7 +65,7 @@ public sealed class BodyStateObservation : IRlObservationBuilder
 
     public BodyStateObservation(int boneCount) => _boneCount = boneCount;
 
-    public int Size => RootComponents + JoystickComponents + (_boneCount * ComponentsPerBone) + ContactBoneNames.Length;
+    public int Size => RootComponents + JoystickComponents + (_boneCount * ComponentsPerBone) + ContactBoneNames.Length + 2;
 
     public string Describe() =>
         $"BodyStateObservation(root={RootComponents}, perBone={ComponentsPerBone} [quaternion+angvel], "
@@ -151,6 +151,11 @@ public sealed class BodyStateObservation : IRlObservationBuilder
         }
 
         AppendContactFlags(context, obs);
+
+        // Pad to exactly 115 to match the baked ONNX model expectation
+        obs.Add(0.0f);
+        obs.Add(0.0f);
+
         return obs.ToArray();
     }
 
