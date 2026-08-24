@@ -56,3 +56,10 @@ build/
 # AI temporary scripts
 .working/
 
+
+# Generated UID files from GDScript compilation
+*.gdc.uid
+
+# Archived training runs
+rl/runs_archive/
+

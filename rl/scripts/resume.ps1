@@ -169,6 +169,8 @@ if ($Viz) {
     Write-Host "  it renders at speedup x$Speedup, so motion looks fast" -ForegroundColor DarkGray
 }
 
+if ($BuildExe -eq $GodotExe) { Write-Host 'Using Godot Editor directly.' -ForegroundColor Yellow; dotnet build "$ProjectPath" }
+
 $vizArg = @()
 if ($Viz) { $vizArg = @('--viz') }
 
@@ -181,6 +183,14 @@ if ($Viz) { $vizArg = @('--viz') }
     --experiment_name=$ExperimentName `
     --save_every_seconds=$SaveEverySeconds `
     --max_seconds=$MaxSeconds `
+    --scene_path="$ScenePath" `
     --restore=$Checkpoint `
     @vizArg
+
+
+
+
+
+
+
 

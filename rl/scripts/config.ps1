@@ -98,7 +98,7 @@ $Speedup = 8
 
 # 1M steps is roughly 9 minutes at the sweet spot.
 # Pure-RL get-up realistically needs 10-100M.
-$Timesteps   = 80000000
+$Timesteps   = 800000000
 
 # Wall-clock cap in seconds. Training stops at whichever comes first, this or $Timesteps.
 # Use this when you want a run of a known DURATION - throughput is not predictable enough to
@@ -107,7 +107,7 @@ $Timesteps   = 80000000
 # 300 = 5 minutes.
 # 900 = 15 minutes.
 # 7200 = 2 hours.
-$MaxSeconds = 3600
+$MaxSeconds = 7200
 
 # --- Run identity ------------------------------------------------------------
 # LEAVE EMPTY. The name is derived below as "<task>_v<next unused>" by scanning
@@ -137,24 +137,31 @@ $ProjectPath = (Resolve-Path "$PSScriptRoot/../..").Path
 if ($Task -eq "perturbation") {
     $ExportPreset = "Windows Perturbation"
     $BuildName    = "RagdollPerturbationTraining.exe"
-} elseif ($Task -eq "stand") {
-    $ExportPreset = "Windows Stand"
-    $BuildName    = "RagdollStandTraining.exe"
+    $ScenePath    = "res://Scenes/RL/Upright/RagdollPerturbationTraining.tscn"
 } elseif ($Task -eq "getup") {
-    $ExportPreset = "Windows GetUp"
+    $ExportPreset = "Windows Get Up"
     $BuildName    = "RagdollGetUpTraining.exe"
+    $ScenePath    = "res://Scenes/RL/Upright/RagdollGetUpTraining.tscn"
 } elseif ($Task -eq "upright") {
     $ExportPreset = "Windows Upright"
     $BuildName    = "RagdollUprightTraining.exe"
+    $ScenePath    = "res://Scenes/RL/Upright/RagdollUprightTraining.tscn"
+} elseif ($Task -eq "stand") {
+    $ExportPreset = "Windows Stand"
+    $BuildName    = "RagdollStandTraining.exe"
+    $ScenePath    = "res://Scenes/RL/Upright/RagdollStandTraining.tscn"
 } elseif ($Task -eq "walk") {
     $ExportPreset = "Windows Walk"
     $BuildName    = "RagdollWalkTraining.exe"
+    $ScenePath    = "res://Scenes/RL/Locomotion/RagdollWalkTraining.tscn"
 } elseif ($Task -eq "stand_multiple") {
     $ExportPreset = "Windows Multiple Stand"
     $BuildName    = "RagdollMultipleStandTraining.exe"
+    $ScenePath    = "res://Scenes/RL/Upright/RagdollMultipleStandTraining.tscn"
 } elseif ($Task -eq "walk_multiple") {
     $ExportPreset = "Windows Multiple Walk"
     $BuildName    = "RagdollMultipleWalkTraining.exe"
+    $ScenePath    = "res://Scenes/RL/Locomotion/RagdollMultipleWalkTraining.tscn"
 } else {
     throw "Unknown `$Task '$Task'. Use 'stand', 'getup', 'upright', 'perturbation' or 'walk'."
 }
@@ -194,6 +201,8 @@ if ([string]::IsNullOrWhiteSpace($ExperimentName)) {
 $Python      = "$ProjectPath/rl/.venv/Scripts/python.exe"
 $TrainScript = "$ProjectPath/rl/train.py"
 $BuildExe = $GodotExe
+
+
 
 
 

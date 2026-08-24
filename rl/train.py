@@ -544,8 +544,7 @@ class SelectivelyVisibleGodotEnv(StableBaselinesGodotEnv):
                 convert_action_space=True,
                 port=port + p,
                 seed=seed + p,
-                show_window=(p < visible_count),
-                **kwargs,
+                show_window=(p < visible_count), **kwargs,
             )
             for p in range(n_parallel)
         ]
@@ -628,6 +627,7 @@ def main() -> None:
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--env_path", required=True, help="Path to the exported Godot executable.")
+    parser.add_argument("--scene_path", default="", help="The specific scene to run")
     parser.add_argument("--n_parallel", type=int, default=1, help="Number of Godot processes to run.")
     parser.add_argument("--speedup", type=int, default=8, help="Physics speed multiplier.")
     parser.add_argument("--timesteps", type=int, default=100_000)
@@ -731,7 +731,8 @@ def main() -> None:
         print(f"curriculum floor carried forward: {curriculum_start:.4f}")
 
     env = SelectivelyVisibleGodotEnv(
-        env_path=args.env_path,
+        env_path=args.env_path, main_scene=args.scene_path, 
+        project_path=os.path.abspath(os.path.join(os.path.dirname(__file__), "..")), 
         n_parallel=args.n_parallel,
         speedup=args.speedup,
         seed=args.seed,
@@ -830,3 +831,11 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
+
+

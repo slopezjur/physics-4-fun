@@ -1,0 +1,508 @@
+[gd_scene load_steps=11 format=3]
+
+[ext_resource type="PackedScene" uid="uid://dp62k4a8uwns2" path="res://Scenes/ActiveRagdoll.tscn" id="1_ragdoll"]
+[ext_resource type="Script" path="res://Source/RL/RagdollRLBridge.cs" id="2_bridge"]
+[ext_resource type="Script" path="res://Scenes/RL/Shared/RagdollAIController.gd" id="3_aicontroller"]
+[ext_resource type="Script" path="res://addons/godot_rl_agents/sync.gd" id="4_sync"]
+[ext_resource type="Script" path="res://Source/UI/MultipleRagdollTelemetryHud.cs" id="5_telemetry"]
+[ext_resource type="Script" path="res://Source/Camera/CameraController.cs" id="6_camera"]
+[ext_resource type="Script" path="res://Source/RL/PolicyAutoLoader.cs" id="7_autoload"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_floor"]
+size = Vector3(84, 1, 60)
+
+[sub_resource type="BoxMesh" id="BoxMesh_floor"]
+size = Vector3(84, 1, 60)
+
+[node name="RagdollMultipleWalkArena" type="Node3D" node_paths=PackedStringArray("Sync", "Bridge")]
+script = ExtResource("7_autoload")
+Sync = NodePath("Sync")
+Bridge = NodePath("Agent_1/RLBridge")
+BrainRunPrefixes = PackedStringArray("walk", "multiple_walk", "c")
+
+[node name="Floor" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Floor"]
+shape = SubResource("BoxShape3D_floor")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Floor"]
+mesh = SubResource("BoxMesh_floor")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.707107, -0.5, 0.5, 0, 0.707107, 0.707107, -0.707107, -0.5, 0.5, 0, 5, 0)
+shadow_enabled = true
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(0, -0.258819, 0.965926, 0, 0.965926, 0.258819, -1, 0, 0, 8, 2.8, -3)
+current = true
+script = ExtResource("6_camera")
+
+[node name="Agent_1" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -29.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_1" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_1" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_1" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_2" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -27.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_2" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_2" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_2" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_3" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -25.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_3" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_3" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_3" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_4" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -23.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_4" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_4" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_4" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_5" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -21.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_5" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_5" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_5" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_6" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -19.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_6" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_6" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_6" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_7" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -17.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_7" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_7" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_7" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_8" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -15.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_8" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_8" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_8" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_9" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -13.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_9" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_9" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_9" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_10" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -11.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_10" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_10" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_10" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_11" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -9.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_11" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_11" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_11" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_12" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -7.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_12" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_12" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_12" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_13" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_13" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_13" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_13" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_14" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_14" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_14" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_14" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_15" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_15" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_15" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_15" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_16" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_16" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_16" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_16" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_17" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_17" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_17" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_17" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_18" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_18" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_18" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_18" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_19" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 7.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_19" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_19" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_19" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_20" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 9.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_20" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_20" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_20" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_21" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 11.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_21" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_21" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_21" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_22" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 13.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_22" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_22" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_22" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_23" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 15.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_23" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_23" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_23" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_24" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 17.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_24" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_24" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_24" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_25" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 19.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_25" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_25" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_25" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_26" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 21.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_26" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_26" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_26" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_27" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 23.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_27" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_27" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_27" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_28" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 25.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_28" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_28" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_28" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_29" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 27.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_29" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_29" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_29" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+
+[node name="Agent_30" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 29.0, 0, 0.0)
+
+[node name="ActiveRagdoll" parent="Agent_30" instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="Agent_30" node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="Agent_30" node_paths=PackedStringArray("Ragdoll", "AiController")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+TaskKind = 1
+MaxEpisodeSeconds = 6.0
+EnablePhaseClock = true
+StandingStartProbability = 1.0
+InitialForwardSpeed = 0.4
+MidStrideStartProbability = 0.0
+
+[node name="Sync" type="Node" parent="."]
+script = ExtResource("4_sync")
+action_repeat = 8
+onnx_model_path = "res://Models/policy.onnx"
+
+[node name="CanvasLayer" type="CanvasLayer" parent="."]
+
+[node name="RagdollTelemetryHud" type="PanelContainer" parent="CanvasLayer"]
+script = ExtResource("5_telemetry")
+
+
+FontSize = 10

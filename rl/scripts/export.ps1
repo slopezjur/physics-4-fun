@@ -25,16 +25,37 @@
 . "$PSScriptRoot/config.ps1"
 
 Write-Host "Exporting '$ExportPreset' -> $BuildExe" -ForegroundColor Cyan
-$FeatureTag = @{ "Windows Stand" = "stand"; "Windows GetUp" = "getup"; "Windows Upright" = "upright"; "Windows Perturbation" = "perturbation"; "Windows Walk" = "walk" }[$ExportPreset]
+$FeatureTag = @{ "Windows Stand" = "stand"; "Windows GetUp" = "getup"; "Windows Upright" = "upright"; "Windows Perturbation" = "perturbation"; "Windows Walk" = "walk"; "Windows Multiple Stand" = "stand_multiple"; "Windows Multiple Walk" = "walk_multiple" }[$ExportPreset]
 Write-Host "  (main scene comes from run/main_scene.$FeatureTag via the '$FeatureTag' feature tag)" -ForegroundColor DarkGray
 
 Write-Host 'Building ExportRelease assembly...' -ForegroundColor Cyan
-dotnet build -c ExportRelease
-if ($LASTEXITCODE -ne 0) { exit 1 }
+# Bypassing Godot 4 feature tag bug in headless console wrappers by temporarily replacing the default main_scene
+$ProjectGodot = "$ProjectPath/project.godot"
+$FeatureOverride = "run/main_scene.$FeatureTag"
+$TargetSceneLine = (Get-Content $ProjectGodot | Select-String $FeatureOverride).Line
+if ($TargetSceneLine) {
+    $TargetScene = $TargetSceneLine.Split("=")[1]
+    $GodotContent = Get-Content $ProjectGodot
+    $GodotContent = $GodotContent -replace '^run/main_scene=.*', "run/main_scene=$TargetScene"
+    Set-Content -Path $ProjectGodot -Value $GodotContent
+    Write-Host "Temporarily set default main_scene to $TargetScene" -ForegroundColor Yellow
+}
 
-Start-Process -FilePath $GodotExe -ArgumentList "--headless", "--path", "$ProjectPath", "--export-release", "$ExportPreset", "$BuildExe" -Wait -NoNewWindow
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Export FAILED (exit $LASTEXITCODE)" -ForegroundColor Red
+dotnet build "$ProjectPath" -c ExportRelease
+if ($LASTEXITCODE -ne 0) { 
+    git checkout -- $ProjectGodot
+    exit 1 
+}
+
+$PckPath = $BuildExe.Replace(".exe", ".pck")
+Start-Process -FilePath $GodotExe -ArgumentList "--headless --path `"$ProjectPath`" --export-debug `"$ExportPreset`" `"$PckPath`"" -Wait -NoNewWindow
+$ExportExitCode = $LASTEXITCODE
+
+# Restore project.godot
+git checkout -- $ProjectGodot
+
+if ($ExportExitCode -ne 0) {
+    Write-Host "Export FAILED (exit $ExportExitCode)" -ForegroundColor Red
     exit 1
 }
 
