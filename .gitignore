@@ -52,3 +52,7 @@ bin/
 
 # Godot export output for RL training builds
 build/
+
+# AI temporary scripts
+.working/
+
