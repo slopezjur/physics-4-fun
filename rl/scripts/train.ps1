@@ -1,4 +1,4 @@
-﻿# Full training run: export first, then train headless.
+# Full training run: export first, then train headless.
 #
 # Checkpoints (.zip + .onnx together, step-stamped) land in rl/runs/<name>_N/ every
 # $SaveEverySeconds. Nothing is ever overwritten, so any earlier session stays recoverable.

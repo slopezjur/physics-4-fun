@@ -1,4 +1,4 @@
-﻿# Rebuilds the standalone binary that training runs against.
+# Rebuilds the standalone binary that training runs against.
 #
 # Training NEVER uses the open editor - it launches this exported build. So any C# or scene change
 # must be re-exported first, or you will silently train stale code.
@@ -28,10 +28,30 @@ Write-Host "Exporting '$ExportPreset' -> $BuildExe" -ForegroundColor Cyan
 $FeatureTag = @{ "Windows Stand" = "stand"; "Windows GetUp" = "getup"; "Windows Upright" = "upright"; "Windows Perturbation" = "perturbation"; "Windows Walk" = "walk" }[$ExportPreset]
 Write-Host "  (main scene comes from run/main_scene.$FeatureTag via the '$FeatureTag' feature tag)" -ForegroundColor DarkGray
 
-& $GodotExe --headless --path $ProjectPath --export-release $ExportPreset $BuildExe
+Write-Host 'Building ExportRelease assembly...' -ForegroundColor Cyan
+dotnet build -c ExportRelease
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
+Start-Process -FilePath $GodotExe -ArgumentList "--headless", "--path", "$ProjectPath", "--export-release", "$ExportPreset", "$BuildExe" -Wait -NoNewWindow
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Export FAILED (exit $LASTEXITCODE)" -ForegroundColor Red
     exit 1
 }
 
 Write-Host "Export complete." -ForegroundColor Green
+
+
+# Fix Godot 4 C# export bug on Windows
+$BuildNameWithoutExe = $BuildName.Replace('.exe', '')
+$ExpectedDataFolder = "$ProjectPath/build/data_$($BuildNameWithoutExe)_windows_x86_64"
+$ProjectDataFolder = "$ProjectPath/build/data_Physics4Fun_windows_x86_64"
+
+if (Test-Path $ProjectDataFolder) {
+    if (Test-Path $ExpectedDataFolder) {
+        Remove-Item -Recurse -Force $ExpectedDataFolder
+    }
+    Rename-Item $ProjectDataFolder $ExpectedDataFolder
+}
+
+
+

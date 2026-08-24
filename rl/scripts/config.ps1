@@ -1,4 +1,4 @@
-﻿# ============================================================================
+# ============================================================================
 #  EDIT THIS FILE to change how training runs. Every script reads these values.
 # ============================================================================
 
@@ -122,7 +122,7 @@ $MaxSeconds = 3600
 #
 # Set it explicitly ONLY to deliberately continue an existing lineage in place -
 # for example to append more steps to perturbation_v8 rather than starting v9.
-$ExperimentName = ""
+$ExperimentName = "stand_multiple_v2"
 
 # --- Checkpointing -----------------------------------------------------------
 # Wall-clock seconds between saves. A crash costs at most this much work.
@@ -194,5 +194,6 @@ if ([string]::IsNullOrWhiteSpace($ExperimentName)) {
 $Python      = "$ProjectPath/rl/.venv/Scripts/python.exe"
 $TrainScript = "$ProjectPath/rl/train.py"
 $BuildExe = $GodotExe
+
 
 

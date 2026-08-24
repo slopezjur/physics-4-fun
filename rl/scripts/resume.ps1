@@ -1,4 +1,4 @@
-﻿# Continues training from an existing checkpoint instead of starting over.
+# Continues training from an existing checkpoint instead of starting over.
 #
 # Restores the policy AND the Adam optimizer state and keeps the step count, so training genuinely
 # continues rather than warm-starting from weights alone. Restarting instead of resuming re-pays
@@ -161,8 +161,6 @@ if (-not (Test-Path $Checkpoint)) {
     exit 1
 }
 
-& "$PSScriptRoot/export.ps1"
-if ($LASTEXITCODE -ne 0) { exit 1 }
 
 Write-Host ""
 Write-Host "Resuming from $Checkpoint" -ForegroundColor Cyan
@@ -185,3 +183,4 @@ if ($Viz) { $vizArg = @('--viz') }
     --max_seconds=$MaxSeconds `
     --restore=$Checkpoint `
     @vizArg
+
