@@ -66,7 +66,7 @@ $GodotExe    = Resolve-GodotExe
 #   "walk"         - start standing, walk forward in a straight line. No perturbation.
 # Picks the export preset, the exported binary, and (via the preset's feature tag)
 # which scene the build boots. Change this one line to switch tasks.
-$Task        = "perturbation"
+$Task = "stand_multiple"
 
 # --- Training scale ----------------------------------------------------------
 # MEASURED on this 7800X3D (8 cores / 16 threads), headless, 180s per point:
@@ -94,7 +94,7 @@ $Task        = "perturbation"
 # at $Speedup. Verified: 40 procs gave 2,258 steps/s at speedup 8 vs ~2,200 at speedup 16, so
 # dropping from 16 costs nothing. Simulation is unchanged either way - delta stays 1/120 s.
 $NParallel   = 32
-$Speedup     = 8
+$Speedup = 8
 
 # 1M steps is roughly 9 minutes at the sweet spot.
 # Pure-RL get-up realistically needs 10-100M.
@@ -107,7 +107,7 @@ $Timesteps   = 80000000
 # 300 = 5 minutes.
 # 900 = 15 minutes.
 # 7200 = 2 hours.
-$MaxSeconds  = 300
+$MaxSeconds = 3600
 
 # --- Run identity ------------------------------------------------------------
 # LEAVE EMPTY. The name is derived below as "<task>_v<next unused>" by scanning
@@ -149,6 +149,12 @@ if ($Task -eq "perturbation") {
 } elseif ($Task -eq "walk") {
     $ExportPreset = "Windows Walk"
     $BuildName    = "RagdollWalkTraining.exe"
+} elseif ($Task -eq "stand_multiple") {
+    $ExportPreset = "Windows Multiple Stand"
+    $BuildName    = "RagdollMultipleStandTraining.exe"
+} elseif ($Task -eq "walk_multiple") {
+    $ExportPreset = "Windows Multiple Walk"
+    $BuildName    = "RagdollMultipleWalkTraining.exe"
 } else {
     throw "Unknown `$Task '$Task'. Use 'stand', 'getup', 'upright', 'perturbation' or 'walk'."
 }
@@ -187,4 +193,6 @@ if ([string]::IsNullOrWhiteSpace($ExperimentName)) {
 }
 $Python      = "$ProjectPath/rl/.venv/Scripts/python.exe"
 $TrainScript = "$ProjectPath/rl/train.py"
-$BuildExe    = "$ProjectPath/build/$BuildName"
+$BuildExe = $GodotExe
+
+

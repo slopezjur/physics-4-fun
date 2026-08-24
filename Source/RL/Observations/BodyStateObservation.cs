@@ -46,7 +46,17 @@ public sealed class BodyStateObservation : IRlObservationBuilder
     /// Must match exactly what Build() emits - Size is published to Python at handshake, and the
     /// not-ready path returns a zero vector of this width, so a mismatch desyncs the transport.
     /// </summary>
+    /// <summary>
+    /// Root block, 18 floats: pelvis height (1), tilt (1), up-vector (3), linear velocity (3),
+    /// angular velocity (3), head height (1), CoM offset from pelvis (3), CoM velocity (3).
+    /// </summary>
     private const int RootComponents = 18;
+
+    /// <summary>
+    /// Universal Joystick, 7 floats: Target Velocity (X, Z), Target Jump, Target Turn,
+    /// Target Posture (Stand/Crouch/Prone), and Terrain Slope (X, Z).
+    /// </summary>
+    private const int JoystickComponents = 7;
 
     /// <summary>Per controlled bone: root-relative quaternion (4) + angular velocity (3).</summary>
     private const int ComponentsPerBone = 7;
@@ -55,7 +65,7 @@ public sealed class BodyStateObservation : IRlObservationBuilder
 
     public BodyStateObservation(int boneCount) => _boneCount = boneCount;
 
-    public int Size => RootComponents + (_boneCount * ComponentsPerBone) + ContactBoneNames.Length;
+    public int Size => RootComponents + JoystickComponents + (_boneCount * ComponentsPerBone) + ContactBoneNames.Length;
 
     public string Describe() =>
         $"BodyStateObservation(root={RootComponents}, perBone={ComponentsPerBone} [quaternion+angvel], "
@@ -102,6 +112,15 @@ public sealed class BodyStateObservation : IRlObservationBuilder
         obs.Add(comVel.X);
         obs.Add(comVel.Y);
         obs.Add(comVel.Z);
+
+        // Universal Joystick Placeholder (Zeroes for now, preparing the observation space)
+        obs.Add(0.0f); // Target Velocity X
+        obs.Add(0.0f); // Target Velocity Z
+        obs.Add(0.0f); // Target Jump
+        obs.Add(0.0f); // Target Turn
+        obs.Add(1.0f); // Target Posture (1.0 = Stand)
+        obs.Add(0.0f); // Terrain Slope X
+        obs.Add(0.0f); // Terrain Slope Z
 
         foreach (ActiveBone? bone in context.ControlledBones)
         {
