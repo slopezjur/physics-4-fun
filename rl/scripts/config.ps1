@@ -122,7 +122,7 @@ $MaxSeconds = 3600
 #
 # Set it explicitly ONLY to deliberately continue an existing lineage in place -
 # for example to append more steps to perturbation_v8 rather than starting v9.
-$ExperimentName = "stand_multiple_v2"
+# $ExperimentName = "stand_multiple_v2"
 
 # --- Checkpointing -----------------------------------------------------------
 # Wall-clock seconds between saves. A crash costs at most this much work.
