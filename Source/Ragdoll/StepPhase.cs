@@ -1,4 +1,4 @@
-﻿namespace Physics4Fun.Ragdoll;
+namespace Physics4Fun.Ragdoll;
 
 public enum StepPhase
 {

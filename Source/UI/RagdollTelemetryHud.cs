@@ -1,4 +1,4 @@
-﻿using Godot;
+using Godot;
 using Physics4Fun.Ragdoll;
 using Physics4Fun.Ragdoll.Interfaces;
 using Physics4Fun.RL;

@@ -1,4 +1,4 @@
-﻿using Godot;
+using Godot;
 using Physics4Fun.Ragdoll.Interfaces;
 
 namespace Physics4Fun.Ragdoll.Modules.Reflexes;
