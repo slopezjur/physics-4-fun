@@ -62,6 +62,12 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
     // Subsystem Modules (SRP)
     private readonly RagdollStateMachine _stateMachine = new();
     private readonly GroundContactModule _groundContact = new();
+
+    /// <summary>
+    /// Per-ragdoll, because it latches hysteresis - see <see cref="OrientationClassifier"/>. It was
+    /// a static class, which silently shared one latch across every body in the process.
+    /// </summary>
+    private readonly OrientationClassifier _orientationClassifier = new();
     private readonly DynamicSteppingModule _stepping = new();
     private readonly WeightTransferModule _weightTransfer;
     private readonly AnkleBalanceModule _ankleBalance = new();
@@ -215,6 +221,12 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
         IsIcpValid = false;
         _pelvisStabilization.ClearTorque();
         CenterOfMassVelocity = Vector3.Zero;
+
+        // Orientation hysteresis describes continuous motion, so it must not survive a teleport.
+        // Reset() is already called on every respawn path (ResetRagdoll, DropToProne,
+        // TeleportToGetUpPose, StartReinforcementLearning), so folding it in here is what keeps a
+        // future respawn path from silently forgetting it.
+        _orientationClassifier.Reset();
 
         _stepping.Reset();
         _weightTransfer.Reset();
@@ -397,7 +409,7 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
 
     private void ClassifyOrientation()
     {
-        CurrentOrientation = OrientationClassifier.Classify(_pelvis.GlobalTransform.Basis);
+        CurrentOrientation = _orientationClassifier.Classify(_pelvis.GlobalTransform.Basis);
     }
 
     private void UpdateCenterOfMass()

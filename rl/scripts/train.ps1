@@ -13,9 +13,13 @@ Write-Host "Training: $NParallel procs, speedup x$Speedup, $Timesteps steps" -Fo
     --env_path=$BuildExe `
     --n_parallel=$NParallel `
     --speedup=$Speedup `
+    --dummies=$Dummies `
     --timesteps=$Timesteps `
     --experiment_dir=$ExperimentDir `
     --experiment_name=$ExperimentName `
     --save_every_seconds=$SaveEverySeconds `
     --max_seconds=$MaxSeconds
+
+
+& "$PSScriptRoot/summary.ps1" -NamePrefix $ExperimentName
 

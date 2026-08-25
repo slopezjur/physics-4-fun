@@ -25,7 +25,7 @@
 . "$PSScriptRoot/config.ps1"
 
 Write-Host "Exporting '$ExportPreset' -> $BuildExe" -ForegroundColor Cyan
-$FeatureTag = @{ "Windows Stand" = "stand"; "Windows GetUp" = "getup"; "Windows Upright" = "upright"; "Windows Perturbation" = "perturbation"; "Windows Walk" = "walk"; "Windows Multiple Stand" = "stand_multiple"; "Windows Multiple Walk" = "walk_multiple" }[$ExportPreset]
+$FeatureTag = @{ "Windows Stand" = "stand"; "Windows GetUp" = "getup"; "Windows Upright" = "upright"; "Windows Perturbation" = "perturbation"; "Windows Walk" = "walk" }[$ExportPreset]
 Write-Host "  (main scene comes from run/main_scene.$FeatureTag via the '$FeatureTag' feature tag)" -ForegroundColor DarkGray
 
 Write-Host 'Building ExportRelease assembly...' -ForegroundColor Cyan
@@ -73,6 +73,3 @@ if (Test-Path $ProjectDataFolder) {
     }
     Rename-Item $ProjectDataFolder $ExpectedDataFolder
 }
-
-
-

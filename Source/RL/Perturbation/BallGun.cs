@@ -472,10 +472,7 @@ public partial class BallGun : Node3D, IRlPerturbationDiagnostics
         _timeUntilNextShot = FirstShotDelaySeconds;
         _gravity = (float)ProjectSettings.GetSetting("physics/3d/default_gravity", 9.8f);
 
-        if (Target == null)
-        {
-            Target = GetTree().Root.FindChild("ActiveRagdoll", true, false) as HumanoidRagdoll;
-        }
+        Target ??= FindTargetInOwnAgent();
 
         // Printed once at startup, not per shot. A perturbation run and a plain run produce
         // otherwise identical logs, and mistaking one for the other silently invalidates any
@@ -485,6 +482,34 @@ public partial class BallGun : Node3D, IRlPerturbationDiagnostics
             + $"(first at {FirstShotDelaySeconds:F1}s), {BallMass:F1}kg @ {LaunchSpeed:F1}m/s "
             + $"from {SpawnDistance:F1}m, {(RandomizeDirection ? "random" : "fixed")} direction, "
             + $"target={(Target != null ? Target.Name.ToString() : "NONE")}");
+    }
+
+    /// <summary>
+    /// Last-resort target lookup, scoped to THIS gun's own agent.
+    ///
+    /// It used to be <c>GetTree().Root.FindChild("ActiveRagdoll", true, false)</c> - a whole-tree
+    /// search returning the first match anywhere. That was harmless while a scene held exactly one
+    /// body, and became silently wrong the moment RagdollSpawner started putting 64 in one process:
+    /// every gun that fell through to it acquired Agent_1, so 63 dummies were shelled by guns aimed
+    /// at a body metres away while their own stood unperturbed. The perturbation metrics would have
+    /// looked like a policy that had learned to ignore impacts.
+    ///
+    /// Resolved through the <see cref="RlAgent"/> ancestor rather than by name, so it cannot cross
+    /// an agent boundary by construction rather than by a filter applied afterwards. Returns null
+    /// when there is no such ancestor, which is the honest answer - a gun outside any agent has no
+    /// body it can be said to belong to, and Update() already treats a null Target as disarmed.
+    /// </summary>
+    private HumanoidRagdoll? FindTargetInOwnAgent()
+    {
+        for (Node? node = GetParent(); node != null; node = node.GetParent())
+        {
+            if (node is RlAgent agent)
+            {
+                return agent.Ragdoll;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -617,9 +642,15 @@ public partial class BallGun : Node3D, IRlPerturbationDiagnostics
         var hits = world.DirectSpaceState.IntersectShape(_probeQuery, 4);
         foreach (var hit in hits)
         {
+            // The ancestor test is load-bearing with more than one agent per process. Agents are
+            // spaced along X and the probe is a world-space shape query, so a ball passing between
+            // two rows can overlap a NEIGHBOUR's bone and credit the impact to a body this gun
+            // never fired at - poisoning both dummies' ball_* diagnostics at once.
             if (hit.TryGetValue("collider", out Variant collider)
                 && collider.As<GodotObject>() is ActiveBone bone
-                && IsInstanceValid(bone))
+                && IsInstanceValid(bone)
+                && Target != null
+                && Target.IsAncestorOf(bone))
             {
                 return bone;
             }
@@ -633,8 +664,10 @@ public partial class BallGun : Node3D, IRlPerturbationDiagnostics
     /// Ages balls on the simulation clock instead of SceneTree timers.
     ///
     /// SceneTree timers are themselves scaled by Engine.TimeScale and allocate a signal connection
-    /// per ball; at 40 processes firing every 3 s for hours that is a steady churn for something a
-    /// float subtraction does exactly as well.
+    /// per ball; across a thousand-odd bodies (16 processes x 64) each firing for hours that is a
+    /// steady churn for something a float subtraction does exactly as well. The argument got
+    /// stronger when RagdollSpawner made the gun per-agent rather than per-scene: one gun per body
+    /// means the allocation count now scales with --dummies too, not just with --n_parallel.
     /// </summary>
     private void AgeBalls(float dt)
     {
@@ -861,6 +894,10 @@ public partial class BallGun : Node3D, IRlPerturbationDiagnostics
         for (int i = 0; i < SmallBallTargetBones.Length; i++)
         {
             string name = SmallBallTargetBones[(start + i) % SmallBallTargetBones.Length];
+            // No ancestor test here, unlike the probe above: FindBone searches Target's own
+            // skeleton, so the result cannot belong to another agent. The guard a patch script
+            // added here was unreachable anyway - it tested Target for null on the line after
+            // dereferencing it, inside a method that already returns early when it is null.
             ActiveBone? bone = Target.FindBone(name);
             if (bone != null && IsInstanceValid(bone))
             {

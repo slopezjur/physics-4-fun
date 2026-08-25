@@ -7,7 +7,26 @@ namespace Physics4Fun.Ragdoll;
 
 /// <summary>
 /// Dynamic Motion Synthesis (DMS) registry and coordinator.
-/// Uses the Strategy Pattern (OCP) to dynamically evaluate bone targets from registered IMotionTrajectory strategies.
+/// Uses the Strategy Pattern (OCP) to dynamically evaluate bone targets from registered
+/// IMotionTrajectory strategies.
+///
+/// <para><b>Every registered trajectory MUST be stateless.</b> This registry is static, so one
+/// instance of each trajectory is shared by every ragdoll in the process - and
+/// <see cref="RL.RagdollSpawner"/> now puts up to 64 of them in one process, all ticking the same
+/// objects every physics frame.</para>
+///
+/// <para>That is safe today only because <see cref="ComputeTargetRotation"/> passes the entire
+/// per-body situation as arguments - bone, state, orientation, time, phase - and every
+/// implementation is a pure function of them, holding nothing but immutable
+/// <c>PhaseBoundaries</c>. It is an invariant, not an accident: a trajectory that caches so much as
+/// a <c>private float _lastPhase</c> would silently share it across all 64 bodies, and the symptom
+/// would be bone targets that depend on which OTHER ragdoll was evaluated immediately before -
+/// nondeterministic, load-dependent, and invisible in a single-body test scene.</para>
+///
+/// <para>This is not hypothetical: <see cref="OrientationClassifier"/> was a static class with
+/// exactly that shape and had to be made per-ragdoll for exactly that reason. If a trajectory ever
+/// needs per-body memory, move the registry off <c>static</c> and give each
+/// <see cref="BalanceController"/> its own, the way it now owns its own classifier.</para>
 /// </summary>
 public static class BiomechanicalMotionSynthesizer
 {

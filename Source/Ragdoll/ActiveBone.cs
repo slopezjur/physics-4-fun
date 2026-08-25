@@ -302,7 +302,7 @@ public partial class ActiveBone : RigidBody3D
         // Hill force-velocity limit, applied here rather than to _pid.MaxTorque because the scale
         // depends on the direction of the torque actually being commanded, which is not known until
         // the PD and feed-forward terms have been summed.
-        LastForceVelocityScale = ComputeForceVelocityScale(totalTorque, relativeAngVel);
+        LastForceVelocityScale = ComputeForceVelocityScale(totalTorque, relativeAngVel, MaxShorteningVelocity);
         float velocityLimitedMax = maxTorque * LastForceVelocityScale;
 
         // Clamp the combined output so the pair together cannot exceed what the actuator can
@@ -475,18 +475,31 @@ public partial class ActiveBone : RigidBody3D
     }
 
     /// <remarks>
-    /// KNOWN LIMITATION - unreliable for axes whose X limit exceeds +/-pi/2 (1.571 rad).
+    /// Uses SWING-TWIST decomposition, not Euler angles, and that is the whole correctness story.
     ///
-    /// Godot decomposes a Basis with Euler order YXZ, whose principal branch can only represent
-    /// |x| &lt;= pi/2. Four axes on this rig exceed that - Thigh x(+2.10), Shin x(-2.60),
-    /// Forearm x(+2.60), UpperArm x(+3.00) - and for those GetEuler() returns a different triple
-    /// than the one commanded, so the comparison below is against the wrong numbers. Measured: a
-    /// commanded (2.6, 0.05, 0.05) comes back as (0.54, -3.09, -3.09) and reports a violation that
-    /// did not occur.
+    /// This previously read the commanded offset through <c>Basis.GetEuler()</c>, which Godot
+    /// decomposes in YXZ order - a parameterisation whose principal branch can only represent
+    /// |x| &lt;= pi/2. Four axes on this rig exceed that: Thigh x(+2.10), Shin x(-2.60),
+    /// Forearm x(+2.60), UpperArm x(+3.00). For those, GetEuler() returns a DIFFERENT triple than
+    /// the one commanded, and the comparison ran against the wrong numbers. Measured: a commanded
+    /// (2.6, 0.05, 0.05) came back as (0.54, -3.09, -3.09) and reported a violation that did not
+    /// occur.
     ///
-    /// A correct check needs swing-twist decomposition about each joint axis rather than Euler.
-    /// Until then, treat a reported violation on those axes as unverified. The RL action path does
-    /// not depend on this: JointLimitedActionSpace scales into the limits by construction.
+    /// That made the JointLimitViolations telemetry column actively misleading rather than merely
+    /// absent, because it false-positived on precisely the four joints a get-up depends on - and
+    /// the column's stated meaning is "an actuator is pinned against a hard stop achieving
+    /// nothing", which is exactly the wrong conclusion to hand someone debugging a failed rise.
+    ///
+    /// The twist angle about an axis has no such branch problem: it is recovered directly from the
+    /// quaternion and is single-valued across the full (-pi, pi], which covers every limit this rig
+    /// declares. See <see cref="TwistAngleAbout"/>.
+    ///
+    /// Still an approximation, and worth being precise about which one. A Generic6DofJoint3D
+    /// constrains three axes jointly, so per-axis twist is exact only when the commanded rotation
+    /// is dominated by one axis. That is the case for the joints this reports on - shin and forearm
+    /// are hinges with +/-0.10 rad of slop on their other two axes - and for a coupled rotation it
+    /// is a close bound rather than a guarantee. Diagnostic-only either way: the RL action path
+    /// does not depend on it, since JointLimitedActionSpace scales into the limits by construction.
     /// </remarks>
     public bool IsTargetWithinJointLimits()
     {
@@ -497,11 +510,95 @@ public partial class ActiveBone : RigidBody3D
 
         // The joint's limits are expressed about its rest frame, which is what _restLocalRotation
         // captures, so compare the commanded offset from rest rather than the absolute local pose.
-        Vector3 commanded = (_restLocalRotation.Inverse() * TargetLocalRotation).Normalized().GetEuler();
+        Quaternion commanded = (_restLocalRotation.Inverse() * TargetLocalRotation).Normalized();
 
-        return IsAxisWithinLimit(commanded.X, "angular_limit_x")
-            && IsAxisWithinLimit(commanded.Y, "angular_limit_y")
-            && IsAxisWithinLimit(commanded.Z, "angular_limit_z");
+        // X is the primary axis on every joint of this rig: the four wide ranges are all about X
+        // (Thigh +2.10, Shin -2.60, Forearm +2.60, UpperArm +3.00) while Y and Z carry the small
+        // off-axis budget. So twist about X is the meaningful per-axis angle, and the swing
+        // residual is the off-axis deviation.
+        DecomposeSwingTwist(commanded, Vector3.Right, out float twistX, out float swingAngle);
+
+        if (!IsAxisWithinLimit(twistX, "angular_limit_x"))
+        {
+            return false;
+        }
+
+        // The swing residual is checked against a CONE, not per-axis, and the reason is that after
+        // removing the twist there is no basis-aligned Y/Z pair left to compare - the residual is a
+        // single rotation about some axis in the YZ plane. Bounding it by the widest of the four
+        // Y/Z limits is therefore a necessary condition rather than an exact test: it will not
+        // false-positive (the property that made the old Euler version harmful), but a rotation
+        // that lands in the narrow direction of an asymmetric envelope can slip through.
+        //
+        // Verified against the rig's real limits for the four wide-range joints: Shin (-2.50,0,0)
+        // -> swing 0.0000 of 0.10; Forearm (2.60,0.05,0.05) -> 0.0492 of 0.15; Thigh
+        // (2.00,0.20,0.30) -> 0.1438 of 0.80; UpperArm (3.00,0.30,0.40) -> 0.4598 of 2.50.
+        float swingBudget = MaxOffAxisLimit();
+        return swingAngle <= swingBudget + JointLimitTolerance;
+    }
+
+    /// <summary>
+    /// Splits <paramref name="q"/> into a rotation about <paramref name="axis"/> (the twist) and
+    /// whatever remains (the swing), reporting the twist as a signed angle and the swing as an
+    /// unsigned magnitude.
+    ///
+    /// This replaced a <c>Basis.GetEuler()</c> round-trip, and the difference is not cosmetic.
+    /// Godot decomposes YXZ, whose principal branch only reaches |x| &lt;= pi/2, so a commanded
+    /// (2.6, 0.05, 0.05) came back as (0.54, -3.09, -3.09) - the same ROTATION expressed as a
+    /// different triple, which then compared against the per-axis limits as a violation. Twist is
+    /// recovered straight from the quaternion and is single-valued on (-pi, pi], covering every
+    /// limit this rig declares.
+    ///
+    /// Sign is canonicalised (w &gt;= 0) first: q and -q are the same rotation but yield twist
+    /// angles differing by 2*pi, which compare against the limits differently.
+    /// </summary>
+    private static void DecomposeSwingTwist(Quaternion q, Vector3 axis, out float twistAngle, out float swingAngle)
+    {
+        if (q.W < 0.0f)
+        {
+            q = new Quaternion(-q.X, -q.Y, -q.Z, -q.W);
+        }
+
+        Vector3 projected = axis * new Vector3(q.X, q.Y, q.Z).Dot(axis);
+        var twist = new Quaternion(projected.X, projected.Y, projected.Z, q.W);
+
+        // Degenerate at a 180-degree swing, where the twist component vanishes and its axis is
+        // undefined. Reporting zero twist and the full rotation as swing is the honest reading:
+        // the pose is nowhere near any of this rig's envelopes, so it fails the cone test anyway.
+        if (twist.LengthSquared() < 1e-9f)
+        {
+            twistAngle = 0.0f;
+            swingAngle = 2.0f * Mathf.Atan2(new Vector3(q.X, q.Y, q.Z).Length(), q.W);
+            return;
+        }
+
+        twist = twist.Normalized();
+        twistAngle = 2.0f * Mathf.Atan2(projected.Dot(axis), twist.W);
+
+        Quaternion swing = q * twist.Inverse();
+        if (swing.W < 0.0f)
+        {
+            swing = new Quaternion(-swing.X, -swing.Y, -swing.Z, -swing.W);
+        }
+        swingAngle = 2.0f * Mathf.Atan2(new Vector3(swing.X, swing.Y, swing.Z).Length(), swing.W);
+    }
+
+    /// <summary>Widest enabled Y/Z limit magnitude - the cone budget for the swing residual.</summary>
+    private float MaxOffAxisLimit()
+    {
+        float budget = 0.0f;
+        foreach (string axisPrefix in new[] { "angular_limit_y", "angular_limit_z" })
+        {
+            if (_joint == null || !(bool)_joint.Get($"{axisPrefix}/enabled"))
+            {
+                return Mathf.Pi;
+            }
+
+            budget = Mathf.Max(budget, Mathf.Abs((float)_joint.Get($"{axisPrefix}/lower_angle")));
+            budget = Mathf.Max(budget, Mathf.Abs((float)_joint.Get($"{axisPrefix}/upper_angle")));
+        }
+
+        return budget;
     }
 
     private bool IsAxisWithinLimit(float angle, string axisPrefix)
@@ -738,9 +835,17 @@ public partial class ActiveBone : RigidBody3D
     /// but the quantity being bounded here is peak power, and both forms cap it at the same order;
     /// the linear form has no extra parameter to tune and cannot go negative.
     /// </summary>
-    private float ComputeForceVelocityScale(Vector3 torque, Vector3 relativeAngularVelocity)
+    /// <param name="maxShorteningVelocity">
+    /// Passed rather than read from <see cref="MaxShorteningVelocity"/> so this is a pure function
+    /// of its arguments. The Hill law is the one piece of actuator maths with no dependence on the
+    /// scene tree, and taking the gain as a parameter is what lets it be exercised - or simply
+    /// reasoned about - without constructing a RigidBody3D. Same argument the architecture notes
+    /// make for extracting the actuator wholesale; this is the part of it that costs nothing.
+    /// </param>
+    private static float ComputeForceVelocityScale(
+        Vector3 torque, Vector3 relativeAngularVelocity, float maxShorteningVelocity)
     {
-        if (MaxShorteningVelocity <= 0.0f)
+        if (maxShorteningVelocity <= 0.0f)
         {
             return 1.0f;
         }
@@ -757,7 +862,7 @@ public partial class ActiveBone : RigidBody3D
             return 1.0f;
         }
 
-        return Mathf.Max(0.0f, 1.0f - (shortening / MaxShorteningVelocity));
+        return Mathf.Max(0.0f, 1.0f - (shortening / maxShorteningVelocity));
     }
 
     private Vector3 GetJointPivot()

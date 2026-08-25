@@ -26,27 +26,39 @@ public partial class ProjectileShooter : Node
         if (@event is InputEventMouseButton mouseButton && mouseButton.ButtonIndex == MouseButton.Left)
         {
             _isFiring = mouseButton.Pressed;
-            if (_isFiring && _timeUntilNextShot <= 0.0f)
-            {
-                SpawnAndShootProjectile();
-                _timeUntilNextShot = 1.0f / Mathf.Max(0.1f, FireRate);
-            }
+
+            // Fire on the press itself rather than waiting for the next _Process, so a single
+            // click feels immediate instead of picking up up to one frame of latency.
+            TryFire();
         }
     }
 
     public override void _Process(double delta)
     {
-        float dt = (float)delta;
         if (_timeUntilNextShot > 0.0f)
         {
-            _timeUntilNextShot -= dt;
+            _timeUntilNextShot -= (float)delta;
         }
 
-        if (_isFiring && _timeUntilNextShot <= 0.0f)
+        TryFire();
+    }
+
+    /// <summary>
+    /// Fires if the button is held and the cooldown has expired.
+    ///
+    /// Both call sites ran an identical copy of this: press-to-fire in _UnhandledInput and
+    /// hold-to-repeat in _Process. Two copies of a guard plus a cooldown reset is how the two
+    /// quietly drift apart - change the rate limit in one and the click path keeps the old one.
+    /// </summary>
+    private void TryFire()
+    {
+        if (!_isFiring || _timeUntilNextShot > 0.0f)
         {
-            SpawnAndShootProjectile();
-            _timeUntilNextShot = 1.0f / Mathf.Max(0.1f, FireRate);
+            return;
         }
+
+        SpawnAndShootProjectile();
+        _timeUntilNextShot = 1.0f / Mathf.Max(0.1f, FireRate);
     }
 
     private void SpawnAndShootProjectile()

@@ -14,10 +14,14 @@ namespace Physics4Fun.RL.Observations;
 /// onto another while this stays identical. That is the sole reason walking can be bootstrapped
 /// from a standing policy rather than trained from noise.
 ///
-/// It carries no task indicator and no goal, which is the current limit of the "one brain" idea:
-/// stand, get-up and perturbation share an objective so they need none, but a task that wants the
-/// body to go somewhere would need a goal vector added here - and adding one invalidates every
-/// existing checkpoint.
+/// It carries no task indicator, which is the current limit of the "one brain" idea: stand, get-up
+/// and perturbation share an objective so they need none.
+///
+/// It DOES carry a goal block, reserved and constant - see <see cref="JoystickComponents"/>. That
+/// block exists ahead of any task using it precisely because adding one later would invalidate
+/// every existing checkpoint, and Walk (the task that will need it) is bootstrapped from a Stand
+/// checkpoint that has to match width. Paying that cost once, up front, is the only way the
+/// bootstrap survives the day walking gains a heading command.
 ///
 /// Three deliberate changes from the M2 placeholder:
 ///
@@ -46,15 +50,30 @@ public sealed class BodyStateObservation : IRlObservationBuilder
     /// Must match exactly what Build() emits - Size is published to Python at handshake, and the
     /// not-ready path returns a zero vector of this width, so a mismatch desyncs the transport.
     /// </summary>
-    /// <summary>
-    /// Root block, 18 floats: pelvis height (1), tilt (1), up-vector (3), linear velocity (3),
-    /// angular velocity (3), head height (1), CoM offset from pelvis (3), CoM velocity (3).
-    /// </summary>
     private const int RootComponents = 18;
 
     /// <summary>
-    /// Universal Joystick, 7 floats: Target Velocity (X, Z), Target Jump, Target Turn,
-    /// Target Posture (Stand/Crouch/Prone), and Terrain Slope (X, Z).
+    /// Goal block ("Universal Joystick"), 7 floats. Constant today - see the slot map in Build().
+    ///
+    /// Present in EVERY task's observation, including the three Upright ones that need no goal at
+    /// all, and that is the point. Walk is a separate brain but is bootstrapped from a Stand
+    /// checkpoint, which only works while the widths match (see the class summary). Walk is also
+    /// the task that will need a command: WalkForwardReward.HeadingWeight is pinned to 0.0 purely
+    /// because the observation carries no heading. A command has to reach the input layer - there
+    /// is no way to express "go that way" to a trained network except through this vector - so the
+    /// slots have to exist in the shared observation BEFORE walking uses them, or the bootstrap
+    /// breaks on the day it does.
+    ///
+    /// The width is therefore load-bearing and frozen. It has already churned 106 -> 108 -> 115 ->
+    /// 113 across the archived lineages, and commits 31573c2 -> 94402ad -> ebbaa1b were three
+    /// commits spent on an ONNX shape crash caused by exactly that. Every change orphans every
+    /// checkpoint. Do not change it without a decision record.
+    ///
+    /// KNOWN DEBT, deliberately not acted on: terrain slope has no slot here. It was in this block
+    /// and was removed - it is exteroception, not a command, so it belongs in the root sensing
+    /// block, and no scene can currently produce a non-zero value (every RL floor is a flat
+    /// axis-aligned BoxShape3D and there is no slope code anywhere in the project). Adding it later
+    /// is its own deliberate width decision, not a free slot to reclaim.
     /// </summary>
     private const int JoystickComponents = 7;
 
@@ -67,8 +86,16 @@ public sealed class BodyStateObservation : IRlObservationBuilder
 
     public int Size => RootComponents + JoystickComponents + (_boneCount * ComponentsPerBone) + ContactBoneNames.Length;
 
+    /// <summary>
+    /// Written verbatim into the run manifest, so the components listed here MUST account for
+    /// every float in Size. They did not: the goal block was added without touching this string,
+    /// and every manifest written since reported root=18 + 12x7 + 4 = 106 next to total=113, with
+    /// seven floats unaccounted for. That is precisely the drift ARCHITECTURE.md claims cannot
+    /// happen. Adding a component and not adding it here reintroduces it.
+    /// </summary>
     public string Describe() =>
-        $"BodyStateObservation(root={RootComponents}, perBone={ComponentsPerBone} [quaternion+angvel], "
+        $"BodyStateObservation(root={RootComponents}, goal={JoystickComponents} [targetVel+jump+turn+posture1hot], "
+        + $"perBone={ComponentsPerBone} [quaternion+angvel], "
         + $"bones={_boneCount}, contacts={ContactBoneNames.Length}, total={Size})";
 
     public float[] Build(in RlContext context)
@@ -113,14 +140,27 @@ public sealed class BodyStateObservation : IRlObservationBuilder
         obs.Add(comVel.Y);
         obs.Add(comVel.Z);
 
-        // Universal Joystick Placeholder (Zeroes for now, preparing the observation space)
-        obs.Add(0.0f); // Target Velocity X
-        obs.Add(0.0f); // Target Velocity Z
-        obs.Add(0.0f); // Target Jump
-        obs.Add(0.0f); // Target Turn
-        obs.Add(1.0f); // Target Posture (1.0 = Stand)
-        obs.Add(0.0f); // Terrain Slope X
-        obs.Add(0.0f); // Terrain Slope Z
+        // Goal block, JoystickComponents floats. Constant until a task actually issues a command;
+        // see the JoystickComponents summary for why it is here before anything drives it.
+        //
+        // Posture is a THREE-SLOT ONE-HOT, not one scalar. It was a single ordinal
+        // (0=Prone/0.5=Crouch/1=Stand) sharing the block with two terrain-slope slots, which
+        // asserted Crouch lies numerically between Prone and Stand - the network would have been
+        // handed that ordering as fact. Splitting it costs nothing because the two slope slots it
+        // replaces were dead: exteroception in a command block, unreachable on flat floors.
+        //
+        // The emitted vector is UNCHANGED by that split - [0,0,0,0,1,0,0] before and after, with
+        // the 1.0 still at index 4 - so every checkpoint trained on the old layout stays valid.
+        // Slots 5 and 6 have emitted exactly 0.0 for every step ever trained, so their first-layer
+        // weights received exactly zero gradient and are still at initialization. There is nothing
+        // in the policy that learned the old meaning and would have to unlearn it.
+        obs.Add(0.0f); // 0: Target Velocity X
+        obs.Add(0.0f); // 1: Target Velocity Z
+        obs.Add(0.0f); // 2: Target Jump
+        obs.Add(0.0f); // 3: Target Turn
+        obs.Add(1.0f); // 4: Target Posture - Stand
+        obs.Add(0.0f); // 5: Target Posture - Crouch
+        obs.Add(0.0f); // 6: Target Posture - Prone
 
         foreach (ActiveBone? bone in context.ControlledBones)
         {

@@ -161,8 +161,9 @@ only composed on top of it.
   is attributable to the policy.
 - `RagdollRLBridge` writes `TargetLocalRotation` directly (rest * action). Action range widened
   0.6 → 2.6 rad to span the real joint envelope; 4 → 12 controlled bones (36 actions).
-- `BodyStateObservation` (106 floats): root-relative **quaternions** (not wrap-prone Euler), pelvis
-  up-vector, CoM offset/velocity, head height, and hand/foot **contact flags**.
+- `BodyStateObservation` (113 floats): root-relative **quaternions** (not wrap-prone Euler), pelvis
+  up-vector, CoM offset/velocity, head height, hand/foot **contact flags**, and a reserved 7-float
+  goal block (see below).
 - `UprightProgressReward`, `UprightTermination` (success on *held* standing, not momentary).
 - Physics restored to **120 Hz** (`EnsurePhysicsTickRate`, derived from `Engine.TimeScale`);
   `action_repeat = 8` → 15 Hz control, chosen against the 40 ms actuator smoothing constant.
@@ -428,3 +429,54 @@ checkpoint overhead plus sustained thermals. `time/fps` slope over the final ses
 t = −1.9, i.e. statistically flat: it does not degrade under load. 40 procs measured 2,258 (+4.5%),
 which is the ceiling for process-vectorized Godot on this CPU. The GPU is nowhere near the
 bottleneck. Sample *composition* was worth far more than any remaining throughput gain.
+
+## Bodies per process beat processes
+
+Measured 2026-08-24, same 7800X3D, headless. The previous section's conclusion — that ~2,258
+steps/s was "the ceiling for process-vectorized Godot on this CPU" — was correct and beside the
+point. It was a ceiling on *processes*. Adding a `RagdollSpawner` to each training scene made the
+body count independent of the process count, and the ceiling moved.
+
+| procs | dummies | speedup | steps/s | theoretical |
+|---|---|---|---|---|
+| 1 | 1 | 1 | 14.9 | 15 |
+| 1 | 1 | 8 | 14.9 | 120 |
+| 1 | 2 | 1 | 29.7 | 30 |
+| 2 | 1 | 1 | 29.7 | 30 |
+| 2 | 2 | 1 | 59.4 | 60 |
+| 8 | 2 | 1 | 235.8 | 238 |
+| 8 | 8 | 1 | 894.5 | 950 |
+| 8 | 8 | 4 | 897.6 | 3,802 |
+| 8 | 16 | 1 | 1,720.8 | 1,901 |
+| 8 | 64 | 1 | 2,976.7 | 7,603 |
+| 14 | 64 | 1 | 3,660.4 | 16,627 |
+| 16 | 16 | 1 | 2,987.8 | 3,802 |
+| 16 | 16 | 4 | 3,103.7 | 15,206 |
+| 16 | 16 | 16 | 3,044.9 | 60,826 |
+| 16 | 32 | 4 | 3,734.2 | 7,603 |
+| 16 | 50 | 1 | 3,725.2 | 11,880 |
+| **16** | **64** | **1** | **4,310.5** | 15,206 |
+| 16 | 64 | 2 | 4,254.3 | 30,413 |
+| 16 | 128 | 1 | 4,335.4 | 30,413 |
+| 32 | 16 | 4 | 3,555.7 | 7,603 |
+| 32 | 32 | 1 | 4,031.0 | 15,206 |
+| 32 | 40 | 1 | 3,963.8 | 19,008 |
+
+Three things fall out of it.
+
+**Dummies and processes are interchangeable only while nothing is saturated.** 1×2 and 2×1 both
+measure 29.7; 2×2 measures 59.4, exactly double. The scaling is clean and linear until it isn't.
+
+**Past saturation, dummies win.** 16×64 measures 4,310 against 4,031 for 32×32 — same 1,024 bodies,
+half the processes, 7% faster. And 16×128 buys 0.6% over 16×64 for double the bodies, so 16×64 is
+the knee. What is being avoided is per-process overhead: socket, render server, engine startup.
+
+**`speedup` does nothing here.** 16×16 measures 2,988 / 3,104 / 3,045 at speedup 1 / 4 / 16 — flat
+across a 16× range, which by the invariants doc's own rule ("a parameter that does nothing across a
+large range is not the mechanism") means it is not the lever. It never was a rate: it is a *request*
+for faster physics ticks, and the CPU is already saturated by simulation, so the request cannot be
+met. The theoretical column shows the gap widening to 14× at 16×16×16. Leave it at 1 except under
+`--viz`, where it sets how fast the visible window plays.
+
+`stand_v28` ran at 16×64×1 and sustained 3,819 steps/s over 8.5 h — 11% under the 180 s sweep
+figure, the same checkpoint-overhead-and-thermals gap the 32-proc measurement showed.

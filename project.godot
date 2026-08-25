@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="Physics4Fun"
-run/main_scene="res://Scenes/RL/Upright/RagdollMultipleStandTraining.tscn"
+run/main_scene="res://Scenes/RL/Upright/RagdollStandArena.tscn"
 config/features=PackedStringArray("4.7", "C#", "Forward Plus")
 config/icon="res://icon.svg"
 run/main_scene.perturbation="res://Scenes/RL/Upright/RagdollPerturbationTraining.tscn"

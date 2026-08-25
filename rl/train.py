@@ -628,6 +628,16 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--env_path", required=True, help="Path to the exported Godot executable.")
     parser.add_argument("--scene_path", default="", help="The specific scene to run")
+    parser.add_argument(
+        "--dummies",
+        type=int,
+        default=1,
+        help="Bodies to spawn INSIDE each Godot process. Total bodies is --n_parallel x this. "
+        "Reaches Godot only because GodotEnv forwards unrecognised kwargs to the child process as "
+        "--key=value, where RagdollSpawner reads it; a scene without a RagdollSpawner ignores it "
+        "silently and trains one body. Prefer raising this over --n_parallel: process overhead is "
+        "the ceiling, so 16x64 measured 4,311 steps/s against 2,258 for 40x1.",
+    )
     parser.add_argument("--n_parallel", type=int, default=1, help="Number of Godot processes to run.")
     parser.add_argument("--speedup", type=int, default=8, help="Physics speed multiplier.")
     parser.add_argument("--timesteps", type=int, default=100_000)
@@ -720,6 +730,15 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # Rejected rather than clamped. Both of these silently produce a valid-looking run at the wrong
+    # scale - a typo'd --dummies=0 trains one body per process and reports a throughput shortfall
+    # of exactly the factor you meant to gain, with nothing in the manifest to distinguish it from
+    # a slow machine.
+    if args.dummies < 1:
+        parser.error(f"--dummies must be at least 1 (got {args.dummies})")
+    if args.n_parallel < 1:
+        parser.error(f"--n_parallel must be at least 1 (got {args.n_parallel})")
+
     # Restored from the previous run unless overridden. GodotEnv forwards unknown kwargs to each
     # process as --key=value, so this arrives as --curriculum_start=<t> on the Godot command line.
     curriculum_start = args.curriculum_start
@@ -735,6 +754,7 @@ def main() -> None:
         project_path=os.path.abspath(os.path.join(os.path.dirname(__file__), "..")), 
         n_parallel=args.n_parallel,
         speedup=args.speedup,
+        dummies=args.dummies,
         seed=args.seed,
         visible_count=1 if args.viz else 0,
         **env_kwargs,
@@ -831,6 +851,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
 
 

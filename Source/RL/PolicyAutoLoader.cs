@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Godot;
 
 namespace Physics4Fun.RL;
@@ -19,8 +20,28 @@ public partial class PolicyAutoLoader : Node3D
     /// <summary>The Sync node whose control mode this sets. </summary>
     [Export] public Node? Sync { get; set; }
 
-    /// <summary>Bridge to switch into continuous playback (no episode resets).</summary>
+    /// <summary>
+    /// Single bridge to switch into continuous playback. Only for a scene that places one agent by
+    /// hand; a spawned scene should set <see cref="Spawner"/> instead and leave this empty. Both
+    /// may be set, and the union is used.
+    /// </summary>
     [Export] public RagdollRLBridge? Bridge { get; set; }
+
+    /// <summary>
+    /// The scene's agent spawner, if it has one. Every agent it produced is switched into playback,
+    /// not just the first.
+    ///
+    /// This is the fix for a real defect rather than a generalisation for its own sake. The
+    /// multi-agent arena pinned <c>Bridge = Agent_1/RLBridge</c>, so exactly one of forty bodies
+    /// got PlaybackMode and the other thirty-nine kept the TRAINING time limit - teleporting to
+    /// their start pose every MaxEpisodeSeconds, in a scene whose entire purpose is to show what a
+    /// policy does when nothing resets it. Precisely the failure the warning below describes,
+    /// reached by wiring rather than by omission.
+    ///
+    /// Read in _Ready, which Godot runs on this root AFTER every descendant - so the spawner's
+    /// _EnterTree has already populated <see cref="RagdollSpawner.Agents"/> by the time this runs.
+    /// </summary>
+    [Export] public RagdollSpawner? Spawner { get; set; }
 
     /// <summary>
     /// Optional hard pin. Empty by default, which is the normal case - an arena should follow its
@@ -56,6 +77,9 @@ public partial class PolicyAutoLoader : Node3D
     /// <summary>Sync.ControlModes.ONNX_INFERENCE - runs a policy locally, never opens a socket.</summary>
     private const int ControlModeOnnxInference = 2;
 
+    /// <summary>Resolved in _Ready; see <see cref="CollectBridges"/>.</summary>
+    private readonly List<RagdollRLBridge> _bridges = new();
+
     public override void _Ready()
     {
         if (Sync == null || !IsInstanceValid(Sync))
@@ -64,21 +88,23 @@ public partial class PolicyAutoLoader : Node3D
             return;
         }
 
-        // Set FIRST and unconditionally. PlaybackMode describes what this SCENE is for - an
-        // inspection scene that never trains - so it must not depend on whether a policy happened
-        // to be found. Tying it to policy discovery meant that any time the lookup came up empty
-        // (nothing trained yet, or the run logs written somewhere else) the training time limit
-        // silently came back to life and teleported the body to prone every 8 seconds - looking
-        // exactly like the bug this was supposed to fix.
-        if (Bridge != null && IsInstanceValid(Bridge))
-        {
-            Bridge.PlaybackMode = true;
-        }
-        else
+        // Set FIRST and unconditionally, on EVERY agent. PlaybackMode describes what this SCENE is
+        // for - an inspection scene that never trains - so it must not depend on whether a policy
+        // happened to be found. Tying it to policy discovery meant that any time the lookup came up
+        // empty (nothing trained yet, or the run logs written somewhere else) the training time
+        // limit silently came back to life and teleported the body to prone every 8 seconds -
+        // looking exactly like the bug this was supposed to fix.
+        CollectBridges();
+        if (_bridges.Count == 0)
         {
             GD.PushWarning(
-                "[PolicyAutoLoader] No Bridge assigned - episodes will keep timing out every "
-                + "MaxEpisodeSeconds. Assign the RLBridge node to keep playback continuous.");
+                "[PolicyAutoLoader] No bridges found - episodes will keep timing out every "
+                + "MaxEpisodeSeconds. Assign Spawner (or Bridge) to keep playback continuous.");
+        }
+
+        foreach (RagdollRLBridge bridge in _bridges)
+        {
+            bridge.PlaybackMode = true;
         }
 
         string? model = ResolveNewestPolicy();
@@ -98,11 +124,15 @@ public partial class PolicyAutoLoader : Node3D
         // Spelled out because the episode lines that follow ("Episode 3 ended -> starting episode
         // 4") look identical whether a policy is being trained or merely replayed, and mistaking
         // playback for training is an easy and confusing error to make.
+        // The agent count is on the banner because "did every body get PlaybackMode?" is otherwise
+        // unanswerable by looking: a body still on the training time limit resets every
+        // MaxEpisodeSeconds, which at a glance is indistinguishable from a policy that falls.
         GD.Print(
             "\n=====================================================\n"
             + " PLAYBACK MODE - no training, no Python, no learning\n"
             + $" Policy : {model}\n"
             + $" Trained: {ExtractStepCount(model)}\n"
+            + $" Agents : {_bridges.Count} in continuous playback\n"
             + " Runs continuously - press R to retry from prone.\n"
             + "=====================================================");
     }
@@ -110,18 +140,55 @@ public partial class PolicyAutoLoader : Node3D
     /// <summary>
     /// Manual retry, since playback deliberately never resets on its own. RagdollDebugInput gates
     /// itself off during the RL state, so this key does not collide with the procedural controls.
+    ///
+    /// Resets ALL agents, not the first: in a spawned arena the row is one experiment, and resetting
+    /// half of it would leave the bodies at different episode ages, which is exactly the comparison
+    /// the arena exists to make.
     /// </summary>
     public override void _UnhandledInput(InputEvent @event)
     {
-        if (Bridge == null || !IsInstanceValid(Bridge) || !Bridge.PlaybackMode)
+        if (_bridges.Count == 0)
         {
             return;
         }
 
-        if (@event is InputEventKey { Pressed: true, Echo: false, Keycode: Key.R })
+        if (@event is not InputEventKey { Pressed: true, Echo: false, Keycode: Key.R })
         {
-            GD.Print("[PolicyAutoLoader] Manual reset - retrying from prone.");
-            Bridge.ResetEpisode();
+            return;
+        }
+
+        GD.Print($"[PolicyAutoLoader] Manual reset - retrying {_bridges.Count} agent(s) from prone.");
+        foreach (RagdollRLBridge bridge in _bridges)
+        {
+            if (bridge.PlaybackMode)
+            {
+                bridge.ResetEpisode();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Every bridge this arena drives: the spawned agents plus the explicit single
+    /// <see cref="Bridge"/>, de-duplicated so setting both is harmless rather than a double reset.
+    /// </summary>
+    private void CollectBridges()
+    {
+        _bridges.Clear();
+
+        if (Spawner != null && IsInstanceValid(Spawner))
+        {
+            foreach (RlAgent agent in Spawner.Agents)
+            {
+                if (agent.Bridge != null && IsInstanceValid(agent.Bridge))
+                {
+                    _bridges.Add(agent.Bridge);
+                }
+            }
+        }
+
+        if (Bridge != null && IsInstanceValid(Bridge) && !_bridges.Contains(Bridge))
+        {
+            _bridges.Add(Bridge);
         }
     }
 

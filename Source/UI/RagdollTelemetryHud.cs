@@ -85,14 +85,25 @@ public partial class RagdollTelemetryHud : PanelContainer
         _progressBar.Visible = false;
         vbox.AddChild(_progressBar);
 
+        // No whole-tree fallback search. This used to be
+        // `GetTree().Root.FindChild("ActiveRagdoll", true, false)`, which returns the FIRST match
+        // anywhere in the tree - fine while a scene held one body, silently wrong once
+        // RagdollSpawner started putting up to 64 in one process, where it would pin the HUD to
+        // Agent_1 no matter which body the scene meant. The same pattern was removed from BallGun
+        // for the same reason.
+        //
+        // Spawned scenes get Ragdoll assigned explicitly by RagdollSpawner.BindTelemetry; scenes
+        // that place a body by hand wire it in the .tscn. A HUD with neither is a wiring error, and
+        // saying so beats displaying a different body's numbers.
         if (Ragdoll == null)
         {
-            Ragdoll = GetTree().Root.FindChild("ActiveRagdoll", true, false) as HumanoidRagdoll;
+            GD.PushWarning(
+                $"[RagdollTelemetryHud] '{Name}' has no Ragdoll assigned and will stay blank. "
+                + "Assign it in the scene, or let RagdollSpawner bind it via its TelemetryHud export.");
+            return;
         }
-        if (Balance == null && Ragdoll != null)
-        {
-            Balance = Ragdoll.Balance;
-        }
+
+        Balance ??= Ragdoll.Balance;
     }
 
     public override void _Process(double delta)

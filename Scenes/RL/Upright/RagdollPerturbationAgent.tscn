@@ -1,0 +1,42 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="PackedScene" uid="uid://dp62k4a8uwns2" path="res://Scenes/ActiveRagdoll.tscn" id="1_ragdoll"]
+[ext_resource type="Script" path="res://Source/RL/RagdollRLBridge.cs" id="2_bridge"]
+[ext_resource type="Script" path="res://Scenes/RL/Shared/RagdollAIController.gd" id="3_aicontroller"]
+[ext_resource type="Script" path="res://Source/RL/Perturbation/BallGun.cs" id="4_ballgun"]
+[ext_resource type="Script" path="res://Source/RL/RlAgent.cs" id="5_agent"]
+
+[node name="RagdollPerturbationAgent" type="Node3D" node_paths=PackedStringArray("Ragdoll", "Bridge")]
+script = ExtResource("5_agent")
+Ragdoll = NodePath("ActiveRagdoll")
+Bridge = NodePath("RLBridge")
+
+[node name="ActiveRagdoll" parent="." instance=ExtResource("1_ragdoll")]
+
+[node name="AIController" type="Node3D" parent="." node_paths=PackedStringArray("bridge")]
+script = ExtResource("3_aicontroller")
+bridge = NodePath("../RLBridge")
+reset_after = 100000
+
+[node name="RLBridge" type="Node" parent="." node_paths=PackedStringArray("Ragdoll", "AiController", "PerturbationSource")]
+script = ExtResource("2_bridge")
+Ragdoll = NodePath("../ActiveRagdoll")
+AiController = NodePath("../AIController")
+MaxEpisodeSeconds = 5.0
+StandingStartProbability = 1.0
+EndEpisodeOnStandingSuccess = false
+PerturbationSource = NodePath("../BallGun")
+
+[node name="BallGun" type="Node3D" parent="." node_paths=PackedStringArray("Target", "Bridge")]
+script = ExtResource("4_ballgun")
+Target = NodePath("../ActiveRagdoll")
+Bridge = NodePath("../RLBridge")
+IntervalSeconds = 10.0
+FirstShotDelaySeconds = 1.0
+LaunchSpeed = 6.0
+BallMass = 0.75
+SmallBallProbability = 1.0
+SmallBallMass = 3.0
+SmallBallRadius = 0.06
+SmallBallSpawnDistance = 2.0
+SmallBallSpeed = 6.0

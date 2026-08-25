@@ -27,6 +27,9 @@ public partial class ActiveJointController : RigidBody3D
     private Vector3 _appliedTorque = Vector3.Zero;
     private Quaternion _targetQuaternion = Quaternion.Identity;
 
+    /// <summary>Edge-detect for the R reset key; see its use in _Process.</summary>
+    private bool _resetKeyHeld;
+
     public override void _Ready()
     {
         _initialTransform = GlobalTransform;
@@ -51,10 +54,14 @@ public partial class ActiveJointController : RigidBody3D
             GD.Print($"[ActiveJoint] Applied impulse kick: {randomDir * DisturbanceForceMagnitude}");
         }
 
-        if (Input.IsKeyPressed(Key.R))
+        // IsKeyJustPressed, not IsKeyPressed: this runs every frame, so holding R re-ran the reset
+        // on all ~60 of them - clearing the PID integrator and re-teleporting the body continuously
+        // for as long as the key was down, which reads as the body being frozen rather than reset.
+        if (Input.IsKeyPressed(Key.R) && !_resetKeyHeld)
         {
             ResetBody();
         }
+        _resetKeyHeld = Input.IsKeyPressed(Key.R);
 
         // Dynamic tilt adjustment via arrow keys
         float tiltSpeed = 45.0f * (float)delta;

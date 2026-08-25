@@ -15,7 +15,7 @@ namespace Physics4Fun.RL;
 /// across every task, because that is what makes a policy trained on one task resumable on
 /// another: the tensor widths are published to Python at handshake and baked into the checkpoint,
 /// so changing them turns a resume into a from-scratch run. Walking is trained by restoring a
-/// standing policy, which is only possible because both tasks see the same 106 floats.
+/// standing policy, which is only possible because both tasks see the same 113 floats.
 ///
 /// The balance/perturbation task is not listed: it uses the get-up components with
 /// <see cref="RagdollRLBridge.EndEpisodeOnStandingSuccess"/> set false, so it needs no separate
@@ -528,7 +528,7 @@ public partial class RagdollRLBridge : Node
         // restored run ever reached (see _last_curriculum_floor). Minimum rather than last because
         // the floor only ever descends within a session, so the lowest value is the honest
         // high-water mark - and the last logged value is often a post-restart reset.
-        float? restoredFloor = ReadCmdlineFloat("curriculum_start");
+        float? restoredFloor = CmdlineArgs.ReadFloat("curriculum_start");
         _curriculum = new Curriculum.ReverseStartPoseCurriculum(
             restoredFloor ?? CurriculumPoseT, CurriculumStep, CurriculumFrontierShare,
             CurriculumWindow, CurriculumAdvanceRate);
@@ -844,7 +844,7 @@ public partial class RagdollRLBridge : Node
     /// info on every transition for every parallel env), but not exactly once either: the very
     /// first call is consumed by the initial reset(), whose info a trainer may never inspect. A
     /// handful of repeats guarantees it lands in at least one step() the trainer does look at,
-    /// while staying negligible against a 106-float observation.
+    /// while staying negligible against a 113-float observation.
     /// </summary>
     public Godot.Collections.Dictionary GetStepInfo()
     {
@@ -995,35 +995,6 @@ public partial class RagdollRLBridge : Node
         }
 
         return true;
-    }
-
-    /// <summary>
-    /// Reads a float passed on the command line as --name=value, or null if absent/unparseable.
-    ///
-    /// Parsed with InvariantCulture, NOT the machine's culture, and that is not a detail. Python
-    /// writes "0.908"; this project is developed on a Spanish-locale machine where the decimal
-    /// separator is a comma, so a culture-sensitive parse either fails outright or - worse - reads
-    /// "0.908" as 908. A silently thousand-fold curriculum floor is exactly the class of bug that
-    /// looks like a physics problem for a day.
-    /// </summary>
-    private static float? ReadCmdlineFloat(string name)
-    {
-        string prefix = $"--{name}=";
-        foreach (string arg in OS.GetCmdlineArgs())
-        {
-            if (!arg.StartsWith(prefix, System.StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            return float.TryParse(
-                arg[prefix.Length..],
-                System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture,
-                out float value) ? value : null;
-        }
-
-        return null;
     }
 
     /// <summary>Called by the GDScript adapter's get_done().</summary>

@@ -56,7 +56,8 @@ $GodotExe    = Resolve-GodotExe
 # --- Which task to train -----------------------------------------------------
 #   "stand"        - start upright, learn to stay upright. Carries the reverse-curriculum
 #                    machinery, which is why start poses spread slightly below vertical.
-#   "perturbation" - a ball gun fires at the dummy every 3 s; learn to keep balance.
+#   "perturbation" - a ball gun fires at the dummy on an interval set in the agent scene; learn
+#                    to keep balance.
 #   "getup"        - start prone, learn to stand up. Owns the reverse curriculum: the floor
 #                    starts at 0.99 (almost upright, where a stand policy already succeeds)
 #                    and walks back toward flat. RESUME IT FROM A STAND CHECKPOINT.
@@ -66,35 +67,47 @@ $GodotExe    = Resolve-GodotExe
 #   "walk"         - start standing, walk forward in a straight line. No perturbation.
 # Picks the export preset, the exported binary, and (via the preset's feature tag)
 # which scene the build boots. Change this one line to switch tasks.
-$Task = "stand_multiple"
+$Task = "stand"
 
 # --- Training scale ----------------------------------------------------------
-# MEASURED on this 7800X3D (8 cores / 16 threads), headless, 180s per point:
+# Three knobs multiply into one sample rate, and only two of them are worth turning.
 #
-#    procs   steps/s   per-proc   gain over previous
-#       16      1394       87.1        -
-#       24      1840       76.6     +32.0%
-#       32      2162       67.6     +17.5%
-#       40      2258       56.5      +4.5%   <- 25% more processes for 4.5% more throughput
+#   $NParallel - Godot PROCESSES. Each is a full engine: its own socket, render server and
+#                startup cost. Scales sample DIVERSITY across seeds.
+#   $Dummies   - bodies inside each process, spawned by RagdollSpawner from the scene's
+#                *Agent.tscn. Adds simulation without adding engine overhead.
+#   $Speedup   - a physics-tick multiplier REQUEST, not an achieved rate.
 #
-# 32 sits at the knee. Going to 40 buys 96 steps/s and costs 8 processes' worth of CPU, which is
-# the difference between being able to use the machine while it trains and not.
+# MEASURED on this 7800X3D (8 cores / 16 threads), headless - full table in
+# docs/RL-DESIGN-NOTES.md:
 #
-# $Speedup is a REQUEST, not an achieved rate: RagdollRLBridge sets physics ticks to
-# $Speedup * 120 per process, and the CPU delivers well under that. It only matters when the
-# target falls BELOW what the CPU could otherwise do, at which point it throttles:
+#    procs x dummies   speedup   steps/s
+#         32 x 1           8       2,162      <- the old ceiling, before $Dummies existed
+#         40 x 1           8       2,258
+#          8 x 64          1       2,977
+#         16 x 16          1       2,988
+#         16 x 64          1       4,311      <- the knee
+#         16 x 128         1       4,335      <- +0.6% for double the bodies
+#         32 x 32          1       4,031
 #
-#              target steps/s = $Speedup * 15 * $NParallel
-#    n=32:  speedup 4 -> 1,920  THROTTLES (ceiling is 2,162)
-#           speedup 8 -> 3,840  safe
-#    n=40:  speedup 4 -> 2,400  barely safe (ceiling 2,258)
-#           speedup 8 -> 4,800  safe
+# Two results worth reading off that table. First, dummies beat processes: 16 x 64 doubles the
+# best process-only figure, because per-process overhead was the ceiling all along. Second,
+# $Speedup stops mattering once dummies carry the parallelism - 16 x 16 measured 2,988 at speedup
+# 1, 3,104 at 4 and 3,045 at 16, i.e. flat. The CPU is already saturated by simulation, so asking
+# for faster ticks cannot produce them. Leave it at 1 unless running --viz, where it sets how fast
+# the visible window plays. Simulation is unchanged either way - delta stays 1/120 s.
 #
-# 8 is the smallest safe value at n=32, and smaller is better for --viz because the window runs
-# at $Speedup. Verified: 40 procs gave 2,258 steps/s at speedup 8 vs ~2,200 at speedup 16, so
-# dropping from 16 costs nothing. Simulation is unchanged either way - delta stays 1/120 s.
-$NParallel   = 32
-$Speedup = 8
+# 16 x 64 x 1 is what stand_v28 trained on for 117M steps at a measured 3,819 steps/s.
+$NParallel = 16
+$Dummies   = 64
+$Speedup   = 1
+
+if ($Dummies -lt 1) {
+    throw "`$Dummies must be at least 1 (got $Dummies)."
+}
+if ($NParallel -lt 1) {
+    throw "`$NParallel must be at least 1 (got $NParallel)."
+}
 
 # 1M steps is roughly 9 minutes at the sweet spot.
 # Pure-RL get-up realistically needs 10-100M.
@@ -122,7 +135,7 @@ $MaxSeconds = 7200
 #
 # Set it explicitly ONLY to deliberately continue an existing lineage in place -
 # for example to append more steps to perturbation_v8 rather than starting v9.
-# $ExperimentName = "stand_multiple_v2"
+# $ExperimentName = "stand_v28"
 
 # --- Checkpointing -----------------------------------------------------------
 # Wall-clock seconds between saves. A crash costs at most this much work.
@@ -139,7 +152,11 @@ if ($Task -eq "perturbation") {
     $BuildName    = "RagdollPerturbationTraining.exe"
     $ScenePath    = "res://Scenes/RL/Upright/RagdollPerturbationTraining.tscn"
 } elseif ($Task -eq "getup") {
-    $ExportPreset = "Windows Get Up"
+    # Must match export_presets.cfg EXACTLY. It read "Windows Get Up" against a preset actually
+    # named "Windows GetUp", so export.ps1's $FeatureTag lookup returned $null and the getup build
+    # would have shipped with no feature tag - booting whatever run/main_scene defaults to rather
+    # than the get-up scene, with nothing in the log to say so.
+    $ExportPreset = "Windows GetUp"
     $BuildName    = "RagdollGetUpTraining.exe"
     $ScenePath    = "res://Scenes/RL/Upright/RagdollGetUpTraining.tscn"
 } elseif ($Task -eq "upright") {
@@ -154,17 +171,15 @@ if ($Task -eq "perturbation") {
     $ExportPreset = "Windows Walk"
     $BuildName    = "RagdollWalkTraining.exe"
     $ScenePath    = "res://Scenes/RL/Locomotion/RagdollWalkTraining.tscn"
-} elseif ($Task -eq "stand_multiple") {
-    $ExportPreset = "Windows Multiple Stand"
-    $BuildName    = "RagdollMultipleStandTraining.exe"
-    $ScenePath    = "res://Scenes/RL/Upright/RagdollMultipleStandTraining.tscn"
-} elseif ($Task -eq "walk_multiple") {
-    $ExportPreset = "Windows Multiple Walk"
-    $BuildName    = "RagdollMultipleWalkTraining.exe"
-    $ScenePath    = "res://Scenes/RL/Locomotion/RagdollMultipleWalkTraining.tscn"
 } else {
     throw "Unknown `$Task '$Task'. Use 'stand', 'getup', 'upright', 'perturbation' or 'walk'."
 }
+
+# There is deliberately no "stand_multiple" / "walk_multiple" task. Those existed when running N
+# bodies meant a SEPARATE scene with N agent subtrees copied into the file by hand - forty blocks
+# of ~16 lines each, regenerated by a script whenever the count changed. $Dummies replaced that:
+# every *Training.tscn now carries a RagdollSpawner and takes its count from --dummies=N, so the
+# body count is a number rather than a scene.
 # Absolute on purpose: every script (training AND tensorboard) must agree on one location.
 $ExperimentDir = "$ProjectPath/rl/runs"
 
@@ -201,8 +216,3 @@ if ([string]::IsNullOrWhiteSpace($ExperimentName)) {
 $Python      = "$ProjectPath/rl/.venv/Scripts/python.exe"
 $TrainScript = "$ProjectPath/rl/train.py"
 $BuildExe = $GodotExe
-
-
-
-
-

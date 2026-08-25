@@ -36,7 +36,7 @@ Treat it as a lab notebook rather than a feature. If you want a ragdoll that get
 
 ## Reinforcement learning track
 
-Pure RL over the same rig: a 106-dim observation, 36 continuous joint targets, PPO via [godot_rl_agents](https://github.com/edbeeching/godot_rl_agents) with 32 parallel Godot instances. `Source/RL/` splits the environment into swappable observation / action / reward / termination components behind `IRl*` interfaces, so an experiment changes one class instead of the bridge.
+Pure RL over the same rig: a 113-dim observation, 36 continuous joint targets, PPO via [godot_rl_agents](https://github.com/edbeeching/godot_rl_agents) with 16 Godot processes x 64 bodies each. `Source/RL/` splits the environment into swappable observation / action / reward / termination components behind `IRl*` interfaces, so an experiment changes one class instead of the bridge.
 
 * **[docs/RL-TRAINING.md](docs/RL-TRAINING.md)** — how to run it: setup, the PowerShell scripts, what every TensorBoard metric means and how to read it.
 * **[docs/RL-DESIGN-NOTES.md](docs/RL-DESIGN-NOTES.md)** — why it is built this way: measured findings, the reward and termination design, and the framework-level bugs found and worked around.

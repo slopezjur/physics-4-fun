@@ -178,6 +178,7 @@ if ($Viz) { $vizArg = @('--viz') }
     --env_path=$BuildExe `
     --n_parallel=$NParallel `
     --speedup=$Speedup `
+    --dummies=$Dummies `
     --timesteps=$Timesteps `
     --experiment_dir=$ExperimentDir `
     --experiment_name=$ExperimentName `
@@ -193,4 +194,7 @@ if ($Viz) { $vizArg = @('--viz') }
 
 
 
+
+
+& "$PSScriptRoot/summary.ps1" -NamePrefix $ExperimentName
 

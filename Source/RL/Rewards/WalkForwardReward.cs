@@ -108,9 +108,13 @@ public sealed class WalkForwardReward : IRlRewardFunction, IRlRewardDiagnostics,
     /// never doing its job anyway: measured lateral_drift is 0.2675 m against 0.758 m of forward
     /// travel, 35% sideways, WITH the penalty active at 0.5.
     ///
-    /// Re-enable this once heading is observable, not before. Doing it properly means adding the
-    /// start-axis offset to the observation, which changes its size from 106 and invalidates every
-    /// existing walk checkpoint - a real cost that needs its own decision, not a silent bump.
+    /// Re-enable this once heading is observable, not before. The obstacle that used to make that
+    /// expensive is gone: BodyStateObservation now reserves a 7-float goal block, and its first two
+    /// slots are Target Velocity X/Z - exactly the channel this term needs - so filling them costs
+    /// no width change and orphans no checkpoint. What remains is a real design step, not a
+    /// constant flip: something has to WRITE a heading into those slots per episode, and the reward
+    /// has to measure drift against that rather than against the start axis.
+    ///
     /// Until then the circling this was meant to prevent is not reachable: the dummy manages about
     /// 1.5 steps before falling.
     /// </summary>
@@ -149,7 +153,14 @@ public sealed class WalkForwardReward : IRlRewardFunction, IRlRewardDiagnostics,
     /// A grace window rather than an instantaneous test, because IsGrounded is
     /// `soleDown && IsInContactWithWorld()` and a legitimate stride transition can show a frame or
     /// two with neither foot registering. A hard gate would spike the reward to zero mid-step and
-    /// inject variance for nothing. 0.1 s absorbs that while still zeroing a one-second glide.
+    /// inject variance for nothing.
+    ///
+    /// 0.05 s, which is 6 physics ticks at 120 Hz - ample for the one or two a stride transition
+    /// actually drops, and far short of any glide worth having. Sized against the tick rate rather
+    /// than in round seconds: too tight and it re-introduces the mid-step variance it exists to
+    /// absorb, too loose and it re-opens the hole it exists to close. Verify with the gap between
+    /// walk/grounded_pay and the termination's standing/grounded - that difference is exactly how
+    /// much this window is forgiving.
     /// </summary>
     private const float ContactGraceSeconds = 0.05f;
 

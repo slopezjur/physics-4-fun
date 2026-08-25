@@ -141,7 +141,7 @@ single process logging as before.
 | `rl/*.onnx` | policy only, for in-engine inference. Cannot resume training from this. |
 | `rl/runs/<name>_N/` | TensorBoard logs, one directory per run. |
 
-All are gitignored. The `.onnx` must match the current observation/action widths (today **106 -> 36**);
+All are gitignored. The `.onnx` must match the current observation/action widths (today **113 -> 36**);
 an `.onnx` from an older layout fails at load with a shape mismatch.
 
 ---
@@ -253,9 +253,16 @@ the floor back toward flat. Train stand first; it is the reference get-up is boo
 
 **The observation and action widths never change between them.** That is load-bearing, not
 incidental: the widths are published to Python at handshake and baked into every checkpoint, so
-changing them turns a resume into a from-scratch run. Because they are fixed at 106 and 36, a
+changing them turns a resume into a from-scratch run. Because they are fixed at 113 and 36, a
 policy trained on one task can be restored onto another — which is the only reason walking is
 trainable in a couple of hours at all. It starts from a standing policy rather than from noise.
+
+The observation reserves 7 of those 113 floats for a **goal block** that is constant today. That is
+the same argument one step ahead: walking is the task that will eventually need a heading command,
+and a command can only reach the policy through its input vector, so the slots have to exist in the
+shared observation *before* walking uses them or the bootstrap breaks on the day it does. The width
+has already churned 106 → 108 → 115 → 113 across the archived lineages, orphaning every checkpoint
+each time. Treat it as frozen.
 
 Only the reward and termination vary, selected by the `TaskKind` export on the bridge
 (`RlTaskKind.GetUp` / `.Walk`). Perturbation is not a separate `TaskKind`: it is the get-up pair
@@ -531,7 +538,7 @@ does not decide what the task *is*.
 | concern | interface | current implementation |
 |---|---|---|
 | what the policy can do | `IRlActionSpace` | `JointLimitedActionSpace` |
-| what the policy sees | `IRlObservationBuilder` | `BodyStateObservation` (106 floats) |
+| what the policy sees | `IRlObservationBuilder` | `BodyStateObservation` (113 floats) |
 | what it is paid for | `IRlRewardFunction` | `UprightProgressReward` |
 | when an episode ends | `IRlTerminationCondition` | `UprightTermination` |
 
