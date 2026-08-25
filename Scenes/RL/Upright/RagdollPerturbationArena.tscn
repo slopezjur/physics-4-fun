@@ -16,6 +16,7 @@ size = Vector3(20, 1, 20)
 [node name="RagdollPerturbationArena" type="Node3D" node_paths=PackedStringArray("Sync", "Spawner")]
 script = ExtResource("7_autoload")
 BrainRunPrefixes = PackedStringArray("perturbation_v")
+PerturbationIntervalOverride = 3.0
 Sync = NodePath("Sync")
 Spawner = NodePath("RagdollSpawner")
 

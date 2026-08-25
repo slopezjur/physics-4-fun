@@ -27,14 +27,14 @@ public enum GetUpPhase
 /// leg leads is decided once per attempt by HumanoidRagdoll, not re-derived here.
 /// </summary>
 public readonly record struct RecoveryContext(
-    ActiveBone Pelvis,
-    ActiveBone? Chest,
-    ActiveBone? ForearmL,
-    ActiveBone? ForearmR,
-    ActiveBone? HandL,
-    ActiveBone? HandR,
-    ActiveBone? LeadFoot,
-    ActiveBone? TrailFoot,
+    Interfaces.IBoneState Pelvis,
+    Interfaces.IBoneState? Chest,
+    Interfaces.IBoneState? ForearmL,
+    Interfaces.IBoneState? ForearmR,
+    Interfaces.IBoneState? HandL,
+    Interfaces.IBoneState? HandR,
+    Interfaces.IBoneState? LeadFoot,
+    Interfaces.IBoneState? TrailFoot,
     Vector3 CenterOfMass,
     float GroundY,
     float PelvisTiltDeg
@@ -190,7 +190,7 @@ public class GetUpPhaseController
     /// </summary>
     public RecoveryCriteria MeasureCriteria(in RecoveryContext context)
     {
-        bool hasChest = context.Chest != null && GodotObject.IsInstanceValid(context.Chest);
+        bool hasChest = context.Chest is { IsValid: true };
 
         return new RecoveryCriteria(
             ChestClearance: hasChest ? context.Chest!.GlobalPosition.Y - context.GroundY : float.NaN,
@@ -213,8 +213,8 @@ public class GetUpPhaseController
     /// </summary>
     private static float ComputeLeadFootComDistance(in RecoveryContext context)
     {
-        ActiveBone? leadFoot = context.LeadFoot;
-        if (leadFoot == null || !GodotObject.IsInstanceValid(leadFoot))
+        Interfaces.IBoneState? leadFoot = context.LeadFoot;
+        if (leadFoot is not { IsValid: true })
         {
             return float.PositiveInfinity;
         }
@@ -224,9 +224,9 @@ public class GetUpPhaseController
             context.CenterOfMass.Z - leadFoot.GlobalPosition.Z).Length();
     }
 
-    private static bool IsPlanted(ActiveBone? bone)
+    private static bool IsPlanted(Interfaces.IBoneState? bone)
     {
-        return bone != null && GodotObject.IsInstanceValid(bone) && bone.IsInContactWithWorld();
+        return bone is { IsValid: true } && bone.IsInContactWithWorld();
     }
 
     /// <summary>

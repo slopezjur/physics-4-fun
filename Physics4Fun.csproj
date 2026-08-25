@@ -7,6 +7,24 @@
     <LangVersion>12</LangVersion>
   </PropertyGroup>
   <ItemGroup>
+    <!--
+      Godot.NET.Sdk globs **/*.cs, which would otherwise pull the test project's sources into the
+      GAME assembly - where xunit is not referenced and the build fails. Tests/ also carries a
+      .gdignore so the editor does not scan it as game content.
+    -->
+    <Compile Remove="Tests/**/*.cs" />
+
+    <!--
+      Two pure actuator functions are `internal` rather than `private` purely so the test project
+      can exercise them: the Hill force-velocity law and the swing-twist decomposition. Both are
+      static, both are self-contained maths, and neither is part of the public surface any scene or
+      module calls. Widening them to `public` would advertise them as API; this keeps them internal
+      to the assembly while making the arithmetic checkable.
+    -->
+    <InternalsVisibleTo Include="Physics4Fun.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Required by addons/godot_rl_agents/onnx/csharp/ - the plugin's in-engine ONNX inference
          path used for the RL exploration track (see docs on RagdollRLBridge.cs). CPU execution
          provider is sufficient for a small MLP policy at inference time; GPU is only needed for

@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Unit tests for the engine-independent half of the project.
+
+    Deliberately a PLAIN Microsoft.NET.Sdk project, not a Godot.NET.Sdk one: nothing here
+    constructs a Node, and pulling in the Godot SDK would drag along source generators and a
+    dynamic-loading layout that exist to make an assembly loadable BY the engine - which is exactly
+    what a test host is not.
+
+    That works because Godot's math types (Vector3, Quaternion, Basis, Mathf) are plain managed
+    structs in GodotSharp.dll. They need no engine, no native library and no initialised
+    ProjectSettings, so every class below can be exercised in a normal test runner. What CANNOT be
+    tested this way is anything deriving from Node or RigidBody3D - see Tests/README.md.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>12</LangVersion>
+    <IsPackable>false</IsPackable>
+    <!--
+      The TFM matches Physics4Fun (net8.0) so the reference is exact, but this machine ships only
+      the .NET 10 runtime - so the net8.0 test host has nothing to launch on and dotnet test aborts
+      before running a single case. RollForward lets it use the newer runtime instead of demanding
+      an 8.0 install that the game itself never needed (Godot supplies its own).
+    -->
+    <RollForward>Major</RollForward>
+    <!-- The engine never loads this assembly, so the Godot analyzers have nothing to say about it. -->
+    <EnableDynamicLoading>false</EnableDynamicLoading>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Physics4Fun.csproj" />
+  </ItemGroup>
+
+</Project>

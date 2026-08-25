@@ -9,8 +9,16 @@ namespace Physics4Fun.Ragdoll;
 /// Uses pure PD control (Ki = 0) to eliminate contact limit-cycle chatter and shaking.
 /// Enforces Newton's Third Law by applying reaction torques to the parent bone.
 /// </summary>
-public partial class ActiveBone : RigidBody3D
+public partial class ActiveBone : RigidBody3D, Interfaces.IBoneState
 {
+    /// <summary>
+    /// <see cref="Interfaces.IBoneState.IsValid"/>. Every other member of that contract is already
+    /// satisfied by RigidBody3D/Node3D (GlobalPosition, GlobalTransform, LinearVelocity,
+    /// AngularVelocity, Mass) or by this class (BoneName, IsInContactWithWorld), so implementing it
+    /// costs exactly this one property.
+    /// </summary>
+    public bool IsValid => IsInstanceValid(this);
+
     [Export] public string BoneName { get; set; } = string.Empty;
     [Export] public ActiveBone? ParentBone { get; set; }
 
@@ -552,7 +560,7 @@ public partial class ActiveBone : RigidBody3D
     /// Sign is canonicalised (w &gt;= 0) first: q and -q are the same rotation but yield twist
     /// angles differing by 2*pi, which compare against the limits differently.
     /// </summary>
-    private static void DecomposeSwingTwist(Quaternion q, Vector3 axis, out float twistAngle, out float swingAngle)
+    internal static void DecomposeSwingTwist(Quaternion q, Vector3 axis, out float twistAngle, out float swingAngle)
     {
         if (q.W < 0.0f)
         {
@@ -842,7 +850,7 @@ public partial class ActiveBone : RigidBody3D
     /// reasoned about - without constructing a RigidBody3D. Same argument the architecture notes
     /// make for extracting the actuator wholesale; this is the part of it that costs nothing.
     /// </param>
-    private static float ComputeForceVelocityScale(
+    internal static float ComputeForceVelocityScale(
         Vector3 torque, Vector3 relativeAngularVelocity, float maxShorteningVelocity)
     {
         if (maxShorteningVelocity <= 0.0f)

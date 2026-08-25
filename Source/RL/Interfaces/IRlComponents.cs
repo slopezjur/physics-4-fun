@@ -277,3 +277,25 @@ public interface IRlStartPoseCurriculum
     /// <summary>Self-description for the run manifest, so provenance cannot drift from the code.</summary>
     string Describe();
 }
+
+/// <summary>
+/// Write-side counterpart to <see cref="IRlPerturbationDiagnostics"/>: the firing cadence of a
+/// perturbation source, so a scene can retune it without knowing which source it has.
+///
+/// This exists because arena and training want DIFFERENT cadences from the same node, and since
+/// agents became runtime-spawned from a shared `*Agent.tscn` there is no editor-time instance left
+/// to carry a per-scene override. Training wants one shot per episode - the interval is set longer
+/// than the episode window, which is how "exactly one ball" is expressed without a shot counter,
+/// and it keeps a fall attributable to a single impact. An arena has no episode boundary at all
+/// (playback never resets), so the same value leaves the body idle between widely spaced hits when
+/// the entire point is to watch repeated recoveries.
+///
+/// Deliberately narrow. The bridge still holds its source as a bare <c>Node</c> and stays ignorant
+/// of ball guns; this is the one property a scene needs to reach, and widening it would rebuild the
+/// coupling that <see cref="IRlPerturbationDiagnostics"/> was split out to avoid.
+/// </summary>
+public interface IRlPerturbationSchedule
+{
+    /// <summary>Simulated seconds between perturbations. Takes effect at the next scheduled shot.</summary>
+    float IntervalSeconds { get; set; }
+}

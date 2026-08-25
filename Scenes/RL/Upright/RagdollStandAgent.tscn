@@ -22,3 +22,6 @@ script = ExtResource("2_bridge")
 Ragdoll = NodePath("../ActiveRagdoll")
 AiController = NodePath("../AIController")
 StandingStartProbability = 1.0
+MaxEpisodeSeconds = 12.0
+EndEpisodeOnStandingSuccess = false
+EffortWeight = 0.1

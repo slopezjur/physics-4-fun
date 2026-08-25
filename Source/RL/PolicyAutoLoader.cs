@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Godot;
+using Physics4Fun.RL.Interfaces;
 
 namespace Physics4Fun.RL;
 
@@ -51,6 +52,23 @@ public partial class PolicyAutoLoader : Node3D
     /// policy. A pinned path that exists beats BrainRunPrefixes.
     /// </summary>
     [Export] public string PromotedModelPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Simulated seconds between perturbations while this scene plays back. 0 (the default) leaves
+    /// whatever the agent scene set, which is correct for every arena without a perturbation source.
+    ///
+    /// The perturbation agent scene ships the TRAINING cadence: an interval deliberately longer than
+    /// the episode window, so exactly one ball lands per episode and a fall stays attributable to a
+    /// single impact. An arena has no episode window - playback never resets - so inheriting that
+    /// value leaves the body standing untouched for ten seconds at a time, in the one scene whose
+    /// purpose is to watch it recover from repeated hits.
+    ///
+    /// Set here rather than in the .tscn because there is no longer a node in the scene file to set
+    /// it on: RagdollSpawner instantiates the agents from a shared PackedScene at runtime. The arena
+    /// .tscn used to carry its own inline BallGun with IntervalSeconds = 3.0 and lost it when the
+    /// agent subtree was extracted, which is how the arena silently inherited the training cadence.
+    /// </summary>
+    [Export] public float PerturbationIntervalOverride { get; set; }
 
     /// <summary>
     /// Run-directory name prefixes belonging to this arena's brain. The newest .onnx under any
@@ -106,6 +124,8 @@ public partial class PolicyAutoLoader : Node3D
         {
             bridge.PlaybackMode = true;
         }
+
+        ApplyPerturbationOverride();
 
         string? model = ResolveNewestPolicy();
         if (model == null)
@@ -164,6 +184,40 @@ public partial class PolicyAutoLoader : Node3D
             {
                 bridge.ResetEpisode();
             }
+        }
+    }
+
+    /// <summary>
+    /// Retunes every agent's perturbation source to the arena cadence, if one is configured.
+    ///
+    /// Reached through the bridge because the bridge is the only typed handle an agent exposes to
+    /// its source, and through <see cref="IRlPerturbationSchedule"/> rather than a cast to BallGun
+    /// so an arena keeps working with a different source. A bridge whose source is null, or does
+    /// not schedule anything, is skipped rather than warned about: most arenas have no gun, and
+    /// that is the normal case rather than a wiring error.
+    /// </summary>
+    private void ApplyPerturbationOverride()
+    {
+        if (PerturbationIntervalOverride <= 0.0f)
+        {
+            return;
+        }
+
+        int retuned = 0;
+        foreach (RagdollRLBridge bridge in _bridges)
+        {
+            if (bridge.PerturbationSource is IRlPerturbationSchedule schedule)
+            {
+                schedule.IntervalSeconds = PerturbationIntervalOverride;
+                retuned++;
+            }
+        }
+
+        if (retuned > 0)
+        {
+            GD.Print(
+                $"[PolicyAutoLoader] Perturbation interval -> {PerturbationIntervalOverride:F1}s "
+                + $"on {retuned} agent(s) (arena cadence, not the training one).");
         }
     }
 

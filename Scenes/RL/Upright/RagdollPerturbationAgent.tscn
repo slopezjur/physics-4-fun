@@ -25,6 +25,7 @@ AiController = NodePath("../AIController")
 MaxEpisodeSeconds = 5.0
 StandingStartProbability = 1.0
 EndEpisodeOnStandingSuccess = false
+EffortWeight = 0.5
 PerturbationSource = NodePath("../BallGun")
 
 [node name="BallGun" type="Node3D" parent="." node_paths=PackedStringArray("Target", "Bridge")]

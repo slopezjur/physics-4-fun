@@ -4,10 +4,28 @@
 # continues rather than warm-starting from weights alone. Restarting instead of resuming re-pays
 # the whole optimizer warm-up, not just the elapsed steps.
 #
-# SB3 continues INTO the checkpoint's own run directory rather than creating a new one
-# (configure_logger: "Continue training in the same directory" when reset_num_timesteps is False),
-# so the TensorBoard curve stays one continuous line. New checkpoints are step-stamped past the
-# restored count, so nothing existing is overwritten.
+# WHERE THE LOGS GO is decided by $ExperimentName from config.ps1, NOT by the checkpoint you pick.
+# This script never inspects the checkpoint's directory - it passes $ExperimentName straight to
+# train.py, which hands it to SB3 as tb_log_name.
+#
+# SB3 then resolves that name with reset_num_timesteps = False (configure_logger, "Continue training
+# in the same directory"), which appends to the LATEST existing directory carrying that name, or
+# creates <name>_0 if none exists. So:
+#
+#   $ExperimentName derived (the default)  -> a NEW directory, e.g. resuming stand_v28 writes
+#                                             stand_v29_0. Two runs, two TensorBoard series.
+#   $ExperimentName pinned to an existing  -> APPENDS to that directory, one continuous series.
+#     lineage, e.g. "stand_v29"
+#
+# Neither is safer for your DATA: checkpoints are files, and an earlier one stays restorable however
+# later runs are named. The step count carries across either way, so on TensorBoard's global-step
+# axis two runs appear as adjacent segments rather than a broken line. What pinning buys is that the
+# version number keeps meaning "one experiment" instead of "one session"; what it costs is the trap
+# config.ps1 documents - change the reward later, forget to unpin, and two incomparable lineages
+# land in one curve. Prefer the derived default unless you are deliberately extending a lineage
+# whose configuration has not changed.
+#
+# New checkpoints are step-stamped past the restored count, so nothing existing is overwritten.
 #
 # Usage:
 #   ./resume.ps1                     # pick from a menu of recent checkpoints

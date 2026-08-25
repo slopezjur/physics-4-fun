@@ -12,6 +12,7 @@ Physics4Fun.Ragdoll/
 │   ├── IBalanceTelemetryProvider.cs    # Read-only contract for UI & diagnostics
 │   ├── IBiomechanicalReflex.cs         # Autonomous reflex strategy contract
 │   ├── IBalanceStrategy.cs             # Balance strategy contract (BalanceContext + Apply)
+│   ├── IBoneState.cs                   # Narrow read-only bone view; what makes consumers testable
 │   └── ISupportLoadDistribution.cs     # How planted limbs share body weight
 ├── Modules/
 │   ├── DynamicSteppingModule.cs         # Instantaneous Capture Point (ICP) & 2-bone IK
@@ -130,6 +131,13 @@ owned solely by `RagdollDebugInput`; and the support-load policy moved out of `H
 behind `ISupportLoadDistribution`, which also gave its known mass over-estimate a documented home
 instead of an anonymous line in the body class.
 
+One more is retired outright: the project now has a **test project**. `Tests/Physics4Fun.Tests`
+covers the SPD actuator, the Hill law, swing-twist, the behavioural FSM, the capture-point maths and
+the get-up phase machine in 91 tests that need no Godot install and run in ~30 ms — see
+`Tests/README.md` for what is reachable and what is permanently not. The reach was widened by
+`IBoneState`, a narrow read-only bone contract that lets a context struct stop carrying
+`ActiveBone`; `RecoveryContext` moved first, with no call-site and no scene changes.
+
 Two more are retired by the move to many bodies per process. `OrientationClassifier` was a static
 class holding a static hysteresis latch — correct while a process simulated one ragdoll, and a
 cross-body defect the moment `RagdollSpawner` put 64 in one, since `EvaluateState` runs for every
@@ -142,9 +150,8 @@ the angle that was actually commanded.
 
 | # | Where | Issue | Why it matters |
 |---|---|---|---|
-| 0 | *(project-wide)* | **No test project.** The solution holds exactly one project; nothing in it is covered. | This is the entry that blocks the next one. "Extracting it would make the maths testable in isolation" is aspirational while there is nowhere to put a test, and every change to the SPD, Hill, ICP or swing-twist maths is currently verified by running a scene and reading telemetry. Godot's `Vector3`/`Quaternion`/`Mathf` are plain managed types that work outside the engine, so a test project referencing `GodotSharp` could cover the pure maths today without any engine harness. |
-| 1 | `ActiveBone` | ~5 responsibilities in ~840 lines: rigid body, SPD actuator, gravity/support feed-forward, force-velocity limit, joint-limit querying. | The actuator is ~250 lines and cannot be exercised without a scene tree. Extracting it would make the SPD and Hill maths testable in isolation — the same argument that moved the curriculum out of the bridge. `ComputeForceVelocityScale` is now a pure static taking its gain as a parameter, which is the part of that extraction that cost nothing; the rest needs item 0 first, because a refactor of this file is only safe if its arithmetic can be pinned down before and after. |
-| 2 | `BalanceContext` | 28 members; every module receives the whole body. | ISP smell. Deliberately **not** fixed: per-module contexts would add real complexity for a struct that is cheap to pass, and no defect has been traced to it. Re-checked at 64 bodies per process — it is passed `in`, so there is no per-tick copy, and construction cost is negligible against the physics step. |
+| 1 | `ActiveBone` | ~5 responsibilities in ~840 lines: rigid body, SPD actuator, gravity/support feed-forward, force-velocity limit, joint-limit querying. | Less urgent than it reads. The SPD core was never actually in here — it lives in `PidController3D`, which has zero scene-tree references and is now covered by 17 tests. What remains engine-bound is orchestration, the load feed-forward (which walks the distal chain reading transforms), and joint-limit reads that query a `Generic6DofJoint3D` by string. The Hill law and swing-twist are pure statics and covered. A split is still worth doing, but the arithmetic it would move is now pinned, which is what makes it safe. |
+| 2 | `BalanceContext` | 28 members, 14 of them `ActiveBone`; every module receives the whole body. | Two separate issues, and only one is worth fixing. The **width** is deliberately kept: passed `in`, no per-tick copy, negligible at 64 bodies, no defect ever traced to it. The **bone type** is not — carrying `ActiveBone` (a `RigidBody3D`) is what keeps every `IBalanceStrategy` and reflex module untestable, exactly as it did for `RecoveryContext` before that moved to `IBoneState`. Converting it is the next step, and needs a write-side `IBoneActuator` companion for the modules that drive bones rather than only observing them. |
 | 3 | `RagdollRLBridge` | Still ~7 responsibilities after the curriculum extraction; `GetStepInfo` is 130 lines. | Cohesive dictionary assembly, so splitting it adds indirection without clarity. The `TaskKind` switch is closed for extension — the right moment to add a registry is when a third brain appears, not before. |
 | 4 | `BodyStateObservation` | The 7-float goal block emits constants and has no contract of its own — no `IRlGoalProvider` alongside the other five. | Deliberately **not** fixed. The slots are inert (six emit exactly `0.0`, so their first-layer weights receive exactly zero gradient), and the interface earns nothing until something actually writes a command. The moment one does — heading for walking is the near-certain first — it should arrive as a contract, not as an edit to `Build()`. |
 | 5 | `RagdollSpawner._EnterTree` | Spawn timing is load-bearing and enforced only by a comment. | `sync.gd` builds its agent list from the `AGENT` group in `_ready`, and `PolicyAutoLoader` reads `Agents` in the root's `_Ready`. Moving the spawn to `_Ready` makes Sync handshake with an empty observation space. Godot offers no way to declare this ordering, so the comment is the mechanism. |

@@ -67,7 +67,7 @@ $GodotExe    = Resolve-GodotExe
 #   "walk"         - start standing, walk forward in a straight line. No perturbation.
 # Picks the export preset, the exported binary, and (via the preset's feature tag)
 # which scene the build boots. Change this one line to switch tasks.
-$Task = "stand"
+$Task = "perturbation"
 
 # --- Training scale ----------------------------------------------------------
 # Three knobs multiply into one sample rate, and only two of them are worth turning.

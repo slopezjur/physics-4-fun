@@ -21,7 +21,7 @@ namespace Physics4Fun.RL.Perturbation;
 /// to *anticipate a scripted event*. Dodging is a different task and would need the ball in the
 /// observation vector.
 /// </summary>
-public partial class BallGun : Node3D, IRlPerturbationDiagnostics
+public partial class BallGun : Node3D, IRlPerturbationDiagnostics, IRlPerturbationSchedule
 {
     /// <summary>The ragdoll to aim at. Balls target its chest, falling back to the pelvis.</summary>
     [Export] public HumanoidRagdoll? Target { get; set; }
@@ -47,8 +47,13 @@ public partial class BallGun : Node3D, IRlPerturbationDiagnostics
     /// Not set to exactly the window length: the second shot would then land on the episode
     /// boundary, and whether it fires at all would depend on tick ordering.
     ///
-    /// The arena scene overrides this to 3 s, because there the point is to watch repeated
-    /// recoveries rather than to train. See its .tscn.
+    /// The ARENA overrides this at runtime, because there the point is to watch repeated recoveries
+    /// rather than to train, and playback has no episode boundary for a long interval to hide
+    /// behind. That override used to live in the arena .tscn as an inline BallGun node; it does
+    /// not any more, and looking for it there will find nothing. Agents are now instantiated from
+    /// a shared `*Agent.tscn` by RagdollSpawner, so no editor-time node exists to override. The
+    /// arena sets it through PolicyAutoLoader.PerturbationIntervalOverride via
+    /// <see cref="Physics4Fun.RL.Interfaces.IRlPerturbationSchedule"/> instead.
     /// </summary>
     [Export] public float IntervalSeconds { get; set; } = 10.0f;
 
