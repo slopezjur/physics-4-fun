@@ -132,7 +132,7 @@ class PeriodicCheckpointCallback(BaseCallback):
 
     def _on_training_end(self) -> None:
         # Skip when a periodic checkpoint already captured this exact step. It happens whenever the
-        # session length is a multiple of the save interval - MaxSeconds 300 with SaveEverySeconds
+        # session length is a multiple of the save interval - MaxMinutes 5 with SaveEverySeconds
         # 300 hits it every time - and produces two files holding the same policy at the same step,
         # which then appear as two indistinguishable entries in the resume menu. The duplicate also
         # costs a redundant ~1.6 s onnx export at the moment the run is trying to shut down.

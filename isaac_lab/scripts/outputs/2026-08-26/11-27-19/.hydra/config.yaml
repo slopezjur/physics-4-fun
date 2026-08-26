@@ -1,0 +1,489 @@
+env:
+  viewer:
+    eye:
+    - 7.5
+    - 7.5
+    - 7.5
+    lookat:
+    - 0.0
+    - 0.0
+    - 0.0
+    cam_prim_path: /OmniverseKit_Persp
+    resolution:
+    - 1280
+    - 720
+    origin_type: world
+    env_index: 0
+    asset_name: null
+    body_name: null
+  sim:
+    physics_prim_path: /physicsScene
+    device: cuda:0
+    dt: 0.008333333333333333
+    render_interval: 2
+    gravity:
+    - 0.0
+    - 0.0
+    - -9.81
+    enable_scene_query_support: false
+    use_fabric: true
+    physx:
+      solver_type: 1
+      solve_articulation_contact_last: false
+      min_position_iteration_count: 1
+      max_position_iteration_count: 4
+      min_velocity_iteration_count: 0
+      max_velocity_iteration_count: 0
+      enable_ccd: false
+      enable_stabilization: false
+      enable_external_forces_every_iteration: false
+      enable_enhanced_determinism: false
+      bounce_threshold_velocity: 0.2
+      friction_offset_threshold: 0.04
+      friction_correlation_distance: 0.025
+      gpu_max_rigid_contact_count: 8388608
+      gpu_max_rigid_patch_count: 8388608
+      gpu_found_lost_pairs_capacity: 8388608
+      gpu_found_lost_aggregate_pairs_capacity: 33554432
+      gpu_total_aggregate_pairs_capacity: 8388608
+      gpu_collision_stack_size: 67108864
+      gpu_heap_capacity: 67108864
+      gpu_temp_buffer_capacity: 16777216
+      gpu_max_num_partitions: 8
+      gpu_max_soft_body_contacts: 1048576
+      gpu_max_particle_contacts: 1048576
+    physics_material:
+      func: isaaclab.sim.spawners.materials.physics_materials:spawn_rigid_body_material
+      static_friction: 0.5
+      dynamic_friction: 0.5
+      restitution: 0.0
+      friction_combine_mode: average
+      restitution_combine_mode: average
+      compliant_contact_stiffness: 0.0
+      compliant_contact_damping: 0.0
+    render:
+      enable_translucency: null
+      enable_reflections: null
+      enable_global_illumination: null
+      antialiasing_mode: null
+      enable_dlssg: null
+      enable_dl_denoiser: null
+      dlss_mode: null
+      enable_direct_lighting: null
+      samples_per_pixel: null
+      enable_shadows: null
+      enable_ambient_occlusion: null
+      dome_light_upper_lower_strategy: null
+      carb_settings: null
+      rendering_mode: null
+    create_stage_in_memory: false
+    logging_level: WARNING
+    save_logs_to_file: true
+    log_dir: null
+  ui_window_class_type: isaaclab.envs.ui.base_env_window:BaseEnvWindow
+  seed: null
+  decimation: 2
+  is_finite_horizon: false
+  episode_length_s: 8.0
+  scene:
+    num_envs: 16384
+    env_spacing: 3.0
+    lazy_sensor_update: true
+    replicate_physics: true
+    filter_collisions: true
+    clone_in_fabric: false
+  events: null
+  observation_space: '{"type": "python", "space": "Box", "value": 143}'
+  num_observations: null
+  state_space: '{"type": "python", "space": "Box", "value": 0}'
+  num_states: null
+  observation_noise_model: null
+  action_space: '{"type": "python", "space": "Box", "value": 36}'
+  num_actions: null
+  action_noise_model: null
+  rerender_on_reset: false
+  num_rerenders_on_reset: 0
+  wait_for_textures: true
+  xr: null
+  log_dir: null
+  robot:
+    class_type: isaaclab.assets.articulation.articulation:Articulation
+    prim_path: /World/envs/env_.*/Robot
+    spawn:
+      func: isaaclab.sim.spawners.from_files.from_files:spawn_from_usd
+      visible: true
+      semantic_tags: null
+      copy_from_source: false
+      mass_props: null
+      deformable_props: null
+      rigid_props:
+        rigid_body_enabled: null
+        kinematic_enabled: null
+        disable_gravity: false
+        linear_damping: null
+        angular_damping: null
+        max_linear_velocity: null
+        max_angular_velocity: null
+        max_depenetration_velocity: 10.0
+        max_contact_impulse: null
+        enable_gyroscopic_forces: true
+        retain_accelerations: null
+        solver_position_iteration_count: null
+        solver_velocity_iteration_count: null
+        sleep_threshold: null
+        stabilization_threshold: null
+      collision_props: null
+      activate_contact_sensors: true
+      scale: null
+      articulation_props:
+        articulation_enabled: null
+        enabled_self_collisions: false
+        solver_position_iteration_count: 4
+        solver_velocity_iteration_count: 0
+        sleep_threshold: 0.005
+        stabilization_threshold: 0.001
+        fix_root_link: null
+      fixed_tendons_props: null
+      spatial_tendons_props: null
+      joint_drive_props: null
+      visual_material_path: material
+      visual_material: null
+      usd_path: D:\Proyectos\Godot\physics-4-fun\isaac_lab\assets\dummy.usd
+      variants: null
+    init_state:
+      pos:
+      - 0.0
+      - 0.0
+      - 0.82
+      rot:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      lin_vel:
+      - 0.0
+      - 0.0
+      - 0.0
+      ang_vel:
+      - 0.0
+      - 0.0
+      - 0.0
+      joint_pos:
+        .*: 0.0
+      joint_vel:
+        .*: 0.0
+    collision_group: 0
+    debug_vis: false
+    articulation_root_prim_path: null
+    soft_joint_pos_limit_factor: 1.0
+    actuators:
+      all:
+        class_type: isaaclab.actuators.actuator_pd:ImplicitActuator
+        joint_names_expr:
+        - .*
+        effort_limit:
+          Spine_rx: 350.0
+          Spine_ry: 350.0
+          Spine_rz: 350.0
+          Thigh_L_rx: 400.0
+          Thigh_L_ry: 400.0
+          Thigh_L_rz: 400.0
+          Thigh_R_rx: 400.0
+          Thigh_R_ry: 400.0
+          Thigh_R_rz: 400.0
+          Chest_rx: 350.0
+          Chest_ry: 350.0
+          Chest_rz: 350.0
+          Shin_L_rx: 400.0
+          Shin_L_ry: 400.0
+          Shin_L_rz: 400.0
+          Shin_R_rx: 400.0
+          Shin_R_ry: 400.0
+          Shin_R_rz: 400.0
+          Head_rx: 60.0
+          Head_ry: 60.0
+          Head_rz: 60.0
+          UpperArm_L_rx: 150.0
+          UpperArm_L_ry: 150.0
+          UpperArm_L_rz: 150.0
+          UpperArm_R_rx: 150.0
+          UpperArm_R_ry: 150.0
+          UpperArm_R_rz: 150.0
+          Foot_L_rx: 250.0
+          Foot_L_ry: 250.0
+          Foot_L_rz: 250.0
+          Foot_R_rx: 250.0
+          Foot_R_ry: 250.0
+          Foot_R_rz: 250.0
+          Forearm_L_rx: 100.0
+          Forearm_L_ry: 100.0
+          Forearm_L_rz: 100.0
+          Forearm_R_rx: 100.0
+          Forearm_R_ry: 100.0
+          Forearm_R_rz: 100.0
+          Hand_L_rx: 25.0
+          Hand_L_ry: 25.0
+          Hand_L_rz: 25.0
+          Hand_R_rx: 25.0
+          Hand_R_ry: 25.0
+          Hand_R_rz: 25.0
+        velocity_limit: 20.0
+        effort_limit_sim: null
+        velocity_limit_sim: null
+        stiffness:
+          Spine_rx: 600.0
+          Spine_ry: 600.0
+          Spine_rz: 600.0
+          Thigh_L_rx: 1600.0
+          Thigh_L_ry: 1600.0
+          Thigh_L_rz: 1600.0
+          Thigh_R_rx: 1600.0
+          Thigh_R_ry: 1600.0
+          Thigh_R_rz: 1600.0
+          Chest_rx: 350.0
+          Chest_ry: 350.0
+          Chest_rz: 350.0
+          Shin_L_rx: 1800.0
+          Shin_L_ry: 1800.0
+          Shin_L_rz: 1800.0
+          Shin_R_rx: 1800.0
+          Shin_R_ry: 1800.0
+          Shin_R_rz: 1800.0
+          Head_rx: 120.0
+          Head_ry: 120.0
+          Head_rz: 120.0
+          UpperArm_L_rx: 120.0
+          UpperArm_L_ry: 120.0
+          UpperArm_L_rz: 120.0
+          UpperArm_R_rx: 120.0
+          UpperArm_R_ry: 120.0
+          UpperArm_R_rz: 120.0
+          Foot_L_rx: 1200.0
+          Foot_L_ry: 1200.0
+          Foot_L_rz: 1200.0
+          Foot_R_rx: 1200.0
+          Foot_R_ry: 1200.0
+          Foot_R_rz: 1200.0
+          Forearm_L_rx: 100.0
+          Forearm_L_ry: 100.0
+          Forearm_L_rz: 100.0
+          Forearm_R_rx: 100.0
+          Forearm_R_ry: 100.0
+          Forearm_R_rz: 100.0
+          Hand_L_rx: 60.0
+          Hand_L_ry: 60.0
+          Hand_L_rz: 60.0
+          Hand_R_rx: 60.0
+          Hand_R_ry: 60.0
+          Hand_R_rz: 60.0
+        damping:
+          Spine_rx: 18.0
+          Spine_ry: 18.0
+          Spine_rz: 18.0
+          Thigh_L_rx: 32.0
+          Thigh_L_ry: 32.0
+          Thigh_L_rz: 32.0
+          Thigh_R_rx: 32.0
+          Thigh_R_ry: 32.0
+          Thigh_R_rz: 32.0
+          Chest_rx: 20.0
+          Chest_ry: 20.0
+          Chest_rz: 20.0
+          Shin_L_rx: 36.0
+          Shin_L_ry: 36.0
+          Shin_L_rz: 36.0
+          Shin_R_rx: 36.0
+          Shin_R_ry: 36.0
+          Shin_R_rz: 36.0
+          Head_rx: 12.0
+          Head_ry: 12.0
+          Head_rz: 12.0
+          UpperArm_L_rx: 10.0
+          UpperArm_L_ry: 10.0
+          UpperArm_L_rz: 10.0
+          UpperArm_R_rx: 10.0
+          UpperArm_R_ry: 10.0
+          UpperArm_R_rz: 10.0
+          Foot_L_rx: 6.0
+          Foot_L_ry: 6.0
+          Foot_L_rz: 6.0
+          Foot_R_rx: 6.0
+          Foot_R_ry: 6.0
+          Foot_R_rz: 6.0
+          Forearm_L_rx: 8.0
+          Forearm_L_ry: 8.0
+          Forearm_L_rz: 8.0
+          Forearm_R_rx: 8.0
+          Forearm_R_ry: 8.0
+          Forearm_R_rz: 8.0
+          Hand_L_rx: 6.0
+          Hand_L_ry: 6.0
+          Hand_L_rz: 6.0
+          Hand_R_rx: 6.0
+          Hand_R_ry: 6.0
+          Hand_R_rz: 6.0
+        armature: null
+        friction: null
+        dynamic_friction: null
+        viscous_friction: null
+    actuator_value_resolution_debug_print: false
+  contact_sensor:
+    class_type: isaaclab.sensors.contact_sensor.contact_sensor:ContactSensor
+    prim_path: /World/envs/env_.*/Robot/(Hand_L|Hand_R|Foot_L|Foot_R)
+    update_period: 0.0
+    history_length: 0
+    debug_vis: false
+    track_pose: false
+    track_contact_points: false
+    track_friction_forces: false
+    max_contact_data_count_per_prim: 4
+    track_air_time: false
+    force_threshold: 1.0
+    filter_prim_paths_expr: []
+    visualizer_cfg:
+      prim_path: /Visuals/ContactSensor
+      markers:
+        contact:
+          func: isaaclab.sim.spawners.shapes.shapes:spawn_sphere
+          visible: true
+          semantic_tags: null
+          copy_from_source: true
+          mass_props: null
+          rigid_props: null
+          collision_props: null
+          activate_contact_sensors: false
+          visual_material_path: material
+          visual_material:
+            func: isaaclab.sim.spawners.materials.visual_materials:spawn_preview_surface
+            diffuse_color:
+            - 1.0
+            - 0.0
+            - 0.0
+            emissive_color:
+            - 0.0
+            - 0.0
+            - 0.0
+            roughness: 0.5
+            metallic: 0.0
+            opacity: 1.0
+          physics_material_path: material
+          physics_material: null
+          radius: 0.02
+        no_contact:
+          func: isaaclab.sim.spawners.shapes.shapes:spawn_sphere
+          visible: false
+          semantic_tags: null
+          copy_from_source: true
+          mass_props: null
+          rigid_props: null
+          collision_props: null
+          activate_contact_sensors: false
+          visual_material_path: material
+          visual_material:
+            func: isaaclab.sim.spawners.materials.visual_materials:spawn_preview_surface
+            diffuse_color:
+            - 0.0
+            - 1.0
+            - 0.0
+            emissive_color:
+            - 0.0
+            - 0.0
+            - 0.0
+            roughness: 0.5
+            metallic: 0.0
+            opacity: 1.0
+          physics_material_path: material
+          physics_material: null
+          radius: 0.02
+  action_scale: 0.4
+  rew_alive: 1.0
+  rew_upright: 2.0
+  rew_head_height: 2.0
+  rew_lin_vel: -1.0
+  rew_ang_vel: -0.05
+  rew_action_rate: -0.01
+  rew_action_clip: -0.02
+  rew_joint_vel: -0.0001
+  rew_effort: -0.02
+  rew_termination: -10.0
+  push_impulse_range:
+  - 0.0
+  - 25.0
+  push_target_bones:
+  - Head
+  - Chest
+  - Spine
+  - Pelvis
+  - UpperArm_L
+  - Forearm_L
+  - UpperArm_R
+  - Forearm_R
+  - Thigh_L
+  - Shin_L
+  - Thigh_R
+  - Shin_R
+  push_height_jitter: 0.25
+  push_first_s: 2.0
+  push_interval_s: 3.0
+  show_impact_ball: true
+  ball_radius: 0.06
+  ball_speed: 6.0
+  ball_spawn_distance: 2.0
+  ball_trail_s: 0.35
+  ball_rebound_speed_factor: 0.45
+  push_randomize_direction: true
+agent:
+  seed: 42
+  device: cuda:0
+  num_steps_per_env: 24
+  max_iterations: 6000
+  empirical_normalization: null
+  obs_groups:
+    policy:
+    - policy
+    critic:
+    - policy
+  clip_actions: null
+  save_interval: 50
+  experiment_name: p4f_perturb
+  run_name: ''
+  logger: tensorboard
+  neptune_project: isaaclab
+  wandb_project: isaaclab
+  resume: false
+  load_run: .*
+  load_checkpoint: model_.*.pt
+  class_name: OnPolicyRunner
+  policy:
+    class_name: ActorCritic
+    init_noise_std: 0.25
+    noise_std_type: scalar
+    state_dependent_std: false
+    actor_obs_normalization: true
+    critic_obs_normalization: true
+    actor_hidden_dims:
+    - 512
+    - 256
+    - 128
+    critic_hidden_dims:
+    - 512
+    - 256
+    - 128
+    activation: elu
+  algorithm:
+    class_name: PPO
+    num_learning_epochs: 5
+    num_mini_batches: 4
+    learning_rate: 0.0005
+    schedule: adaptive
+    gamma: 0.99
+    lam: 0.95
+    entropy_coef: 0.005
+    desired_kl: 0.01
+    max_grad_norm: 1.0
+    value_loss_coef: 1.0
+    use_clipped_value_loss: true
+    clip_param: 0.2
+    normalize_advantage_per_mini_batch: false
+    rnd_cfg: null
+    symmetry_cfg: null

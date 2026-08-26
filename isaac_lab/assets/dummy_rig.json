@@ -1,0 +1,796 @@
+{
+  "source_scene": "Scenes/ActiveRagdoll.tscn",
+  "root_link": "Pelvis",
+  "controlled_bones": [
+    "Spine",
+    "Chest",
+    "UpperArm_L",
+    "Forearm_L",
+    "UpperArm_R",
+    "Forearm_R",
+    "Thigh_L",
+    "Shin_L",
+    "Foot_L",
+    "Thigh_R",
+    "Shin_R",
+    "Foot_R"
+  ],
+  "contact_bones": [
+    "Hand_L",
+    "Hand_R",
+    "Foot_L",
+    "Foot_R"
+  ],
+  "actuated_joints": [
+    "Spine_rx",
+    "Spine_ry",
+    "Spine_rz",
+    "Thigh_L_rx",
+    "Thigh_L_ry",
+    "Thigh_L_rz",
+    "Thigh_R_rx",
+    "Thigh_R_ry",
+    "Thigh_R_rz",
+    "Chest_rx",
+    "Chest_ry",
+    "Chest_rz",
+    "Shin_L_rx",
+    "Shin_L_ry",
+    "Shin_L_rz",
+    "Shin_R_rx",
+    "Shin_R_ry",
+    "Shin_R_rz",
+    "UpperArm_L_rx",
+    "UpperArm_L_ry",
+    "UpperArm_L_rz",
+    "UpperArm_R_rx",
+    "UpperArm_R_ry",
+    "UpperArm_R_rz",
+    "Foot_L_rx",
+    "Foot_L_ry",
+    "Foot_L_rz",
+    "Foot_R_rx",
+    "Foot_R_ry",
+    "Foot_R_rz",
+    "Forearm_L_rx",
+    "Forearm_L_ry",
+    "Forearm_L_rz",
+    "Forearm_R_rx",
+    "Forearm_R_ry",
+    "Forearm_R_rz"
+  ],
+  "passive_joints": [
+    "Head_rx",
+    "Head_ry",
+    "Head_rz",
+    "Hand_L_rx",
+    "Hand_L_ry",
+    "Hand_L_rz",
+    "Hand_R_rx",
+    "Hand_R_ry",
+    "Hand_R_rz"
+  ],
+  "joints": {
+    "Spine_rx": {
+      "bone": "Spine",
+      "godot_axis": "x",
+      "urdf_axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "reversed": false,
+      "lower": -0.4,
+      "upper": 1.0,
+      "effort": 350.0,
+      "stiffness": 600.0,
+      "damping": 18.0,
+      "actuated": true
+    },
+    "Spine_ry": {
+      "bone": "Spine",
+      "godot_axis": "y",
+      "urdf_axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "reversed": false,
+      "lower": -0.5,
+      "upper": 0.5,
+      "effort": 350.0,
+      "stiffness": 600.0,
+      "damping": 18.0,
+      "actuated": true
+    },
+    "Spine_rz": {
+      "bone": "Spine",
+      "godot_axis": "z",
+      "urdf_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "reversed": true,
+      "lower": -0.5,
+      "upper": 0.5,
+      "effort": 350.0,
+      "stiffness": 600.0,
+      "damping": 18.0,
+      "actuated": true
+    },
+    "Thigh_L_rx": {
+      "bone": "Thigh_L",
+      "godot_axis": "x",
+      "urdf_axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "reversed": false,
+      "lower": -0.5,
+      "upper": 2.1,
+      "effort": 400.0,
+      "stiffness": 1600.0,
+      "damping": 32.0,
+      "actuated": true
+    },
+    "Thigh_L_ry": {
+      "bone": "Thigh_L",
+      "godot_axis": "y",
+      "urdf_axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "reversed": false,
+      "lower": -0.5,
+      "upper": 0.5,
+      "effort": 400.0,
+      "stiffness": 1600.0,
+      "damping": 32.0,
+      "actuated": true
+    },
+    "Thigh_L_rz": {
+      "bone": "Thigh_L",
+      "godot_axis": "z",
+      "urdf_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "reversed": true,
+      "lower": -0.8,
+      "upper": 0.2,
+      "effort": 400.0,
+      "stiffness": 1600.0,
+      "damping": 32.0,
+      "actuated": true
+    },
+    "Thigh_R_rx": {
+      "bone": "Thigh_R",
+      "godot_axis": "x",
+      "urdf_axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "reversed": false,
+      "lower": -0.5,
+      "upper": 2.1,
+      "effort": 400.0,
+      "stiffness": 1600.0,
+      "damping": 32.0,
+      "actuated": true
+    },
+    "Thigh_R_ry": {
+      "bone": "Thigh_R",
+      "godot_axis": "y",
+      "urdf_axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "reversed": false,
+      "lower": -0.5,
+      "upper": 0.5,
+      "effort": 400.0,
+      "stiffness": 1600.0,
+      "damping": 32.0,
+      "actuated": true
+    },
+    "Thigh_R_rz": {
+      "bone": "Thigh_R",
+      "godot_axis": "z",
+      "urdf_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "reversed": true,
+      "lower": -0.2,
+      "upper": 0.8,
+      "effort": 400.0,
+      "stiffness": 1600.0,
+      "damping": 32.0,
+      "actuated": true
+    },
+    "Chest_rx": {
+      "bone": "Chest",
+      "godot_axis": "x",
+      "urdf_axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "reversed": false,
+      "lower": -0.5,
+      "upper": 0.5,
+      "effort": 350.0,
+      "stiffness": 350.0,
+      "damping": 20.0,
+      "actuated": true
+    },
+    "Chest_ry": {
+      "bone": "Chest",
+      "godot_axis": "y",
+      "urdf_axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "reversed": false,
+      "lower": -0.5,
+      "upper": 0.5,
+      "effort": 350.0,
+      "stiffness": 350.0,
+      "damping": 20.0,
+      "actuated": true
+    },
+    "Chest_rz": {
+      "bone": "Chest",
+      "godot_axis": "z",
+      "urdf_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "reversed": true,
+      "lower": -0.5,
+      "upper": 0.5,
+      "effort": 350.0,
+      "stiffness": 350.0,
+      "damping": 20.0,
+      "actuated": true
+    },
+    "Shin_L_rx": {
+      "bone": "Shin_L",
+      "godot_axis": "x",
+      "urdf_axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "reversed": false,
+      "lower": -2.6,
+      "upper": 0.1,
+      "effort": 400.0,
+      "stiffness": 1800.0,
+      "damping": 36.0,
+      "actuated": true
+    },
+    "Shin_L_ry": {
+      "bone": "Shin_L",
+      "godot_axis": "y",
+      "urdf_axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "reversed": false,
+      "lower": -0.1,
+      "upper": 0.1,
+      "effort": 400.0,
+      "stiffness": 1800.0,
+      "damping": 36.0,
+      "actuated": true
+    },
+    "Shin_L_rz": {
+      "bone": "Shin_L",
+      "godot_axis": "z",
+      "urdf_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "reversed": true,
+      "lower": -0.1,
+      "upper": 0.1,
+      "effort": 400.0,
+      "stiffness": 1800.0,
+      "damping": 36.0,
+      "actuated": true
+    },
+    "Shin_R_rx": {
+      "bone": "Shin_R",
+      "godot_axis": "x",
+      "urdf_axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "reversed": false,
+      "lower": -2.6,
+      "upper": 0.1,
+      "effort": 400.0,
+      "stiffness": 1800.0,
+      "damping": 36.0,
+      "actuated": true
+    },
+    "Shin_R_ry": {
+      "bone": "Shin_R",
+      "godot_axis": "y",
+      "urdf_axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "reversed": false,
+      "lower": -0.1,
+      "upper": 0.1,
+      "effort": 400.0,
+      "stiffness": 1800.0,
+      "damping": 36.0,
+      "actuated": true
+    },
+    "Shin_R_rz": {
+      "bone": "Shin_R",
+      "godot_axis": "z",
+      "urdf_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "reversed": true,
+      "lower": -0.1,
+      "upper": 0.1,
+      "effort": 400.0,
+      "stiffness": 1800.0,
+      "damping": 36.0,
+      "actuated": true
+    },
+    "Head_rx": {
+      "bone": "Head",
+      "godot_axis": "x",
+      "urdf_axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "reversed": false,
+      "lower": -0.6,
+      "upper": 1.0,
+      "effort": 60.0,
+      "stiffness": 120.0,
+      "damping": 12.0,
+      "actuated": false
+    },
+    "Head_ry": {
+      "bone": "Head",
+      "godot_axis": "y",
+      "urdf_axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "reversed": false,
+      "lower": -1.0,
+      "upper": 1.0,
+      "effort": 60.0,
+      "stiffness": 120.0,
+      "damping": 12.0,
+      "actuated": false
+    },
+    "Head_rz": {
+      "bone": "Head",
+      "godot_axis": "z",
+      "urdf_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "reversed": true,
+      "lower": -1.0,
+      "upper": 1.0,
+      "effort": 60.0,
+      "stiffness": 120.0,
+      "damping": 12.0,
+      "actuated": false
+    },
+    "UpperArm_L_rx": {
+      "bone": "UpperArm_L",
+      "godot_axis": "x",
+      "urdf_axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "reversed": false,
+      "lower": -1.0,
+      "upper": 3.0,
+      "effort": 150.0,
+      "stiffness": 120.0,
+      "damping": 10.0,
+      "actuated": true
+    },
+    "UpperArm_L_ry": {
+      "bone": "UpperArm_L",
+      "godot_axis": "y",
+      "urdf_axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "reversed": false,
+      "lower": -1.5,
+      "upper": 1.5,
+      "effort": 150.0,
+      "stiffness": 120.0,
+      "damping": 10.0,
+      "actuated": true
+    },
+    "UpperArm_L_rz": {
+      "bone": "UpperArm_L",
+      "godot_axis": "z",
+      "urdf_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "reversed": true,
+      "lower": -2.5,
+      "upper": 0.5,
+      "effort": 150.0,
+      "stiffness": 120.0,
+      "damping": 10.0,
+      "actuated": true
+    },
+    "UpperArm_R_rx": {
+      "bone": "UpperArm_R",
+      "godot_axis": "x",
+      "urdf_axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "reversed": false,
+      "lower": -1.0,
+      "upper": 3.0,
+      "effort": 150.0,
+      "stiffness": 120.0,
+      "damping": 10.0,
+      "actuated": true
+    },
+    "UpperArm_R_ry": {
+      "bone": "UpperArm_R",
+      "godot_axis": "y",
+      "urdf_axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "reversed": false,
+      "lower": -1.5,
+      "upper": 1.5,
+      "effort": 150.0,
+      "stiffness": 120.0,
+      "damping": 10.0,
+      "actuated": true
+    },
+    "UpperArm_R_rz": {
+      "bone": "UpperArm_R",
+      "godot_axis": "z",
+      "urdf_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "reversed": true,
+      "lower": -0.5,
+      "upper": 2.5,
+      "effort": 150.0,
+      "stiffness": 120.0,
+      "damping": 10.0,
+      "actuated": true
+    },
+    "Foot_L_rx": {
+      "bone": "Foot_L",
+      "godot_axis": "x",
+      "urdf_axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "reversed": false,
+      "lower": -0.8,
+      "upper": 0.6,
+      "effort": 250.0,
+      "stiffness": 1200.0,
+      "damping": 6.0,
+      "actuated": true
+    },
+    "Foot_L_ry": {
+      "bone": "Foot_L",
+      "godot_axis": "y",
+      "urdf_axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "reversed": false,
+      "lower": -0.2,
+      "upper": 0.2,
+      "effort": 250.0,
+      "stiffness": 1200.0,
+      "damping": 6.0,
+      "actuated": true
+    },
+    "Foot_L_rz": {
+      "bone": "Foot_L",
+      "godot_axis": "z",
+      "urdf_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "reversed": true,
+      "lower": -0.2,
+      "upper": 0.2,
+      "effort": 250.0,
+      "stiffness": 1200.0,
+      "damping": 6.0,
+      "actuated": true
+    },
+    "Foot_R_rx": {
+      "bone": "Foot_R",
+      "godot_axis": "x",
+      "urdf_axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "reversed": false,
+      "lower": -0.8,
+      "upper": 0.6,
+      "effort": 250.0,
+      "stiffness": 1200.0,
+      "damping": 6.0,
+      "actuated": true
+    },
+    "Foot_R_ry": {
+      "bone": "Foot_R",
+      "godot_axis": "y",
+      "urdf_axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "reversed": false,
+      "lower": -0.2,
+      "upper": 0.2,
+      "effort": 250.0,
+      "stiffness": 1200.0,
+      "damping": 6.0,
+      "actuated": true
+    },
+    "Foot_R_rz": {
+      "bone": "Foot_R",
+      "godot_axis": "z",
+      "urdf_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "reversed": true,
+      "lower": -0.2,
+      "upper": 0.2,
+      "effort": 250.0,
+      "stiffness": 1200.0,
+      "damping": 6.0,
+      "actuated": true
+    },
+    "Forearm_L_rx": {
+      "bone": "Forearm_L",
+      "godot_axis": "x",
+      "urdf_axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "reversed": false,
+      "lower": -0.1,
+      "upper": 2.6,
+      "effort": 100.0,
+      "stiffness": 100.0,
+      "damping": 8.0,
+      "actuated": true
+    },
+    "Forearm_L_ry": {
+      "bone": "Forearm_L",
+      "godot_axis": "y",
+      "urdf_axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "reversed": false,
+      "lower": -0.15,
+      "upper": 0.15,
+      "effort": 100.0,
+      "stiffness": 100.0,
+      "damping": 8.0,
+      "actuated": true
+    },
+    "Forearm_L_rz": {
+      "bone": "Forearm_L",
+      "godot_axis": "z",
+      "urdf_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "reversed": true,
+      "lower": -0.15,
+      "upper": 0.15,
+      "effort": 100.0,
+      "stiffness": 100.0,
+      "damping": 8.0,
+      "actuated": true
+    },
+    "Forearm_R_rx": {
+      "bone": "Forearm_R",
+      "godot_axis": "x",
+      "urdf_axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "reversed": false,
+      "lower": -0.1,
+      "upper": 2.6,
+      "effort": 100.0,
+      "stiffness": 100.0,
+      "damping": 8.0,
+      "actuated": true
+    },
+    "Forearm_R_ry": {
+      "bone": "Forearm_R",
+      "godot_axis": "y",
+      "urdf_axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "reversed": false,
+      "lower": -0.15,
+      "upper": 0.15,
+      "effort": 100.0,
+      "stiffness": 100.0,
+      "damping": 8.0,
+      "actuated": true
+    },
+    "Forearm_R_rz": {
+      "bone": "Forearm_R",
+      "godot_axis": "z",
+      "urdf_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "reversed": true,
+      "lower": -0.15,
+      "upper": 0.15,
+      "effort": 100.0,
+      "stiffness": 100.0,
+      "damping": 8.0,
+      "actuated": true
+    },
+    "Hand_L_rx": {
+      "bone": "Hand_L",
+      "godot_axis": "x",
+      "urdf_axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "reversed": false,
+      "lower": -1.0,
+      "upper": 1.0,
+      "effort": 25.0,
+      "stiffness": 60.0,
+      "damping": 6.0,
+      "actuated": false
+    },
+    "Hand_L_ry": {
+      "bone": "Hand_L",
+      "godot_axis": "y",
+      "urdf_axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "reversed": false,
+      "lower": -0.5,
+      "upper": 0.5,
+      "effort": 25.0,
+      "stiffness": 60.0,
+      "damping": 6.0,
+      "actuated": false
+    },
+    "Hand_L_rz": {
+      "bone": "Hand_L",
+      "godot_axis": "z",
+      "urdf_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "reversed": true,
+      "lower": -0.5,
+      "upper": 0.5,
+      "effort": 25.0,
+      "stiffness": 60.0,
+      "damping": 6.0,
+      "actuated": false
+    },
+    "Hand_R_rx": {
+      "bone": "Hand_R",
+      "godot_axis": "x",
+      "urdf_axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "reversed": false,
+      "lower": -1.0,
+      "upper": 1.0,
+      "effort": 25.0,
+      "stiffness": 60.0,
+      "damping": 6.0,
+      "actuated": false
+    },
+    "Hand_R_ry": {
+      "bone": "Hand_R",
+      "godot_axis": "y",
+      "urdf_axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "reversed": false,
+      "lower": -0.5,
+      "upper": 0.5,
+      "effort": 25.0,
+      "stiffness": 60.0,
+      "damping": 6.0,
+      "actuated": false
+    },
+    "Hand_R_rz": {
+      "bone": "Hand_R",
+      "godot_axis": "z",
+      "urdf_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "reversed": true,
+      "lower": -0.5,
+      "upper": 0.5,
+      "effort": 25.0,
+      "stiffness": 60.0,
+      "damping": 6.0,
+      "actuated": false
+    }
+  },
+  "total_mass": 80.6
+}

@@ -113,14 +113,18 @@ if ($NParallel -lt 1) {
 # Pure-RL get-up realistically needs 10-100M.
 $Timesteps   = 800000000
 
-# Wall-clock cap in seconds. Training stops at whichever comes first, this or $Timesteps.
+# Wall-clock cap in MINUTES. Training stops at whichever comes first, this or $Timesteps.
 # Use this when you want a run of a known DURATION - throughput is not predictable enough to
 # express "15 minutes" as a step count, especially with a visible instance.
-# 0 = no time limit.
-# 300 = 5 minutes.
-# 900 = 15 minutes.
-# 7200 = 2 hours.
-$MaxSeconds = 7200
+#   0 = no time limit
+#   5 = five minutes
+#  15 = fifteen minutes
+# 120 = two hours
+#
+# Minutes rather than seconds because every run is decided in minutes and the conversion was one
+# more thing to get wrong at the moment of setting it. $MaxSeconds is derived below and is what
+# the scripts still pass to train.py, so nothing downstream changed.
+$MaxMinutes = 120
 
 # --- Run identity ------------------------------------------------------------
 # LEAVE EMPTY. The name is derived below as "<task>_v<next unused>" by scanning
@@ -181,6 +185,8 @@ if ($Task -eq "perturbation") {
 # every *Training.tscn now carries a RagdollSpawner and takes its count from --dummies=N, so the
 # body count is a number rather than a scene.
 # Absolute on purpose: every script (training AND tensorboard) must agree on one location.
+$MaxSeconds = $MaxMinutes * 60
+
 $ExperimentDir = "$ProjectPath/rl/runs"
 
 # Next unused experiment version for a task, by scanning the run directories.

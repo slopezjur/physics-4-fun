@@ -63,3 +63,17 @@ build/
 # Archived training runs
 rl/runs_archive/
 
+
+# Isaac Lab track. dummy.urdf and dummy_rig.json ARE tracked: they are small, they are the
+# generated rig contract that both engines read, and versioning them makes a scene change that
+# alters the dummy visible in a diff. Everything below is a build artifact of those two.
+isaac_lab/logs/
+isaac_lab/outputs/
+isaac_lab/assets/dummy.usd
+isaac_lab/assets/configuration/
+isaac_lab/assets/config.yaml
+isaac_lab/assets/.asset_hash
+# The exported .onnx files ARE tracked - they are the deliverable, ~950 KB each, and the whole
+# point of the track. The TorchScript twins are not: same policy, re-derivable from the checkpoint
+# with play.py --export_only, and they double the footprint for nothing.
+isaac_lab/exported/*.pt
