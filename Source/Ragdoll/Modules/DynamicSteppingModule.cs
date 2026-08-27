@@ -43,19 +43,19 @@ public class DynamicSteppingModule : IBalanceStrategy
             return;
         }
 
-        if (!EnableDynamicStepping || context.FootL == null || context.FootR == null || !GodotObject.IsInstanceValid(context.FootL) || !GodotObject.IsInstanceValid(context.FootR))
+        if (!EnableDynamicStepping || context.FootL == null || context.FootR == null || !context.FootL.IsValid || !context.FootR.IsValid)
         {
             CurrentStepPhase = StepPhase.DoubleSupport;
             return;
         }
 
-        ActiveBone pelvis = context.Pelvis;
-        ActiveBone? thighL = context.ThighL;
-        ActiveBone? thighR = context.ThighR;
-        ActiveBone? shinL = context.ShinL;
-        ActiveBone? shinR = context.ShinR;
-        ActiveBone footL = context.FootL;
-        ActiveBone footR = context.FootR;
+        IBoneState pelvis = context.Pelvis;
+        IBoneState? thighL = context.ThighL;
+        IBoneState? thighR = context.ThighR;
+        IBoneState? shinL = context.ShinL;
+        IBoneState? shinR = context.ShinR;
+        IBoneState footL = context.FootL;
+        IBoneState footR = context.FootR;
         bool isGroundedL = context.IsGroundedL;
         bool isGroundedR = context.IsGroundedR;
         Vector3 groundPointL = context.GroundPointL;
@@ -99,7 +99,7 @@ public class DynamicSteppingModule : IBalanceStrategy
                 CurrentStepPhase = swingLeft ? StepPhase.LeftSwing : StepPhase.RightSwing;
                 StepProgress = 0.0f;
 
-                ActiveBone swingFoot = swingLeft ? footL : footR;
+                IBoneState swingFoot = swingLeft ? footL : footR;
                 _stepStartPos = swingFoot.GlobalPosition;
 
                 Vector3 hipPos = pelvis.GlobalTransform * new Vector3(swingLeft ? 0.14f : -0.14f, -0.06f, 0.0f);
@@ -136,10 +136,10 @@ public class DynamicSteppingModule : IBalanceStrategy
             currentFootTarget.Y += 4.0f * StepHeight * s * (1.0f - s);
 
             bool isLeft = CurrentStepPhase == StepPhase.LeftSwing;
-            ActiveBone? swingThigh = isLeft ? thighL : thighR;
-            ActiveBone? swingShin = isLeft ? shinL : shinR;
+            IBoneState? swingThigh = isLeft ? thighL : thighR;
+            IBoneState? swingShin = isLeft ? shinL : shinR;
 
-            if (swingThigh != null && swingShin != null && GodotObject.IsInstanceValid(swingThigh) && GodotObject.IsInstanceValid(swingShin))
+            if (swingThigh != null && swingShin != null && swingThigh.IsValid && swingShin.IsValid)
             {
                 // Measure real segment lengths once from the skeleton instead of hardcoding
                 if (!_legLengthsMeasured)
@@ -175,9 +175,9 @@ public class DynamicSteppingModule : IBalanceStrategy
             }
 
             // Maintain upright stance leg posture without fighting joint limits
-            ActiveBone? stanceThigh = isLeft ? thighR : thighL;
-            ActiveBone? stanceShin = isLeft ? shinR : shinL;
-            if (stanceThigh != null && stanceShin != null && GodotObject.IsInstanceValid(stanceThigh) && GodotObject.IsInstanceValid(stanceShin))
+            IBoneState? stanceThigh = isLeft ? thighR : thighL;
+            IBoneState? stanceShin = isLeft ? shinR : shinL;
+            if (stanceThigh != null && stanceShin != null && stanceThigh.IsValid && stanceShin.IsValid)
             {
                 Vector3 localUp = pelvis.GlobalTransform.Basis.Inverse() * Vector3.Up;
                 float stancePitch = Mathf.Clamp(Mathf.Atan2(localUp.Z, localUp.Y) * 0.8f, -0.30f, 0.30f);
@@ -191,7 +191,7 @@ public class DynamicSteppingModule : IBalanceStrategy
                 stanceThigh.FeedForwardTargetOffset = Quaternion.FromEuler(new Vector3(stancePitch * strength, 0.0f, stanceRoll * strength));
             }
 
-            ActiveBone swingFoot = isLeft ? footL : footR;
+            IBoneState swingFoot = isLeft ? footL : footR;
             bool isGroundedSwing = isLeft ? isGroundedL : isGroundedR;
             // Commit to the swing: only real foot contact late in the arc (descending) counts as
             // touchdown. Aborting on early contact/height thrashed the step machine — the swing

@@ -53,20 +53,20 @@ public class HipStrategyModule : IBalanceStrategy
             return;
         }
 
-        ActiveBone pelvis = context.Pelvis;
-        ActiveBone? spine = context.Spine;
-        ActiveBone? thighL = context.ThighL;
-        ActiveBone? thighR = context.ThighR;
-        ActiveBone? shinL = context.ShinL;
-        ActiveBone? shinR = context.ShinR;
-        ActiveBone? footL = context.FootL;
-        ActiveBone? footR = context.FootR;
+        IBoneState pelvis = context.Pelvis;
+        IBoneState? spine = context.Spine;
+        IBoneState? thighL = context.ThighL;
+        IBoneState? thighR = context.ThighR;
+        IBoneState? shinL = context.ShinL;
+        IBoneState? shinR = context.ShinR;
+        IBoneState? footL = context.FootL;
+        IBoneState? footR = context.FootR;
         Vector3 centerOfMass = context.CenterOfMass;
         Vector3 centerOfMassVelocity = context.CenterOfMassVelocity;
         float groundY = (context.GroundPointL.Y + context.GroundPointR.Y) * 0.5f;
         float strength = context.Strength;
 
-        if (footL == null || footR == null || !GodotObject.IsInstanceValid(footL) || !GodotObject.IsInstanceValid(footR))
+        if (footL == null || footR == null || !footL.IsValid || !footR.IsValid)
         {
             return;
         }
@@ -101,16 +101,16 @@ public class HipStrategyModule : IBalanceStrategy
         float finalHipPitch = (pitchError + arrestPitch) * strength - heightOffset;
         Quaternion hipOffset = Quaternion.FromEuler(new Vector3(finalHipPitch, 0.0f, rollError * strength));
 
-        if (thighL != null && GodotObject.IsInstanceValid(thighL))
+        if (thighL != null && thighL.IsValid)
         {
             thighL.FeedForwardTargetOffset = hipOffset;
         }
-        if (thighR != null && GodotObject.IsInstanceValid(thighR))
+        if (thighR != null && thighR.IsValid)
         {
             thighR.FeedForwardTargetOffset = hipOffset;
         }
 
-        if (spine != null && GodotObject.IsInstanceValid(spine))
+        if (spine != null && spine.IsValid)
         {
             Vector3 spineLocalUp = spine.GlobalTransform.Basis.Inverse() * Vector3.Up;
             float spinePitch = Mathf.Clamp(Mathf.Atan2(spineLocalUp.Z, spineLocalUp.Y) * SpinePostureScale, -MaxSpinePitchOffset, MaxSpinePitchOffset);
@@ -121,11 +121,11 @@ public class HipStrategyModule : IBalanceStrategy
         }
 
         Quaternion kneeOffset = Quaternion.FromEuler(new Vector3(heightOffset, 0.0f, 0.0f));
-        if (shinL != null && GodotObject.IsInstanceValid(shinL))
+        if (shinL != null && shinL.IsValid)
         {
             shinL.FeedForwardTargetOffset = kneeOffset;
         }
-        if (shinR != null && GodotObject.IsInstanceValid(shinR))
+        if (shinR != null && shinR.IsValid)
         {
             shinR.FeedForwardTargetOffset = kneeOffset;
         }

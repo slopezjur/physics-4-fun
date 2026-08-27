@@ -15,19 +15,19 @@ public class ObstacleBracingReflexModule : IBiomechanicalReflex
 
     public bool IsBracing { get; private set; } = false;
 
-    private ActiveBone? _chest;
-    private ActiveBone? _upperArmL;
-    private ActiveBone? _upperArmR;
-    private ActiveBone? _forearmL;
-    private ActiveBone? _forearmR;
+    private IBoneState? _chest;
+    private IBoneState? _upperArmL;
+    private IBoneState? _upperArmR;
+    private IBoneState? _forearmL;
+    private IBoneState? _forearmR;
     private Array<Rid>? _excludeRids;
 
     public void Initialize(
-        ActiveBone? chest,
-        ActiveBone? upperArmL,
-        ActiveBone? upperArmR,
-        ActiveBone? forearmL,
-        ActiveBone? forearmR,
+        IBoneState? chest,
+        IBoneState? upperArmL,
+        IBoneState? upperArmR,
+        IBoneState? forearmL,
+        IBoneState? forearmR,
         Array<Rid>? excludeRids)
     {
         _chest = chest;
@@ -45,7 +45,7 @@ public class ObstacleBracingReflexModule : IBiomechanicalReflex
 
     public void Update(RagdollState state, StepPhase stepPhase, float delta)
     {
-        if (!IsEnabled || _chest == null || !GodotObject.IsInstanceValid(_chest))
+        if (!IsEnabled || _chest == null || !_chest.IsValid)
         {
             IsBracing = false;
             return;
@@ -58,7 +58,11 @@ public class ObstacleBracingReflexModule : IBiomechanicalReflex
             return;
         }
 
-        var world = _chest.GetWorld3D();
+        // A raycast is an ENGINE capability, not bone state - so this is the one place these
+        // modules still need the concrete body. Cast here rather than widening IBoneState:
+        // faking a physics query is not the same as faking a bone, and pretending otherwise
+        // would make the interface untestable in the way it was added to prevent.
+        var world = ((Node3D)_chest).GetWorld3D();
         if (world == null) return;
         var spaceState = world.DirectSpaceState;
 

@@ -41,7 +41,7 @@ public class PelvisStabilizationModule : IBalanceStrategy
     public float RecoveryMaxTorque { get; set; } = 120.0f;
 
     /// <summary>Limbs that can carry the stabilizer's reaction into the ground, in preference order.</summary>
-    private readonly List<ActiveBone> _reactionLimbs = new();
+    private readonly List<IBoneState> _reactionLimbs = new();
 
     public void Apply(in BalanceContext context)
     {
@@ -77,7 +77,7 @@ public class PelvisStabilizationModule : IBalanceStrategy
             return;
         }
 
-        ActiveBone pelvis = context.Pelvis;
+        IBoneState pelvis = context.Pelvis;
 
         // Axis-angle attitude error between pelvis up axis and world up (magnitude ~ sin(angle))
         Vector3 pelvisUp = pelvis.GlobalTransform.Basis.Y.Normalized();
@@ -98,7 +98,7 @@ public class PelvisStabilizationModule : IBalanceStrategy
         pelvis.ApplyTorque(torque);
 
         Vector3 reaction = -torque / _reactionLimbs.Count;
-        foreach (ActiveBone limb in _reactionLimbs)
+        foreach (IBoneState limb in _reactionLimbs)
         {
             limb.ApplyTorque(reaction);
         }
@@ -110,11 +110,11 @@ public class PelvisStabilizationModule : IBalanceStrategy
 
         if (!rising)
         {
-            if (context.IsGroundedL && context.FootL != null && GodotObject.IsInstanceValid(context.FootL))
+            if (context.IsGroundedL && context.FootL != null && context.FootL.IsValid)
             {
                 _reactionLimbs.Add(context.FootL);
             }
-            if (context.IsGroundedR && context.FootR != null && GodotObject.IsInstanceValid(context.FootR))
+            if (context.IsGroundedR && context.FootR != null && context.FootR.IsValid)
             {
                 _reactionLimbs.Add(context.FootR);
             }
@@ -131,9 +131,9 @@ public class PelvisStabilizationModule : IBalanceStrategy
         AddIfContacting(context.HandR);
     }
 
-    private void AddIfContacting(ActiveBone? limb)
+    private void AddIfContacting(IBoneState? limb)
     {
-        if (limb != null && GodotObject.IsInstanceValid(limb) && limb.IsInContactWithWorld())
+        if (limb != null && limb.IsValid && limb.IsInContactWithWorld())
         {
             _reactionLimbs.Add(limb);
         }

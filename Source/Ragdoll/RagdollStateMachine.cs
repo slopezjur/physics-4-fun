@@ -107,93 +107,113 @@ public class RagdollStateMachine
             return RagdollState.Balanced;
         }
 
-        switch (currentState)
+        return currentState switch
         {
-            case RagdollState.Balanced:
-                if (tiltAngleDeg > KnockoutTiltAngleDeg || _airborneTimer > 0.6f)
-                {
-                    _groundRestTimer = 0.0f;
-                    _flailGroundTimer = 0.0f;
-                    return RagdollState.Flailing;
-                }
-                if (tiltAngleDeg > MaxStumbleTiltAngleDeg || speed > DecoupleVelocityThreshold)
-                {
-                    _stumbleTimer = 1.4f;
-                    return RagdollState.Stumbling;
-                }
-                return RagdollState.Balanced;
+            RagdollState.Balanced => FromBalanced(delta, tiltAngleDeg, currentHeight, speed, isGroundedL, isGroundedR),
+            RagdollState.Stumbling => FromStumbling(delta, tiltAngleDeg, currentHeight, speed, isGroundedL, isGroundedR),
+            RagdollState.Flailing => FromFlailing(delta, tiltAngleDeg, currentHeight, speed, isGroundedL, isGroundedR),
+            RagdollState.KnockedOut => FromKnockedOut(delta, tiltAngleDeg, currentHeight, speed, isGroundedL, isGroundedR),
+            RagdollState.Recovering => FromRecovering(delta, tiltAngleDeg, currentHeight, speed, isGroundedL, isGroundedR),
+            _ => currentState,
+        };
+    }
 
-            case RagdollState.Stumbling:
-                _stumbleTimer -= delta;
-                if (tiltAngleDeg > KnockoutTiltAngleDeg || (currentHeight < 0.25f && speed < 1.0f) || _airborneTimer > 0.6f)
-                {
-                    _groundRestTimer = 0.0f;
-                    _flailGroundTimer = 0.0f;
-                    return RagdollState.Flailing;
-                }
-                if (_stumbleTimer <= 0.0f && tiltAngleDeg < 30.0f && (isGroundedL || isGroundedR))
-                {
-                    return RagdollState.Balanced;
-                }
-                return RagdollState.Stumbling;
-
-            case RagdollState.Flailing:
-                if (currentHeight < 0.35f && speed < 2.5f)
-                {
-                    _flailGroundTimer += delta;
-                    if (_flailGroundTimer >= 0.25f)
-                    {
-                        _flailGroundTimer = 0.0f;
-                        _groundRestTimer = 0.0f;
-                        return RagdollState.KnockedOut;
-                    }
-                }
-                else
-                {
-                    _flailGroundTimer = 0.0f;
-                }
+    /// <summary>Transitions out of <see cref="RagdollState.Balanced"/>.</summary>
+    private RagdollState FromBalanced(float delta, float tiltAngleDeg, float currentHeight, float speed, bool isGroundedL, bool isGroundedR)
+    {
+            if (tiltAngleDeg > KnockoutTiltAngleDeg || _airborneTimer > 0.6f)
+            {
+                _groundRestTimer = 0.0f;
+                _flailGroundTimer = 0.0f;
                 return RagdollState.Flailing;
+            }
+            if (tiltAngleDeg > MaxStumbleTiltAngleDeg || speed > DecoupleVelocityThreshold)
+            {
+                _stumbleTimer = 1.4f;
+                return RagdollState.Stumbling;
+            }
+            return RagdollState.Balanced;
+    }
 
-            case RagdollState.KnockedOut:
-                if (currentHeight < 0.45f && speed < 1.0f)
-                {
-                    _groundRestTimer += delta;
-                    if (_groundRestTimer >= AutoRecoveryDelay)
-                    {
-                        _groundRestTimer = 0.0f;
-                        _recoveryTimer = RecoveryDuration;
-                        RecoveryProgressNormalized = 0.0f;
-                        return RagdollState.Recovering;
-                    }
-                }
-                else
-                {
-                    _groundRestTimer = 0.0f;
-                }
-                return RagdollState.KnockedOut;
+    /// <summary>Transitions out of <see cref="RagdollState.Stumbling"/>.</summary>
+    private RagdollState FromStumbling(float delta, float tiltAngleDeg, float currentHeight, float speed, bool isGroundedL, bool isGroundedR)
+    {
+            _stumbleTimer -= delta;
+            if (tiltAngleDeg > KnockoutTiltAngleDeg || (currentHeight < 0.25f && speed < 1.0f) || _airborneTimer > 0.6f)
+            {
+                _groundRestTimer = 0.0f;
+                _flailGroundTimer = 0.0f;
+                return RagdollState.Flailing;
+            }
+            if (_stumbleTimer <= 0.0f && tiltAngleDeg < 30.0f && (isGroundedL || isGroundedR))
+            {
+                return RagdollState.Balanced;
+            }
+            return RagdollState.Stumbling;
+    }
 
-            case RagdollState.Recovering:
-                _recoveryTimer -= delta;
-                RecoveryProgressNormalized = Mathf.Clamp(1.0f - (_recoveryTimer / RecoveryDuration), 0.0f, 1.0f);
-
-                // Success is now purely physical: upright, risen, and in contact. The old
-                // "progress >= 0.85" gate tied success to the clock, which no longer tracks the
-                // phase-driven trajectory and would block an early, clean rise.
-                if (tiltAngleDeg < 30.0f && currentHeight > 0.60f && (isGroundedL || isGroundedR))
+    /// <summary>Transitions out of <see cref="RagdollState.Flailing"/>.</summary>
+    private RagdollState FromFlailing(float delta, float tiltAngleDeg, float currentHeight, float speed, bool isGroundedL, bool isGroundedR)
+    {
+            if (currentHeight < 0.35f && speed < 2.5f)
+            {
+                _flailGroundTimer += delta;
+                if (_flailGroundTimer >= 0.25f)
                 {
-                    RecoveryProgressNormalized = 1.0f;
-                    return RagdollState.Balanced;
-                }
-
-                if (_recoveryTimer <= -1.5f)
-                {
+                    _flailGroundTimer = 0.0f;
                     _groundRestTimer = 0.0f;
                     return RagdollState.KnockedOut;
                 }
-                return RagdollState.Recovering;
-
-            default:
-                return currentState;
-        }
+            }
+            else
+            {
+                _flailGroundTimer = 0.0f;
+            }
+            return RagdollState.Flailing;
     }
+
+    /// <summary>Transitions out of <see cref="RagdollState.KnockedOut"/>.</summary>
+    private RagdollState FromKnockedOut(float delta, float tiltAngleDeg, float currentHeight, float speed, bool isGroundedL, bool isGroundedR)
+    {
+            if (currentHeight < 0.45f && speed < 1.0f)
+            {
+                _groundRestTimer += delta;
+                if (_groundRestTimer >= AutoRecoveryDelay)
+                {
+                    _groundRestTimer = 0.0f;
+                    _recoveryTimer = RecoveryDuration;
+                    RecoveryProgressNormalized = 0.0f;
+                    return RagdollState.Recovering;
+                }
+            }
+            else
+            {
+                _groundRestTimer = 0.0f;
+            }
+            return RagdollState.KnockedOut;
+    }
+
+    /// <summary>Transitions out of <see cref="RagdollState.Recovering"/>.</summary>
+    private RagdollState FromRecovering(float delta, float tiltAngleDeg, float currentHeight, float speed, bool isGroundedL, bool isGroundedR)
+    {
+            _recoveryTimer -= delta;
+            RecoveryProgressNormalized = Mathf.Clamp(1.0f - (_recoveryTimer / RecoveryDuration), 0.0f, 1.0f);
+
+            // Success is now purely physical: upright, risen, and in contact. The old
+            // "progress >= 0.85" gate tied success to the clock, which no longer tracks the
+            // phase-driven trajectory and would block an early, clean rise.
+            if (tiltAngleDeg < 30.0f && currentHeight > 0.60f && (isGroundedL || isGroundedR))
+            {
+                RecoveryProgressNormalized = 1.0f;
+                return RagdollState.Balanced;
+            }
+
+            if (_recoveryTimer <= -1.5f)
+            {
+                _groundRestTimer = 0.0f;
+                return RagdollState.KnockedOut;
+            }
+            return RagdollState.Recovering;
+    }
+
 }

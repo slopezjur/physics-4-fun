@@ -12,21 +12,21 @@ public class ArmReflexModule : IBiomechanicalReflex
     public float ArmCounterBalanceGain { get; set; } = 0.08f;
     public float ImpactBraceDistance { get; set; } = 1.4f;
 
-    private ActiveBone? _pelvis;
-    private ActiveBone? _chest;
-    private ActiveBone? _upperArmL;
-    private ActiveBone? _upperArmR;
-    private ActiveBone? _forearmL;
-    private ActiveBone? _forearmR;
+    private IBoneState? _pelvis;
+    private IBoneState? _chest;
+    private IBoneState? _upperArmL;
+    private IBoneState? _upperArmR;
+    private IBoneState? _forearmL;
+    private IBoneState? _forearmR;
     private Godot.Collections.Array<Rid> _ragdollRids = new();
 
     public void Initialize(
-        ActiveBone pelvis,
-        ActiveBone? chest,
-        ActiveBone? upperArmL,
-        ActiveBone? upperArmR,
-        ActiveBone? forearmL,
-        ActiveBone? forearmR,
+        IBoneState pelvis,
+        IBoneState? chest,
+        IBoneState? upperArmL,
+        IBoneState? upperArmR,
+        IBoneState? forearmL,
+        IBoneState? forearmR,
         Godot.Collections.Array<Rid> ragdollRids)
     {
         _pelvis = pelvis;
@@ -49,7 +49,7 @@ public class ArmReflexModule : IBiomechanicalReflex
     public void Update(RagdollState state, StepPhase stepPhase, float delta)
     {
         if (!IsEnabled || _pelvis == null || _upperArmL == null || _upperArmR == null ||
-            !GodotObject.IsInstanceValid(_pelvis) || !GodotObject.IsInstanceValid(_upperArmL) || !GodotObject.IsInstanceValid(_upperArmR))
+            !_pelvis.IsValid || !_upperArmL.IsValid || !_upperArmR.IsValid)
         {
             return;
         }
@@ -62,8 +62,12 @@ public class ArmReflexModule : IBiomechanicalReflex
         bool isImminentFall = state == RagdollState.Flailing || comVel.Y < -0.40f || tiltDeg > 28.0f;
         if (isImminentFall)
         {
-            var spaceState = _pelvis.GetWorld3D().DirectSpaceState;
-            Vector3 rayStart = (_chest != null && GodotObject.IsInstanceValid(_chest)) ? _chest.GlobalPosition : _pelvis.GlobalPosition;
+        // A raycast is an ENGINE capability, not bone state - so this is the one place these
+        // modules still need the concrete body. Cast here rather than widening IBoneState:
+        // faking a physics query is not the same as faking a bone, and pretending otherwise
+        // would make the interface untestable in the way it was added to prevent.
+            var spaceState = ((Node3D)_pelvis).GetWorld3D().DirectSpaceState;
+            Vector3 rayStart = (_chest != null && _chest.IsValid) ? _chest.GlobalPosition : _pelvis.GlobalPosition;
             Vector3 rayDir = comVel.Normalized();
             if (rayDir.Y > -0.2f) rayDir = (rayDir - new Vector3(0, 0.9f, 0)).Normalized();
 

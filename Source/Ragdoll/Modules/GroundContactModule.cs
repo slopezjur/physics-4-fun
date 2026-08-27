@@ -1,4 +1,5 @@
 using Godot;
+using Physics4Fun.Ragdoll.Interfaces;
 
 namespace Physics4Fun.Ragdoll.Modules;
 
@@ -20,9 +21,13 @@ public class GroundContactModule
     public Vector3 GroundPointL { get; private set; } = Vector3.Zero;
     public Vector3 GroundPointR { get; private set; } = Vector3.Zero;
 
-    public void Update(ActiveBone pelvis, ActiveBone? footL, ActiveBone? footR, Godot.Collections.Array<Rid> excludeRids)
+    public void Update(IBoneState pelvis, IBoneState? footL, IBoneState? footR, Godot.Collections.Array<Rid> excludeRids)
     {
-        var spaceState = pelvis.GetWorld3D().DirectSpaceState;
+        // A raycast is an ENGINE capability, not bone state - so this is the one place these
+        // modules still need the concrete body. Cast here rather than widening IBoneState:
+        // faking a physics query is not the same as faking a bone, and pretending otherwise
+        // would make the interface untestable in the way it was added to prevent.
+        var spaceState = ((Node3D)pelvis).GetWorld3D().DirectSpaceState;
 
         Vector3 groundPointL = GroundPointL;
         Vector3 groundPointR = GroundPointR;
@@ -32,9 +37,9 @@ public class GroundContactModule
         GroundPointR = groundPointR;
     }
 
-    private static bool UpdateFootGroundSensor(ActiveBone? foot, ref Vector3 groundPoint, PhysicsDirectSpaceState3D spaceState, Godot.Collections.Array<Rid> excludeRids)
+    private static bool UpdateFootGroundSensor(IBoneState? foot, ref Vector3 groundPoint, PhysicsDirectSpaceState3D spaceState, Godot.Collections.Array<Rid> excludeRids)
     {
-        if (foot == null || !GodotObject.IsInstanceValid(foot))
+        if (foot == null || !foot.IsValid)
         {
             return false;
         }

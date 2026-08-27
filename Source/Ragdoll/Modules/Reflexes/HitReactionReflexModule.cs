@@ -15,25 +15,25 @@ public class HitReactionReflexModule : IBiomechanicalReflex
     public bool IsClutchingWound => _clutchTimer > 0.0f;
     public string LastHitBone => _hitBoneName;
 
-    private ActiveBone? _upperArmL;
-    private ActiveBone? _upperArmR;
-    private ActiveBone? _forearmL;
-    private ActiveBone? _forearmR;
-    private ActiveBone? _chest;
-    private ActiveBone? _head;
+    private IBoneState? _upperArmL;
+    private IBoneState? _upperArmR;
+    private IBoneState? _forearmL;
+    private IBoneState? _forearmR;
+    private IBoneState? _chest;
+    private IBoneState? _head;
 
     private string _hitBoneName = string.Empty;
     private float _clutchTimer = 0.0f;
     private float _flinchTimer = 0.0f;
-    private ActiveBone? _flinchBone;
+    private IBoneState? _flinchBone;
 
     public void Initialize(
-        ActiveBone? chest,
-        ActiveBone? head,
-        ActiveBone? upperArmL,
-        ActiveBone? upperArmR,
-        ActiveBone? forearmL,
-        ActiveBone? forearmR)
+        IBoneState? chest,
+        IBoneState? head,
+        IBoneState? upperArmL,
+        IBoneState? upperArmR,
+        IBoneState? forearmL,
+        IBoneState? forearmR)
     {
         _chest = chest;
         _head = head;
@@ -43,9 +43,9 @@ public class HitReactionReflexModule : IBiomechanicalReflex
         _forearmR = forearmR;
     }
 
-    public void RegisterHit(ActiveBone hitBone, Vector3 hitPoint, Vector3 impulse)
+    public void RegisterHit(IBoneState hitBone, Vector3 hitPoint, Vector3 impulse)
     {
-        if (!IsEnabled || hitBone == null || !GodotObject.IsInstanceValid(hitBone))
+        if (!IsEnabled || hitBone == null || !hitBone.IsValid)
         {
             return;
         }
@@ -78,7 +78,7 @@ public class HitReactionReflexModule : IBiomechanicalReflex
         if (_flinchTimer > 0.0f)
         {
             _flinchTimer -= delta;
-            if (_flinchBone != null && GodotObject.IsInstanceValid(_flinchBone))
+            if (_flinchBone != null && _flinchBone.IsValid)
             {
                 float recoverS = 1.0f - Mathf.Clamp(_flinchTimer / 0.40f, 0.0f, 1.0f);
                 _flinchBone.MuscleStrength = Mathf.Lerp(FlinchMuscleStrength, 1.0f, recoverS);

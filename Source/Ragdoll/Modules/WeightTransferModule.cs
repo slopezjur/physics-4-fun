@@ -41,9 +41,9 @@ public class WeightTransferModule : IBalanceStrategy
 
         // Lateral CoM error in the yaw-level frame drives double-support weight shifting
         float lateralComError = 0.0f;
-        ActiveBone? footL = context.FootL;
-        ActiveBone? footR = context.FootR;
-        if (footL != null && footR != null && GodotObject.IsInstanceValid(footL) && GodotObject.IsInstanceValid(footR))
+        IBoneState? footL = context.FootL;
+        IBoneState? footR = context.FootR;
+        if (footL != null && footR != null && footL.IsValid && footR.IsValid)
         {
             Vector3 supportCenter = (footL.GlobalPosition + footR.GlobalPosition) * 0.5f;
             Vector3 flatForward = -context.Pelvis.GlobalTransform.Basis.Z;
@@ -55,10 +55,10 @@ public class WeightTransferModule : IBalanceStrategy
 
         StepPhase stepPhase = _stepping.CurrentStepPhase;
         float stepProgress = _stepping.StepProgress;
-        ActiveBone? thighL = context.ThighL;
-        ActiveBone? thighR = context.ThighR;
-        ActiveBone? shinL = context.ShinL;
-        ActiveBone? shinR = context.ShinR;
+        IBoneState? thighL = context.ThighL;
+        IBoneState? thighR = context.ThighR;
+        IBoneState? shinL = context.ShinL;
+        IBoneState? shinR = context.ShinR;
         float delta = context.Delta;
 
         float targetShareL = 0.5f;
@@ -115,13 +115,13 @@ public class WeightTransferModule : IBalanceStrategy
             limbStrengthR = 1.0f + (CurrentWeightShareR - 0.5f) * 0.4f;
         }
 
-        if (thighL != null && shinL != null && GodotObject.IsInstanceValid(thighL) && GodotObject.IsInstanceValid(shinL))
+        if (thighL != null && shinL != null && thighL.IsValid && shinL.IsValid)
         {
             thighL.MuscleStrength = limbStrengthL;
             shinL.MuscleStrength = limbStrengthL;
         }
 
-        if (thighR != null && shinR != null && GodotObject.IsInstanceValid(thighR) && GodotObject.IsInstanceValid(shinR))
+        if (thighR != null && shinR != null && thighR.IsValid && shinR.IsValid)
         {
             thighR.MuscleStrength = limbStrengthR;
             shinR.MuscleStrength = limbStrengthR;

@@ -12,11 +12,11 @@ public class VestibularGazeModule : IBiomechanicalReflex
     public float HeadHorizonGain { get; set; } = 0.40f;
     public float HeadLookAheadGain { get; set; } = 0.15f;
 
-    private ActiveBone? _pelvis;
-    private ActiveBone? _chest;
-    private ActiveBone? _head;
+    private IBoneState? _pelvis;
+    private IBoneState? _chest;
+    private IBoneState? _head;
 
-    public void Initialize(ActiveBone pelvis, ActiveBone? chest, ActiveBone? head)
+    public void Initialize(IBoneState pelvis, IBoneState? chest, IBoneState? head)
     {
         _pelvis = pelvis;
         _chest = chest;
@@ -33,7 +33,7 @@ public class VestibularGazeModule : IBiomechanicalReflex
 
     public void Update(RagdollState state, StepPhase stepPhase, float delta)
     {
-        if (!IsEnabled || _head == null || !GodotObject.IsInstanceValid(_head) || _pelvis == null || !GodotObject.IsInstanceValid(_pelvis))
+        if (!IsEnabled || _head == null || !_head.IsValid || _pelvis == null || !_pelvis.IsValid)
         {
             return;
         }
@@ -63,7 +63,7 @@ public class VestibularGazeModule : IBiomechanicalReflex
             return;
         }
 
-        ActiveBone parent = (_chest != null && GodotObject.IsInstanceValid(_chest)) ? _chest : _pelvis;
+        IBoneState parent = (_chest != null && _chest.IsValid) ? _chest : _pelvis;
         Transform3D parentTransform = parent.GlobalTransform;
         Vector3 chestForward = -parentTransform.Basis.Z.Normalized(); // Godot forward is -Z
         Vector3 chestRight = parentTransform.Basis.X.Normalized();

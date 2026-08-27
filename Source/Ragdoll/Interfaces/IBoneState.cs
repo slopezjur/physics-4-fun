@@ -44,4 +44,28 @@ public interface IBoneState
 
     /// <summary>Whether this bone is currently resting on or touching world geometry.</summary>
     bool IsInContactWithWorld();
+
+    // --- what a balance module needs to ACT, not just observe -----------------------------------
+    //
+    // Added so `BalanceContext` can carry `IBoneState` instead of the concrete `ActiveBone`. Until
+    // it did, every balance strategy needed a live RigidBody3D in a running scene tree to be
+    // exercised at all - which is why the 121-line DynamicSteppingModule had no tests, and the
+    // reason FakeBone exists in the first place. The abstraction was here; the context never took
+    // it. Seven of the ten modules only ever read, and these three members are the entire write
+    // surface the other three use.
+    //
+    // Deliberately narrow. Anything an engine genuinely owns - raycasts through `GetWorld3D` - stays
+    // off this interface, because faking a physics query is not the same as faking bone state.
+
+    /// <summary>Muscle authority, 0 to 1. Weight transfer and the flinch reflex modulate it.</summary>
+    float MuscleStrength { get; set; }
+
+    /// <summary>
+    /// Pose offset composed on top of whatever the bone is otherwise tracking. The channel through
+    /// which the balance layer and the reflexes bias a limb without owning its target outright.
+    /// </summary>
+    Quaternion FeedForwardTargetOffset { get; set; }
+
+    /// <summary>Apply a world-space torque. Used by pelvis stabilisation and its reaction limbs.</summary>
+    void ApplyTorque(Vector3 torque);
 }

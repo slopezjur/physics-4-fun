@@ -36,6 +36,35 @@ internal sealed class FakeBone : IBoneState
 
     public bool IsInContactWithWorld() => InContact;
 
+    // --- write surface -------------------------------------------------------------------------
+    //
+    // Recorded rather than simulated. A balance module's whole output is what it does to its bones,
+    // so a fake that REMEMBERS the calls lets a test assert on the decision instead of on a physics
+    // outcome several frames later - which is the difference between a unit test and a rig.
+
+    public float MuscleStrength { get; set; } = 1.0f;
+
+    public Quaternion FeedForwardTargetOffset { get; set; } = Quaternion.Identity;
+
+    /// <summary>Every torque this bone was given, in order.</summary>
+    public List<Vector3> AppliedTorques { get; } = new();
+
+    /// <summary>Sum of all torques applied - usually what a test wants to check.</summary>
+    public Vector3 NetTorque
+    {
+        get
+        {
+            Vector3 total = Vector3.Zero;
+            foreach (Vector3 t in AppliedTorques)
+            {
+                total += t;
+            }
+            return total;
+        }
+    }
+
+    public void ApplyTorque(Vector3 torque) => AppliedTorques.Add(torque);
+
     /// <summary>Places the bone at a height with the given contact state, the two things get-up reasons about.</summary>
     public static FakeBone At(float y, bool planted = false, string name = "Fake")
         => new(name) { GlobalPosition = new Vector3(0.0f, y, 0.0f), InContact = planted };

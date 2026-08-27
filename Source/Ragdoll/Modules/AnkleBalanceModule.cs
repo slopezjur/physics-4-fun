@@ -40,14 +40,14 @@ public class AnkleBalanceModule : IBalanceStrategy
             return;
         }
 
-        ActiveBone? footL = context.FootL;
-        ActiveBone? footR = context.FootR;
+        IBoneState? footL = context.FootL;
+        IBoneState? footR = context.FootR;
         Vector3 centerOfMass = context.CenterOfMass;
         Vector3 centerOfMassVelocity = context.CenterOfMassVelocity;
         float strength = context.Strength;
         float delta = context.Delta;
 
-        if (footL == null || footR == null || !GodotObject.IsInstanceValid(footL) || !GodotObject.IsInstanceValid(footR))
+        if (footL == null || footR == null || !footL.IsValid || !footR.IsValid)
         {
             return;
         }
