@@ -26,23 +26,9 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import os
 import pathlib
-import re
-import shutil
-import subprocess
-import sys
 
-HERE = pathlib.Path(__file__).resolve().parent
-ISAAC3_ROOT = HERE.parent
-PROJECT_ROOT = ISAAC3_ROOT.parent
-SCENE = "res://Scenes/RL/Isaac3/Stand/IsaacStandCheckNewton.tscn"
-GODOT = pathlib.Path(
-    os.environ.get(
-        "P4F_GODOT",
-        r"D:\Programas\Godot_v4.7.1-stable_mono_win64\Godot_v4.7.1-stable_mono_win64_console.exe",
-    )
-)
+from godot_check import PROJECT_ROOT, add_common_args, measure, scene_path
 
 
 def parse_args() -> argparse.Namespace:
@@ -51,86 +37,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--current", default="", help="Checkpoint to beat. Empty = measure --new alone.")
     p.add_argument("--task", default="P4F-Dummy-Stand-Newton-v0")
     p.add_argument("--brain", default="balance", help="Artifact stem, from export.py's BRAIN map.")
-    p.add_argument(
-        "--authorities",
-        type=float,
-        nargs="+",
-        default=[0.20, 0.15, 0.10, 0.07, 0.05],
-        help="Action-scale ladder, tried high to low; the first that stands is the score.",
-    )
-    p.add_argument("--push", type=float, default=8.0, help="Push impulse for the tie-break, N.s. 0 skips.")
+    add_common_args(p)
     return p.parse_args()
 
-
-# --------------------------------------------------------------------------- godot
-
-def set_scene(authority: float, push: float) -> None:
-    """Rewrite only the two properties under test, leaving the rest of the scene alone.
-
-    **`newline="\\n"` is not optional on Windows.** A bare `write_text` applies universal-newline
-    translation and rewrites the WHOLE file as CRLF - including the `\\n` inside multi-line Label
-    strings, which Godot then renders as an extra line break. That is not a diff artefact: it
-    silently double-spaced every line of the TestChamber HUD, and the scene this function edits is
-    touched on every single rung of the authority ladder.
-    """
-    path = PROJECT_ROOT / SCENE.removeprefix("res://")
-    text = path.read_text(encoding="utf-8")
-    text = re.sub(r"ActionScaleOverride = [0-9.]+\n|PushImpulse = [0-9.]+\n|PushAtSeconds = [0-9.]+\n", "", text)
-    block = f"ActionScaleOverride = {authority}\n"
-    if push > 0.0:
-        block += f"PushImpulse = {push}\nPushAtSeconds = 4.0\n"
-    path.write_text(
-        text.replace("BalanceAssist = 1.0\n", f"BalanceAssist = 1.0\n{block}"),
-        encoding="utf-8", newline="\n",
-    )
-
-
-def stands() -> bool:
-    out = subprocess.run(
-        [str(GODOT), "--headless", "--path", str(PROJECT_ROOT), SCENE],
-        capture_output=True, text=True, errors="replace", timeout=180,
-    ).stdout
-    return "=> STANDING" in out
-
-
-def export(checkpoint: pathlib.Path, task: str) -> bool:
-    """Export and promote, so the Godot scene loads this checkpoint on its next run."""
-    env = dict(
-        os.environ,
-        PYTHONUTF8="1",
-        PYTHONIOENCODING="utf-8",
-        P4F_XPBD_ITERATIONS=os.environ.get("P4F_XPBD_ITERATIONS", "2"),
-    )
-    done = subprocess.run(
-        [sys.executable, str(HERE / "export.py"), "--task", task,
-         "--checkpoint", str(checkpoint), "--promote"],
-        cwd=str(ISAAC3_ROOT), env=env, capture_output=True, text=True, errors="replace", timeout=900,
-    )
-    if done.returncode != 0:
-        print(f"    export failed: {done.stdout[-300:]}")
-    return done.returncode == 0
-
-
-def measure(checkpoint: pathlib.Path, args: argparse.Namespace) -> tuple[float, float]:
-    """(highest authority that stands, push survived there). (0, 0) if it never stands."""
-    if not export(checkpoint, args.task):
-        return 0.0, 0.0
-
-    best = 0.0
-    for authority in sorted(args.authorities, reverse=True):
-        set_scene(authority, push=0.0)
-        if stands():
-            best = authority
-            break
-
-    held = 0.0
-    if best > 0.0 and args.push > 0.0:
-        set_scene(best, push=args.push)
-        held = args.push if stands() else 0.0
-    return best, held
-
-
-# --------------------------------------------------------------------------- safety
 
 @contextlib.contextmanager
 def models_restored(brain: str):
@@ -160,8 +69,8 @@ def main() -> None:
     new = pathlib.Path(args.new).resolve()
     current = pathlib.Path(args.current).resolve() if args.current else None
 
-    scene_path = PROJECT_ROOT / SCENE.removeprefix("res://")
-    scene_backup = scene_path.read_text(encoding="utf-8")
+    scene = scene_path()
+    scene_backup = scene.read_text(encoding="utf-8")
 
     rows: list[tuple[str, pathlib.Path, float, float]] = []
     try:
@@ -170,11 +79,11 @@ def main() -> None:
                 if checkpoint is None:
                     continue
                 print(f"  measuring {label}: {checkpoint.parent.name}/{checkpoint.name}")
-                authority, push = measure(checkpoint, args)
+                authority, push = measure(checkpoint, args.task, args.authorities, args.push)
                 rows.append((label, checkpoint, authority, push))
                 print(f"    authority {authority:.2f}" + (f", survives {push:.0f} N.s" if push else ""))
     finally:
-        scene_path.write_text(scene_backup, encoding="utf-8")
+        scene.write_text(scene_backup, encoding="utf-8", newline="\n")
 
     print(f"\n  {'':<9} {'authority':>9} {'push':>7}   checkpoint")
     for label, checkpoint, authority, push in rows:
