@@ -54,7 +54,7 @@ $Python = Resolve-Isaac3Python
 # All four are registered by p4f_newton/tasks/__init__.py. See $TaskMap below for the ids.
 #
 # Scripts also accept -Task to override this for one command without editing the file.
-$Task = "stand"
+$Task = "perturb"
 
 # --- Training scale ----------------------------------------------------------
 # MEASURED on this machine (RTX 4080 SUPER 16 GB, 32 GB system), Stand under XPBD at 2 solver
@@ -406,6 +406,17 @@ function Get-Isaac3Steps {
     return $Iteration * $Info.NumEnvs * $Info.StepsPerEnv
 }
 
+# `2026-08-27_15-06-42_night10` -> `20260827-150642_night10`.
+#
+# The date has to stay. It was being stripped to save width, which was fine while every run was from
+# the same afternoon and actively misleading the moment a lineage spanned midnight: two runs a day
+# apart rendered as `15-06-42` and `01-07-35` and sorted next to each other looking like one
+# session. Compacting the separators buys back most of the width the date costs.
+function Format-Isaac3Run {
+    param([string] $Name)
+    return $Name -replace '^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})', '$1$2$3-$4$5$6'
+}
+
 # Compact, because the numbers reach billions and a menu column cannot carry 5,485,363,200.
 #
 # Formatted against InvariantCulture deliberately. `-f` uses the CURRENT culture, so on a Spanish
@@ -609,7 +620,7 @@ function Select-Isaac3Checkpoint {
     # Alignment in a .NET composite format is a SIGNED INTEGER - {2,6} right, {2,-6} left. There is
     # no {2,>6}: it throws FormatError at render time, which killed the header row while every data
     # row below carried on printing. Leading width is 4, matching the data rows' "{0,2}) ".
-    Write-Host ("    {0,-26} {1,-22} {2,6} {3,7} {4,6}  {5,-8} {6,6} {7,-7}" -f `
+    Write-Host ("    {0,-26} {1,-24} {2,6} {3,7} {4,6}  {5,-8} {6,6} {7,-7}" -f `
                 "lineage", "run", "iter", "steps", "envs", "task", "scale", "std") -ForegroundColor DarkGray
     # Max timestamp among SAME-TASK rows, taken BEFORE the loop - the list is sorted promoted-first,
     # so "the first compatible entry" is no longer the newest one.
@@ -622,9 +633,9 @@ function Select-Isaac3Checkpoint {
 
     for ($i = 0; $i -lt $options.Count; $i++) {
         $o = $options[$i]
-        $label = "{0,2}) {1,-26} {2,-22} {3,6} {4,7} {5,6}  {6,-8} {7,6} {8,-7}" -f `
+        $label = "{0,2}) {1,-26} {2,-24} {3,6} {4,7} {5,6}  {6,-8} {7,6} {8,-7}" -f `
                  ($i + 1), ($o.Experiment -replace '^p4f_newton_', ''),
-                 ($o.Run -replace '^\d{4}-\d{2}-\d{2}_', ''), $o.Iteration,
+                 (Format-Isaac3Run $o.Run), $o.Iteration,
                  (Format-Isaac3Steps $o.Steps), $o.NumEnvs,
                  $o.Task, $o.ActionScale, $o.StdType
         # `newest` is only worth flagging when it is NOT the promoted row - otherwise the menu

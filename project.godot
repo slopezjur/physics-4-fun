@@ -37,6 +37,8 @@ enabled=PackedStringArray("res://addons/godot_rl_agents/plugin.cfg")
 
 common/physics_ticks_per_second=120
 3d/physics_engine="Jolt Physics"
+jolt_physics_3d/simulation/velocity_steps=30
+jolt_physics_3d/simulation/position_steps=16
 
 [rendering]
 

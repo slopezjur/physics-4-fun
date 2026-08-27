@@ -1,9 +1,9 @@
 {
-  "generated": "2026-08-27T13:25:19+00:00",
-  "source_checkpoint": "D:\\Proyectos\\Godot\\physics-4-fun\\isaac_lab_3\\logs\\rsl_rl\\p4f_newton_stand_assist\\2026-08-27_14-12-16_night06\\model_3087.pt",
+  "generated": "2026-08-27T23:38:13+00:00",
+  "source_checkpoint": "D:\\Proyectos\\Godot\\physics-4-fun\\isaac_lab_3\\logs\\rsl_rl\\p4f_newton_honest_s8\\2026-08-28_01-07-35\\model_833.pt",
   "task": "P4F-Dummy-Stand-Newton-v0",
   "engine": "isaac-lab-3 / newton / xpbd",
-  "solver_iterations": 2,
+  "solver_iterations": 8,
   "observation_size": 143,
   "action_size": 36,
   "action_scale": 0.15,

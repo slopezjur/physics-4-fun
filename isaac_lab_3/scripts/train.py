@@ -103,6 +103,7 @@ def main() -> None:
     args = parse_args()
 
     from isaaclab_tasks.utils import load_cfg_from_registry
+    from run_conditions import apply_overrides, restore
 
     env_cfg = load_cfg_from_registry(args.task, "env_cfg_entry_point")
     agent_cfg = load_cfg_from_registry(args.task, "rsl_rl_cfg_entry_point")
@@ -117,24 +118,12 @@ def main() -> None:
         agent_cfg.max_iterations = args.iterations
     if args.experiment:
         agent_cfg.experiment_name = args.experiment
-    for pair in args.set:
-        if "=" not in pair:
-            raise SystemExit(f"--set expects KEY=VALUE, got '{pair}'")
-        key, _, raw = pair.partition("=")
-        key, raw = key.strip(), raw.strip()
-        if not hasattr(env_cfg, key):
-            raise SystemExit(f"--set '{key}' is not a field of this task's env cfg.")
-        current = getattr(env_cfg, key)
-        if isinstance(current, bool):
-            value = raw.lower() in ("1", "true", "yes", "on")
-        elif isinstance(current, int) and not isinstance(current, bool):
-            value = int(raw)
-        elif isinstance(current, float):
-            value = float(raw)
-        else:
-            value = raw
-        setattr(env_cfg, key, value)
-        print(f"[train] override {key} {current} -> {value}")
+    # A resume continues an experiment, so it must continue that experiment's PLANT. Without this
+    # the reaction, the solver iterations and the action scale all revert to task defaults and the
+    # run silently trains a different body than the checkpoint came from.
+    if args.resume:
+        restore(env_cfg, args.resume, label="train")
+    apply_overrides(env_cfg, args.set, label="train")
     if args.push >= 0.0:
         env_cfg.push_velocity = args.push
         env_cfg.push_ang_velocity = args.push * (5.0 / 3.0)

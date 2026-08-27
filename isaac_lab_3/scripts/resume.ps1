@@ -32,7 +32,19 @@ param(
     [switch] $All,
     # After training, measure the new checkpoint against the one currently in Godot and offer to
     # promote it. Opt-in on purpose - see the block at the end of this file.
-    [switch] $Promote
+    [switch] $Promote,
+    # XPBD solver iterations for this run only. **Part of the trained dynamics.** Continuing a
+    # lineage trained at 8 with config.ps1 still saying 2 would silently change the body underneath
+    # the policy - the same class of bug as action_scale reverting on resume. 0 keeps the config.
+    [int] $Solver = 0,
+    # Override env-cfg fields, e.g. -Set balance_reaction=True,balance_max_torque=300.
+    #
+    # NEEDED because the carry-forward below only restores action_scale and action_rate_limit from
+    # the source run. balance_reaction and balance_max_torque are equally part of the plant, and a
+    # resume that drops them trains a DIFFERENT body than the checkpoint came from - silently. The
+    # proper fix is to widen the carry-forward to every trained condition, as play.py already does;
+    # until then pass them here explicitly.
+    [string[]] $Set = @()
 )
 # Captured BEFORE dot-sourcing: config.ps1 defines $Envs, $MaxMinutes, $Task and $Experiment itself,
 # so reading the parameters afterwards returns the config values and every override is lost.
@@ -89,6 +101,7 @@ if ($sameTask) {
     $mode = "init_from (weights only, optimizer dropped, exploration noise reset)"
 }
 
+if ($Solver -gt 0) { $SolverIterations = $Solver }
 $env:P4F_XPBD_ITERATIONS = "$SolverIterations"
 
 $cmd = @("$PSScriptRoot/train.py", '--task', $TaskId, '--num_envs', $Envs,
@@ -126,6 +139,7 @@ if ((Test-InvariantNumber $sourceScale ([ref] $scale)) -and $scale -gt 0.0) {
 if ((Test-InvariantNumber $sourceLimit ([ref] $limit)) -and $limit -ge 0.0) {
     $cmd += @('--action_rate_limit', $sourceLimit)
 }
+foreach ($pair in $Set) { $cmd += @('--set', $pair) }
 
 $budget = if ($MaxMinutes -gt 0) { "$MaxMinutes min" } else { "no time cap" }
 Write-Host ""

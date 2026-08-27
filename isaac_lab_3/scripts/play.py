@@ -27,6 +27,7 @@ import torch
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 import p4f_newton.tasks  # noqa: F401,E402  registers the tasks with gymnasium
+from run_conditions import apply_overrides, restore  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -104,88 +105,6 @@ def attach_viewer(env_cfg, which: str) -> None:
         env_cfg.sim.visualizer_cfgs = [ViserVisualizerCfg()]
 
 
-# Settings that change what the policy IS, as opposed to how the run is presented. Anything here
-# read from the task registry instead of the checkpoint's own run makes playback a different
-# experiment from the training it is supposed to be replaying.
-#
-# `balance_assist` is the one that made this necessary. It defaults to 0.0 through
-# `P4F_BALANCE_ASSIST`, while the whole `stand_assist` lineage trained at 1.0 - an external
-# stabilising wrench the policy learned to lean on. Replaying without it put a checkpoint that
-# holds 75% standing at 0% and on the floor in under two seconds, and it looked exactly like a
-# broken brain rather than a broken harness.
-TRAINED_CONDITIONS = (
-    "action_scale",
-    "action_rate_limit",
-    "obs_joint_vel_clip",
-    "balance_assist",
-    "balance_gain",
-    "balance_damping",
-    "balance_max_torque",
-    "balance_reaction",
-    "enforce_effort_limit",
-)
-
-
-def restore_trained_conditions(env_cfg, checkpoint: str) -> None:
-    """Re-apply the checkpoint's own `params/env.yaml` over the task defaults.
-
-    The same `run_config` idea `export.py` uses to build an honest contract - a policy is only
-    meaningful against the plant it was trained on, and the registry defaults are not that plant.
-    """
-    run = pathlib.Path(checkpoint).resolve().parent
-    env_yaml = run / "params" / "env.yaml"
-    if not env_yaml.is_file():
-        print(f"[play] WARNING no {env_yaml}; playing back against TASK DEFAULTS, which may not be "
-              "what this checkpoint was trained on.")
-        return
-
-    import yaml
-
-    with open(env_yaml, encoding="utf-8") as fh:
-        trained = yaml.unsafe_load(fh) or {}
-
-    changed = []
-    for key in TRAINED_CONDITIONS:
-        if key not in trained:
-            continue
-        was = getattr(env_cfg, key, None)
-        now = trained[key]
-        if was != now:
-            changed.append(f"{key} {was} -> {now}")
-        setattr(env_cfg, key, now)
-
-    if changed:
-        print("[play] restored the trained conditions: " + ", ".join(changed))
-
-
-def apply_overrides(env_cfg, pairs) -> None:
-    """Apply `--set key=value` on top of whatever the trained conditions established.
-
-    Values are parsed against the EXISTING field's type, so `balance_reaction=True` sets a bool and
-    `action_scale=0.2` a float, and a typo in the key raises rather than being silently ignored -
-    a mis-set condition that reads as "no effect" is how a measurement quietly becomes fiction.
-    """
-    for pair in pairs:
-        if "=" not in pair:
-            raise SystemExit(f"--set expects KEY=VALUE, got '{pair}'")
-        key, _, raw = pair.partition("=")
-        key, raw = key.strip(), raw.strip()
-        if not hasattr(env_cfg, key):
-            raise SystemExit(f"--set '{key}' is not a field of this task's env cfg.")
-
-        current = getattr(env_cfg, key)
-        if isinstance(current, bool):
-            value = raw.lower() in ("1", "true", "yes", "on")
-        elif isinstance(current, int) and not isinstance(current, bool):
-            value = int(raw)
-        elif isinstance(current, float):
-            value = float(raw)
-        else:
-            value = raw
-        setattr(env_cfg, key, value)
-        print(f"[play] override {key} {current} -> {value}")
-
-
 def find_viewer(base):
     """The live `NewtonViewerGL`, or None when running headless or on another backend.
 
@@ -216,8 +135,8 @@ def main() -> None:
     env_cfg.sim.device = args.device
     env_cfg.playback = True  # measure the policy, not the observation noise
     if args.checkpoint and not args.task_defaults:
-        restore_trained_conditions(env_cfg, args.checkpoint)
-    apply_overrides(env_cfg, args.set)
+        restore(env_cfg, args.checkpoint, label="play")
+    apply_overrides(env_cfg, args.set, label="play")
     attach_viewer(env_cfg, args.viewer)
 
     if not args.terminate:
@@ -236,7 +155,18 @@ def main() -> None:
         agent_cfg = handle_deprecated_rsl_rl_cfg(agent_cfg, metadata.version("rsl-rl-lib"))
         wrapped = RslRlVecEnvWrapper(env, clip_actions=getattr(agent_cfg, "clip_actions", None))
         runner = OnPolicyRunner(wrapped, agent_cfg.to_dict(), log_dir=None, device=args.device)
-        runner.load(args.checkpoint)
+        # `strict=False` because the checkpoint and the TASK may parameterise the policy's std
+        # differently - `std_param` (scalar) against `log_std_param` (log) - and playback does not
+        # use it at all: `get_inference_policy` drives the distribution's MEAN. Watching a Stand
+        # brain inside the Perturb env is a normal thing to want, and those two tasks happen to
+        # disagree on that one key, so strict loading refused a checkpoint that is fine.
+        #
+        # Safe because strict=False only tolerates missing or unexpected KEYS. A genuinely wrong
+        # checkpoint - different observation size, different layer widths - still raises on the
+        # shape mismatch, which is the check that actually matters here.
+        #
+        # train.py:180 does the same for --init_from, for the same reason.
+        runner.load(args.checkpoint, strict=False)
         policy = runner.get_inference_policy(device=args.device)
         env = wrapped
         print(f"[play] policy: {args.checkpoint}")
