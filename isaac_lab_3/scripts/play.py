@@ -50,6 +50,16 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seconds", type=float, default=0.0, help="0 runs until the window is closed.")
     p.add_argument("--device", type=str, default="cuda:0")
     p.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Override one env-cfg field AFTER the checkpoint's own conditions are restored, e.g. "
+        "--set balance_reaction=True. For asking what a policy does OUTSIDE the plant it trained "
+        "on, which is the whole sim-to-sim question - the answer is meaningless unless everything "
+        "else still matches, so this deliberately overrides one field rather than all of them.",
+    )
+    p.add_argument(
         "--task_defaults",
         action="store_true",
         help="Ignore the checkpoint's own params/env.yaml and use the task registry defaults. "
@@ -148,6 +158,34 @@ def restore_trained_conditions(env_cfg, checkpoint: str) -> None:
         print("[play] restored the trained conditions: " + ", ".join(changed))
 
 
+def apply_overrides(env_cfg, pairs) -> None:
+    """Apply `--set key=value` on top of whatever the trained conditions established.
+
+    Values are parsed against the EXISTING field's type, so `balance_reaction=True` sets a bool and
+    `action_scale=0.2` a float, and a typo in the key raises rather than being silently ignored -
+    a mis-set condition that reads as "no effect" is how a measurement quietly becomes fiction.
+    """
+    for pair in pairs:
+        if "=" not in pair:
+            raise SystemExit(f"--set expects KEY=VALUE, got '{pair}'")
+        key, _, raw = pair.partition("=")
+        key, raw = key.strip(), raw.strip()
+        if not hasattr(env_cfg, key):
+            raise SystemExit(f"--set '{key}' is not a field of this task's env cfg.")
+
+        current = getattr(env_cfg, key)
+        if isinstance(current, bool):
+            value = raw.lower() in ("1", "true", "yes", "on")
+        elif isinstance(current, int) and not isinstance(current, bool):
+            value = int(raw)
+        elif isinstance(current, float):
+            value = float(raw)
+        else:
+            value = raw
+        setattr(env_cfg, key, value)
+        print(f"[play] override {key} {current} -> {value}")
+
+
 def find_viewer(base):
     """The live `NewtonViewerGL`, or None when running headless or on another backend.
 
@@ -179,6 +217,7 @@ def main() -> None:
     env_cfg.playback = True  # measure the policy, not the observation noise
     if args.checkpoint and not args.task_defaults:
         restore_trained_conditions(env_cfg, args.checkpoint)
+    apply_overrides(env_cfg, args.set)
     attach_viewer(env_cfg, args.viewer)
 
     if not args.terminate:

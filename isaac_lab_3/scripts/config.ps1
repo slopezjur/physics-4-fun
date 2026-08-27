@@ -64,6 +64,8 @@ $Task = "stand"
 #       4096	  222700   <- the default
 #		8192
 #		16384
+#		24576
+#		32768
 #
 # For comparison the 2.3.2 PhysX track measured 110,000 at 4,096 on the URDF rig and about 204,000
 # at 8,192 on the D6 rig. XPBD on the D6 rig is roughly 2x the PhysX figure at the same env count,
@@ -71,7 +73,7 @@ $Task = "stand"
 #
 # Re-measure before assuming this transfers to another task: the 2.3.2 config records that a table
 # taken from the wrong task is exactly how its own env count got set wrong once.
-$Envs = 16384
+$Envs = 24576
 
 # 0 = use the task's own max_iterations (p4f_newton/tasks/<task>/agents/rsl_rl_ppo_cfg.py).
 $Iterations = 0
