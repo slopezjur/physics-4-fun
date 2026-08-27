@@ -19,6 +19,21 @@ public partial class HumanoidRagdoll : Node3D
     [Export] public ActiveBone? Head { get; set; }
     [Export] public BalanceController? Balance { get; set; }
 
+    /// <summary>
+    /// Skip the procedural joint-target layer while leaving everything else running.
+    ///
+    /// <para>Distinct from entering <see cref="RagdollState.ReinforcementLearning"/>, which also
+    /// switches off the balance strategies - they self-gate to Balanced/Stumbling, so the RL state
+    /// leaves the body with no root stabilisation at all. That is fine for a policy trained to be
+    /// the sole controller of a passively stable body, and wrong for this one: Godot's dummy cannot
+    /// hold the rest pose without an external stabilising wrench, while Isaac's nearly can.</para>
+    ///
+    /// <para>Setting this in the Balanced state gives the split that actually matches: the POLICY
+    /// owns the joint targets, and Godot's balance layer owns pelvis stabilisation, ankle and hip
+    /// strategies. See IsaacPolicyDriver.BalanceAssist.</para>
+    /// </summary>
+    public bool SuppressProceduralPose { get; set; }
+
     [ExportGroup("Configuration")]
     [Export] public Godot.Collections.Dictionary<int, float> StateStiffnessMap { get; set; } = new()
     {
@@ -480,7 +495,7 @@ public partial class HumanoidRagdoll : Node3D
         // The RL dummy still uses the shared body (ActiveBone muscles + joint limits); it is only
         // the procedural brain that is disconnected. Balance/state-machine/debug-input already
         // gate themselves off for this state - this was the last remaining coupling.
-        if (CurrentState == RagdollState.ReinforcementLearning)
+        if (CurrentState == RagdollState.ReinforcementLearning || SuppressProceduralPose)
         {
             return;
         }

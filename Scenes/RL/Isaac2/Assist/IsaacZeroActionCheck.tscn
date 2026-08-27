@@ -1,0 +1,11 @@
+[gd_scene load_steps=2 format=3 uid="uid://ci1isaaczerocheck"]
+
+[ext_resource type="Script" path="res://Source/RL/Isaac/IsaacArena.cs" id="1_arena"]
+
+[node name="IsaacZeroActionCheck" type="Node3D"]
+script = ExtResource("1_arena")
+PolicyPath = "res://isaac_lab/exported/stand_policy.onnx"
+AutoQuitSeconds = 8.0
+ReportInterval = 1.0
+PolicyDelaySeconds = 2.0
+ZeroAction = true

@@ -34,8 +34,9 @@ not merely degrade, it will fall over.
 
 ## 2. Action vector — 36 floats
 
-Order is `dummy_rig.json → actuated_joints`, which is
-`RagdollRLBridge.ControlledBoneNames` × `(x, y, z)`:
+Order is `dummy_rig.json → actuated_joints`, and **nothing may restate it by hand** — read the
+list. `stand_env.py` resolves the action tensor through
+`find_joints(ACTUATED_JOINTS, preserve_order=True)`, so that list *is* the definition.
 
 ```
 index 3*i + 0  ->  <bone_i>_rx     (Godot local X, lateral / pitch)
@@ -43,14 +44,20 @@ index 3*i + 1  ->  <bone_i>_ry     (Godot local Y, vertical / yaw)
 index 3*i + 2  ->  <bone_i>_rz     (Godot local Z, forward / roll)
 ```
 
-with bones in order:
+with bones in the URDF's **tree order**:
 
 ```
-0 Spine        1 Chest
-2 UpperArm_L   3 Forearm_L    4 UpperArm_R   5 Forearm_R
-6 Thigh_L      7 Shin_L       8 Foot_L
-9 Thigh_R     10 Shin_R      11 Foot_R
+0 Spine        1 Thigh_L      2 Thigh_R      3 Chest
+4 Shin_L       5 Shin_R       6 UpperArm_L   7 UpperArm_R
+8 Foot_L       9 Foot_R      10 Forearm_L   11 Forearm_R
 ```
+
+> **This page previously published `ControlledBoneNames` order** — Spine, Chest, UpperArm_L,
+> Forearm_L, … — which is not what the generator produces. `tools/tscn_to_urdf.py` appends to
+> `actuated_joints` inside its tree-order emission loop, so only index 0 coincides between the two
+> orderings. A consumer implementing the old table would have sent Chest commands to `Thigh_L` and
+> shoulder commands to `Foot_R`: a total scramble, and a silent one — the dummy simply flails.
+> Trained policies were never affected, because Isaac read the list rather than this page.
 
 Each value is in `[-1, 1]` and maps onto that specific axis's own limit as an absolute target,
 **piecewise-linear about the rest pose**:
@@ -84,14 +91,17 @@ scale 1.0, the policy plateaued at 48-step episodes while a zero-action policy f
 survives 168; acting was worse than doing nothing. The far end of each joint's range is still
 reachable, just over several steps rather than one.
 
-> **This differs from `JointLimitedActionSpace`, and Godot must be changed to match.** That class
-> maps affinely across the whole range, `target = lower + (a+1)/2 * (upper - lower)`, which puts
-> `a = 0` at the *midpoint of the limits* rather than at the rest pose. For the knee (`[-2.6, 0.1]`)
-> the midpoint is −1.25 rad, so a freshly initialised policy — which outputs approximately zero —
-> commands a deep crouch from the first step. Measured in Isaac before the change: mean episode
-> length 22 steps out of 480, a 0.37 s collapse, on every episode. The property that motivated
-> per-axis scaling in the first place is preserved exactly (the full `[-1, 1]` maps onto the
-> reachable range of that axis, nothing wasted past a hard stop); only the zero point moves.
+> **How this relates to `JointLimitedActionSpace`.** That class already splits at zero — `Scale()`
+> returns `a >= 0 ? a * upper : -a * lower`, and its own comment gives the reason: "action 0 is
+> always the REST pose". So the piecewise shape matches; the deltas are the missing `ACTION_SCALE`
+> factor and the roll-axis sign below.
+>
+> An earlier revision of this page claimed that class maps affinely across the whole range,
+> `target = lower + (a+1)/2 * (upper - lower)`, and had to be rewritten. That was a description of
+> the *Isaac* mapping before it was fixed, not of the Godot code. The measurement it cites is real
+> and worth keeping: with `a = 0` at the midpoint of the limits, the knee (`[-2.6, 0.1]`) sits at
+> −1.25 rad, so a freshly initialised policy commands a deep crouch from the first step — mean
+> episode length 22 of 480, a 0.37 s collapse, every episode.
 
 `lower`/`upper` per joint are in `dummy_rig.json`. They are the Godot limits, so Godot should use
 its own live joint limits and get the same numbers; if the two disagree, the scene changed and the
@@ -113,8 +123,30 @@ Isaac is Z-up, Godot is Y-up. Positions map `urdf = (-godot.z, godot.x, godot.y)
 
 The converter asserts the shoulder and hip roll limits stay mirror-symmetric across L/R after
 conversion, because that asymmetry is the only property in the rig that catches a sign slip.
-**Godot does not need to apply this mapping to actions** — it commands its own local axes directly,
-and the mapping was already applied when the URDF was built.
+
+**Godot MUST negate the roll (z) component, in both directions.**
+
+```
+isaac_angle(<bone>_rz)  =  -godot_euler_z(<bone>)
+godot_euler_z(<bone>)   =  -isaac_angle(<bone>_rz)
+```
+
+`x` and `y` need no sign change: URDF Y is Godot X and URDF Z is Godot Y, both in the same sense.
+
+The reason is that `AXIS_MAP["z"]` emits the URDF axis as `+X` with `flip=True`, and `flip` negates
+only the **limit pair**, not the axis vector. URDF `+X` is Godot `−Z` (from `to_urdf`, which maps
+`godot (x,y,z) → (−z, x, y)`), so a positive rotation about the URDF joint axis is a negative
+rotation about Godot's local Z.
+
+Confirmed against the rig: `UpperArm_L` angular limit z is `[−0.5, +2.5]` in `ActiveRagdoll.tscn`
+and `[−2.5, +0.5]` in `dummy_rig.json` — exactly `(−upper, −lower)`.
+
+> **This page previously stated the opposite** — that "Godot does not need to apply this mapping to
+> actions". It does. Without the negation, action `a = +1` on `UpperArm_L_rz` commands `+0.2 rad`
+> about Godot `+Z` where Isaac meant `−0.2 rad`, and every roll axis in the body — both shoulders,
+> both hips, the spine and chest — is mirrored. The dummy splays outward where the policy learned
+> to pull in. Like the ordering defect above, this never touched training; Isaac worked in its own
+> axes throughout.
 
 ---
 
@@ -126,7 +158,7 @@ and the mapping was already applied when the URDF was built.
 | `[3:6]` | 3 | Root linear velocity, yaw-frame (heading-relative), m/s |
 | `[6:9]` | 3 | Root angular velocity, pelvis frame, rad/s |
 | `[9:10]` | 1 | Pelvis height above ground, m (rest = 0.82) |
-| `[10:55]` | 45 | Joint position − default, rad, **all 45 DOF** in `dummy_rig.json → joints` order |
+| `[10:55]` | 45 | Joint position − default, rad, **all 45 DOF** in `dummy_rig.json → physx_dof_order` |
 | `[55:100]` | 45 | Joint velocity, rad/s, same order |
 | `[100:104]` | 4 | Contact flags: `Hand_L, Hand_R, Foot_L, Foot_R` — 1.0 if ‖force‖ > 1 N |
 | `[104:140]` | 36 | Previous action, as sent (pre-scaling, in `[-1, 1]`) |
@@ -139,6 +171,13 @@ to mean anything to a trained network, so the slots must exist before walking us
 them later orphans every Stand checkpoint. This is the same argument `BodyStateObservation` makes
 for its reserved 7-float joystick block, applied to this layout.
 
+**`physx_dof_order` is not the same as `dummy_rig.json → joints` order.** The environments build
+these two slices from raw `data.joint_pos` / `data.joint_vel`, which are indexed in the order PhysX
+assigned at USD import — not the order the URDF declares. `convert_asset.py` records it into the
+rig contract from the live articulation, because only an imported articulation knows it. This page
+previously pointed at the declaration order, which is a coincidence at best; read
+`physx_dof_order`, and if the key is absent, re-run `convert.ps1`.
+
 Note this is **not** the Godot 113-dim `BodyStateObservation` layout. That width is frozen for
 reasons internal to the Godot lineage (checkpoint compatibility, the reserved 7-float joystick
 block) and carries root-relative bone quaternions rather than joint angles — a representation that
@@ -147,9 +186,22 @@ therefore implement this layout to consume the policy. All of it is available on
 joint angles come from the same `GetJointAngularLimits` / bone-local decomposition the action path
 already uses in reverse.
 
-Velocities and gravity are expressed in **Godot's own axes**, not Isaac's — the policy was trained
-on quantities computed in the pelvis frame, and that frame is whatever the engine calls it. The
-only thing that must match is *which physical quantity* sits in each slot.
+Velocities and gravity are pelvis-frame quantities, and Godot **must remap their components** with
+the same `to_urdf` permutation the positions use:
+
+```
+isaac = (-godot.z, godot.x, godot.y)
+```
+
+Applies to slices `[0:3]`, `[3:6]` and `[6:9]`. The check is the rest pose: Godot's world gravity
+`(0, -1, 0)` in an upright pelvis frame is `(0, -1, 0)`, which remaps to `(0, 0, -1)` — exactly the
+upright value this table specifies. Emitted raw it would be `(0, -1, 0)`, putting gravity in the
+slot the policy learned to read as a *lateral* component.
+
+> **This page previously said the opposite** — that these are "expressed in Godot's own axes, not
+> Isaac's" and that only the physical quantity per slot needs to match. That is wrong. Isaac's
+> pelvis frame is X-forward/Y-left/Z-up and Godot's is X-left/Y-up/Z-back; they are different bases
+> on the same body, so the same physical vector has different components in each.
 
 ---
 

@@ -16,8 +16,8 @@
 #
 # The replacement is a feature-tagged project setting. project.godot declares both:
 #
-#     run/main_scene="res://Scenes/RL/Upright/RagdollPerturbationArena.tscn"
-#     run/main_scene.stand="res://Scenes/RL/Upright/RagdollStandTraining.tscn"
+#     run/main_scene="res://Scenes/RL/Jolt/Upright/RagdollPerturbationArena.tscn"
+#     run/main_scene.stand="res://Scenes/RL/Jolt/Upright/RagdollStandTraining.tscn"
 #
 # and export_presets.cfg sets custom_features="training". Godot resolves "<setting>.<feature>"
 # against the active feature tags, so the editor boots the Arena and the exported build boots the

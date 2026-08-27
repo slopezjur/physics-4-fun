@@ -154,7 +154,7 @@ $ProjectPath = (Resolve-Path "$PSScriptRoot/../..").Path
 if ($Task -eq "perturbation") {
     $ExportPreset = "Windows Perturbation"
     $BuildName    = "RagdollPerturbationTraining.exe"
-    $ScenePath    = "res://Scenes/RL/Upright/RagdollPerturbationTraining.tscn"
+    $ScenePath    = "res://Scenes/RL/Jolt/Upright/RagdollPerturbationTraining.tscn"
 } elseif ($Task -eq "getup") {
     # Must match export_presets.cfg EXACTLY. It read "Windows Get Up" against a preset actually
     # named "Windows GetUp", so export.ps1's $FeatureTag lookup returned $null and the getup build
@@ -162,21 +162,31 @@ if ($Task -eq "perturbation") {
     # than the get-up scene, with nothing in the log to say so.
     $ExportPreset = "Windows GetUp"
     $BuildName    = "RagdollGetUpTraining.exe"
-    $ScenePath    = "res://Scenes/RL/Upright/RagdollGetUpTraining.tscn"
+    $ScenePath    = "res://Scenes/RL/Jolt/Upright/RagdollGetUpTraining.tscn"
 } elseif ($Task -eq "upright") {
     $ExportPreset = "Windows Upright"
     $BuildName    = "RagdollUprightTraining.exe"
-    $ScenePath    = "res://Scenes/RL/Upright/RagdollUprightTraining.tscn"
+    $ScenePath    = "res://Scenes/RL/Jolt/Upright/RagdollUprightTraining.tscn"
 } elseif ($Task -eq "stand") {
     $ExportPreset = "Windows Stand"
     $BuildName    = "RagdollStandTraining.exe"
-    $ScenePath    = "res://Scenes/RL/Upright/RagdollStandTraining.tscn"
+    $ScenePath    = "res://Scenes/RL/Jolt/Upright/RagdollStandTraining.tscn"
+} elseif ($Task -eq "isaacstand") {
+    # Stand, but trained against the ISAAC observation/action contract - 143 obs, 36 actions at
+    # 60 Hz - instead of this track's native 113 at 15 Hz. See RagdollRLBridge.UseIsaacContract.
+    #
+    # Exists to answer whether this trainer can learn at all under that contract, which is the
+    # precondition for fine-tuning an Isaac-pretrained policy here. Nothing is transplanted yet:
+    # this run starts from scratch on purpose, so its curve is the baseline any transplant has to beat.
+    $ExportPreset = "Windows IsaacStand"
+    $BuildName    = "RagdollIsaacStandTraining.exe"
+    $ScenePath    = "res://Scenes/RL/Jolt/Upright/RagdollIsaacStandTraining.tscn"
 } elseif ($Task -eq "walk") {
     $ExportPreset = "Windows Walk"
     $BuildName    = "RagdollWalkTraining.exe"
-    $ScenePath    = "res://Scenes/RL/Locomotion/RagdollWalkTraining.tscn"
+    $ScenePath    = "res://Scenes/RL/Jolt/Locomotion/RagdollWalkTraining.tscn"
 } else {
-    throw "Unknown `$Task '$Task'. Use 'stand', 'getup', 'upright', 'perturbation' or 'walk'."
+    throw "Unknown `$Task '$Task'. Use 'stand', 'isaacstand', 'getup', 'upright', 'perturbation' or 'walk'."
 }
 
 # There is deliberately no "stand_multiple" / "walk_multiple" task. Those existed when running N

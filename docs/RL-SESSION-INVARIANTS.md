@@ -47,7 +47,39 @@ A policy trained against broken dynamics learns to exploit the break.
 Before a long run, take one 10 s arena dump (**T**) and check the [physics sanity](#physics-sanity)
 list below.
 
-### 3. `ep_rew_mean` is not comparable across changes to reward, episode length, or termination
+### 3. Jolt solver settings are part of the dynamics a policy is trained against
+
+`Physics -> Jolt Physics 3D -> Simulation` (Advanced Settings on) exposes **Position Steps** and
+**Velocity Steps**, defaulting to **2** and **10**. They control how hard the constraint solver works
+to stop joints drifting apart under load. Raising them makes the ragdoll firmer; lowering them makes
+it sloppier. Either way it changes the body a policy is balancing.
+
+Every checkpoint in `rl/runs/` up to and including `perturbation_v7` was trained at the **2 / 10
+defaults**. Running one of them against different settings is the same class of mistake as swapping
+the rig underneath it: the policy is driving a body it never saw, and the degradation looks like a
+training regression with no cause in the logs.
+
+> **Measured, 2026-08-26.** Zero-action hold (no policy, rest pose commanded), head height:
+>
+> | t | 2 / 10 | 16 / 30 |
+> |---|---|---|
+> | 6 s | 0.211 | 0.608 |
+> | 7 s | 0.266 | 0.318 |
+>
+> Higher iterations are genuinely better physics - the body degrades far more gracefully - and still
+> do not make the rest pose stable. Godot's ragdoll needs an active policy to stand at any setting.
+
+**Rule:** change these only at a retrain boundary, never between training and playback. If you do
+change them, note the values in the run manifest, and re-measure throughput - more iterations cost
+CPU per physics tick, and this track's bottleneck is already wall-clock (a mature policy is ~295M
+steps at ~3,700 steps/s, about 22 hours).
+
+**Gotcha:** the setting is ignored when Godot is launched as `godot --headless --path .` - a
+hand-edited `project.godot` value does not reach the physics server, and `ProjectSettings.GetSetting`
+reports the default. It applies correctly when run from the editor (F5/F6) and in an exported build,
+which is what training uses. So a headless A/B of these values silently compares nothing.
+
+### 4. `ep_rew_mean` is not comparable across changes to reward, episode length, or termination
 
 It is a sum over a window. Change the window or what ends it and the number moves for reasons that
 have nothing to do with policy quality.
@@ -55,7 +87,7 @@ have nothing to do with policy quality.
 Judge instead on **per-tick fractions** (`standing/*`) and **per-task rates**
 (`task_<name>/success`), which are length-invariant.
 
-### 4. Per-tick fractions are not comparable across termination changes either
+### 5. Per-tick fractions are not comparable across termination changes either
 
 They are diluted by whatever the body does after failing.
 
@@ -65,7 +97,7 @@ They are diluted by whatever the body does after failing.
 
 After any termination change, the first run is a **new baseline**, not a comparison.
 
-### 5. A metric pinned at a constant is broken, not informative
+### 6. A metric pinned at a constant is broken, not informative
 
 Both directions are failures: always 0 and always alarming.
 
@@ -76,7 +108,7 @@ Both directions are failures: always 0 and always alarming.
 > check decomposes quaternions in Euler YXZ, whose principal branch cannot represent the ±2.6 rad
 > limits four axes on this rig actually have. A smoke alarm that is always on cannot report a fire.
 
-### 6. Constant telemetry columns hide dead machinery
+### 7. Constant telemetry columns hide dead machinery
 
 28 columns in a dump were identical on every row — `BalanceStrength`, `WeightShareL/R`,
 `PelvisStabTorque`, all get-up phase columns. Under RL the balance controller is off by design, but
@@ -85,7 +117,7 @@ the columns still write, so a reader cannot distinguish *off by design* from *br
 If a column is constant for a whole run, find out which of the two it is before trusting anything
 near it.
 
-### 7. Names must be derived, never remembered
+### 8. Names must be derived, never remembered
 
 > **Cost:** `$ExperimentName` read `perturbation_v3` while three later experiments ran, so v4, v5 and
 > v6 all wrote into `perturbation_v3_0` — two lineages, one directory, no way to separate them
@@ -150,13 +182,13 @@ halved the search space for the cost of one run.
 > the search immediately. It did not, and later measurement showed the ball's momentum was never
 > the energy source at all.
 
-### 4. Distinguish measuring the thing from measuring its consequence
+### 5. Distinguish measuring the thing from measuring its consequence
 
 `ActuatorPowerW` was originally `|τ·ω|`, which counts braking as power. It read 26 kW *because* the
 limbs were already moving fast, then got used as evidence that the actuators were driving them.
 Signed power (`ActuatorPowerInW` / `OutW`) separates cause from effect.
 
-### 5. A comment explaining why something is safe is not evidence that it is
+### 6. A comment explaining why something is safe is not evidence that it is
 
 The action space carried a comment stating "the RL action path does not depend on this". It was
 correct. The neighbouring comment claiming "aim is not the problem" was written with equal

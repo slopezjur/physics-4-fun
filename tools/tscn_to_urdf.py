@@ -43,9 +43,13 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SCENE_PATH = PROJECT_ROOT / "Scenes" / "ActiveRagdoll.tscn"
 OUTPUT_DIR = PROJECT_ROOT / "isaac_lab" / "assets"
 
-# Bones the RL policy actuates, in the exact order RagdollRLBridge.ControlledBoneNames declares
-# them. The order is load-bearing: action index 3*i+{0,1,2} maps to <bone>_r{x,y,z}, so this list
-# and that C# array must stay identical or every action lands on the wrong joint.
+# Bones the RL policy actuates. This is a SET, used only to decide which joints are actuated - the
+# order here does NOT reach the action vector.
+#
+# The action order is `rig["actuated_joints"]`, appended in build_urdf()'s tree-order loop below,
+# which produces Spine, Thigh_L, Thigh_R, Chest, ... This comment used to claim the two were the
+# same and that the list had to match RagdollRLBridge.ControlledBoneNames; they are not, and only
+# index 0 coincides. Anything consuming actions must read `actuated_joints`, never this list.
 CONTROLLED_BONES = [
     "Spine", "Chest",
     "UpperArm_L", "Forearm_L", "UpperArm_R", "Forearm_R",

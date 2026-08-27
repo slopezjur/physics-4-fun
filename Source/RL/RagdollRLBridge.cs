@@ -352,6 +352,33 @@ public partial class RagdollRLBridge : Node
     [Export] public float EffortWeight { get; set; } = 0.02f;
 
     /// <summary>
+    /// Train against the ISAAC observation/action contract instead of this track's native one.
+    ///
+    /// <para>Swaps <see cref="BodyStateObservation"/> (113 floats, root-relative bone quaternions)
+    /// for <see cref="Isaac.IsaacObservation"/> (143 floats, joint angles) and
+    /// <see cref="JointLimitedActionSpace"/> for <see cref="Isaac.IsaacActionSpace"/>, which applies
+    /// the contract's ACTION_SCALE of 0.4. Requires `action_repeat = 2` on the scene's Sync node:
+    /// the Isaac contract is defined at 60 Hz and this track's native default of 8 is 15 Hz.</para>
+    ///
+    /// <para><b>Why.</b> Policies trained in Isaac do not transfer to Godot - four attempts, all
+    /// measured, all failed on a solver-class difference rather than on wiring. Fine-tuning is the
+    /// remaining option: pretrain in Isaac at ~200k steps/s, then adapt here. That is only possible
+    /// while both sides speak the same contract, which is what this flag buys. It also answers the
+    /// question fine-tuning depends on - whether this track can learn AT ALL under that contract -
+    /// without any weight transfer being involved yet.</para>
+    ///
+    /// <para><b>Bone order changes with it.</b> The Isaac action vector is ordered by the rig
+    /// contract's `actuated_joints`, not by <c>ControlledBoneNames</c>. Those two orders differ, and
+    /// on the URDF rig only index 0 coincided - so the controlled-bone cache is rebuilt from the
+    /// contract when this is set. Getting that wrong sends every command to the wrong joint and
+    /// trains perfectly happily while doing it.</para>
+    /// </summary>
+    [Export] public bool UseIsaacContract { get; set; }
+
+    /// <summary>Rig contract backing <see cref="UseIsaacContract"/>. Must match the pretrained policy's rig.</summary>
+    [Export] public string IsaacRigContractPath { get; set; } = "res://isaac_lab/assets/dummy_d6_rig.json";
+
+    /// <summary>
     /// Playback: run the policy continuously instead of in episodes.
     ///
     /// Episodes exist for TRAINING - a learner needs bounded, comparable rollouts, and the time
@@ -427,6 +454,8 @@ public partial class RagdollRLBridge : Node
 
 
     private Quaternion[] _pendingOffsets = System.Array.Empty<Quaternion>();
+    private Isaac.IsaacObservation? _isaacObservations;
+    private Isaac.IsaacActionSpace? _isaacActions;
     /// <summary>Reward owed to the trainer since the last DrainReward - NOT an episode total.</summary>
     private float _accumulatedReward;
 
@@ -550,11 +579,17 @@ public partial class RagdollRLBridge : Node
             return;
         }
 
-        CacheControlledBones();
-
-        _actions = new JointLimitedActionSpace(ControlledBoneNames);
-        _actions.Bind(_controlledBones);
-        _observations = new BodyStateObservation(ControlledBoneNames.Length);
+        if (UseIsaacContract)
+        {
+            BuildIsaacContract();
+        }
+        else
+        {
+            CacheControlledBones(ControlledBoneNames);
+            _actions = new JointLimitedActionSpace(ControlledBoneNames);
+            _actions.Bind(_controlledBones);
+            _observations = new BodyStateObservation(ControlledBoneNames.Length);
+        }
         // Only these two vary by task. The observation and action space above are shared on
         // purpose - see RlTaskKind for why that is what makes cross-task resuming possible.
         (_reward, _termination) = TaskKind switch
@@ -571,26 +606,65 @@ public partial class RagdollRLBridge : Node
         ResetEpisode();
     }
 
-    private void CacheControlledBones()
+    private void CacheControlledBones(string[] boneNames)
     {
-        _controlledBones = new ActiveBone?[ControlledBoneNames.Length];
+        _controlledBones = new ActiveBone?[boneNames.Length];
         var byName = new System.Collections.Generic.Dictionary<string, ActiveBone>();
         foreach (var bone in Ragdoll!.GetBones())
         {
             byName[bone.BoneName] = bone;
         }
 
-        for (int i = 0; i < ControlledBoneNames.Length; i++)
+        for (int i = 0; i < boneNames.Length; i++)
         {
-            if (byName.TryGetValue(ControlledBoneNames[i], out var bone))
+            if (byName.TryGetValue(boneNames[i], out var bone))
             {
                 _controlledBones[i] = bone;
             }
             else
             {
-                GD.PushError($"[RagdollRLBridge] Bone '{ControlledBoneNames[i]}' not found on Ragdoll.");
+                GD.PushError($"[RagdollRLBridge] Bone '{boneNames[i]}' not found on Ragdoll.");
             }
         }
+    }
+
+    /// <summary>
+    /// Builds the Isaac-contract observation and action space, with the bone cache and the pending
+    /// offset buffer rebuilt in the CONTRACT's order rather than ControlledBoneNames order.
+    /// </summary>
+    private void BuildIsaacContract()
+    {
+        Isaac.IsaacRigContract rig;
+        try
+        {
+            rig = Isaac.IsaacRigContract.Load(IsaacRigContractPath);
+        }
+        catch (System.Exception e)
+        {
+            GD.PushError($"[RagdollRLBridge] UseIsaacContract is set but the rig contract "
+                         + $"'{IsaacRigContractPath}' could not be loaded: {e.Message}");
+            return;
+        }
+
+        string[] boneNames = rig.ActuatedBoneNames();
+        CacheControlledBones(boneNames);
+
+        _pendingOffsets = new Quaternion[boneNames.Length];
+        for (int i = 0; i < _pendingOffsets.Length; i++)
+        {
+            _pendingOffsets[i] = Quaternion.Identity;
+        }
+
+        var actions = new Isaac.IsaacActionSpace(rig);
+        _isaacActions = actions;
+        _actions = actions;
+        _actions.Bind(_controlledBones);
+
+        _isaacObservations = new Isaac.IsaacObservation(rig, Ragdoll!);
+        _observations = _isaacObservations;
+
+        GD.Print($"[RagdollRLBridge] Isaac contract: {_observations.Size} obs / {_actions.Size} actions, "
+                 + $"bones {string.Join(",", boneNames)}");
     }
 
     public override void _PhysicsProcess(double delta)
@@ -811,6 +885,11 @@ public partial class RagdollRLBridge : Node
         }
 
         _actions.Decode(action, _pendingOffsets);
+
+        // Slice [104:140] of the Isaac observation is the previous action as SENT - clamped, before
+        // scaling. Nothing else records it, and leaving it at zero would feed the policy a constant
+        // where training saw its own last command.
+        _isaacObservations?.RecordAction(_isaacActions!.ClampedAction);
 
         // A real action arrived: the ragdoll can stop idling soft and take on the full impedance
         // an actual policy needs to press/balance with. See HumanoidRagdoll.ReinforcementLearningPolicyActive.

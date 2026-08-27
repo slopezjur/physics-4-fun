@@ -5,4 +5,4 @@
 . "$PSScriptRoot/config.ps1"
 
 Write-Host "Opening RagdollStandArena (test scene)..." -ForegroundColor Cyan
-& $GodotExe --path $ProjectPath "res://Scenes/RL/Upright/RagdollStandArena.tscn"
+& $GodotExe --path $ProjectPath "res://Scenes/RL/Jolt/Upright/RagdollStandArena.tscn"

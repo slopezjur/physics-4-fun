@@ -58,9 +58,17 @@ class StandEnv(DirectRLEnv):
         self._act_default = self.robot.data.default_joint_pos[0, self._actuated_ids]
 
         self._head_id, _ = self.robot.find_bodies("Head")
+        # Pelvis is the URDF root link and the body the micro-push acts on.
+        self._root_body_id, _ = self.robot.find_bodies("Pelvis")
         self._contact_ids, _ = self.contact_sensor.find_bodies(CONTACT_BONES, preserve_order=True)
 
         self._default_joint_pos = self.robot.data.default_joint_pos.clone()
+
+        # Baselines for _randomise_physics. Captured before anything perturbs them.
+        self._default_stiffness = self.robot.data.default_joint_stiffness.clone()
+        self._default_damping = self.robot.data.default_joint_damping.clone()
+        self._default_masses = self.robot.root_physx_view.get_masses().clone()
+        self._default_materials = self.robot.root_physx_view.get_material_properties().clone()
         self._previous_action = torch.zeros(self.num_envs, self.cfg.action_space, device=self.device)
         self._action = torch.zeros_like(self._previous_action)
         self._raw_action = torch.zeros_like(self._previous_action)
@@ -156,6 +164,33 @@ class StandEnv(DirectRLEnv):
         target = self._act_default + self.cfg.action_scale * self._action * span
         self.robot.set_joint_position_target(target, joint_ids=self._actuated_ids)
 
+        self._apply_micro_push()
+
+    def _apply_micro_push(self) -> None:
+        """A small random force on the pelvis, resampled every step, so the body never settles.
+
+        Distinct from the Perturbation task's ball, which is an occasional large impulse the policy
+        must RECOVER from. This is a continuous small disturbance the policy must live with, and it
+        exists to close a specific measured gap rather than to add difficulty: Isaac's rest pose is
+        a genuine equilibrium (98.4% still standing after 8 s of zero actions), so a trained policy
+        settles into near-zero joint velocities. Godot's body is never still - its procedural
+        controller micro-corrects continuously, putting the joint-velocity observation at 4-8 rad/s
+        - and the policy, having never seen that, ran permanently saturated there.
+
+        Observation noise alone cannot fix this: it teaches tolerance of a noisy reading of a still
+        body. Only an actually-moving body puts real nonzero velocities in the training
+        distribution.
+        """
+        if self.cfg.micro_push_force <= 0.0:
+            return
+
+        force = torch.randn(self.num_envs, 1, 3, device=self.device) * self.cfg.micro_push_force
+        self.robot.set_external_force_and_torque(
+            forces=force,
+            torques=torch.zeros_like(force),
+            body_ids=self._root_body_id,
+        )
+
     # ------------------------------------------------------------------ observation
 
     def _get_observations(self) -> dict:
@@ -167,14 +202,27 @@ class StandEnv(DirectRLEnv):
         forces = self.contact_sensor.data.net_forces_w[:, self._contact_ids, :]
         contacts = (forces.norm(dim=-1) > 1.0).float()
 
+        joint_pos = data.joint_pos - self._default_joint_pos
+        joint_vel = data.joint_vel
+
+        # Sim-to-sim hardening. Off unless configured, so prior runs stay reproducible.
+        #
+        # Applied to the OBSERVATION only, never to the state the reward is computed from: the
+        # policy should learn to act well under an uncertain reading, not be scored against a
+        # corrupted one.
+        if self.cfg.obs_noise_joint_pos > 0.0:
+            joint_pos = joint_pos + torch.randn_like(joint_pos) * self.cfg.obs_noise_joint_pos
+        if self.cfg.obs_noise_joint_vel > 0.0:
+            joint_vel = joint_vel + torch.randn_like(joint_vel) * self.cfg.obs_noise_joint_vel
+
         obs = torch.cat(
             [
                 projected_gravity,
                 lin_vel_b,
                 ang_vel_b,
                 data.root_pos_w[:, 2].unsqueeze(-1) - self.scene.env_origins[:, 2].unsqueeze(-1),
-                data.joint_pos - self._default_joint_pos,
-                data.joint_vel,
+                joint_pos,
+                joint_vel,
                 contacts,
                 self._action,
                 self._command,
@@ -249,6 +297,70 @@ class StandEnv(DirectRLEnv):
             "termination": self.cfg.rew_termination * self._fell.float(),
         }
 
+    def _randomise_physics(self, env_ids) -> None:
+        """Resample joint gains, link masses and friction for the given environments.
+
+        The standard sim-to-real recipe rather than another attempt to match two simulators exactly.
+        A policy trained against a single set of dynamics has learned a strategy for that body; one
+        trained across a family has to find a strategy that survives the family, and a different
+        engine is then just another sample from it.
+
+        <b>Applied to the DEFAULTS every time, never compounded.</b> Scaling the current values would
+        random-walk the body across episodes - after a few hundred resets some environments would be
+        running gains orders of magnitude from anything authored, and the resulting policy would be
+        trained on a rig that no longer resembles the Godot scene at all.
+        """
+        cfg = self.cfg
+        ranges = (
+            cfg.rand_stiffness_range,
+            cfg.rand_damping_range,
+            cfg.rand_mass_range,
+            cfg.rand_friction_range,
+        )
+        if all(lo == 1.0 and hi == 1.0 for lo, hi in ranges):
+            return
+
+        n = len(env_ids)
+
+        def scale(rng: tuple[float, float], width: int) -> torch.Tensor:
+            """One factor per environment, broadcast across that environment's joints/bodies.
+
+            Per-environment rather than per-joint: the engines differ by a systematic property of
+            the solver, not by independent noise on each joint, so the training distribution should
+            contain uniformly stiffer and uniformly sloppier BODIES.
+            """
+            lo, hi = rng
+            factor = torch.empty(n, 1, device=self.device).uniform_(lo, hi)
+            return factor.expand(n, width)
+
+        if cfg.rand_stiffness_range != (1.0, 1.0):
+            self.robot.write_joint_stiffness_to_sim(
+                self._default_stiffness[env_ids] * scale(cfg.rand_stiffness_range, self.robot.num_joints),
+                env_ids=env_ids,
+            )
+        if cfg.rand_damping_range != (1.0, 1.0):
+            self.robot.write_joint_damping_to_sim(
+                self._default_damping[env_ids] * scale(cfg.rand_damping_range, self.robot.num_joints),
+                env_ids=env_ids,
+            )
+
+        if cfg.rand_mass_range != (1.0, 1.0):
+            # set_masses works on the CPU view and takes the FULL tensor, writing only env_ids.
+            masses = self.robot.root_physx_view.get_masses()
+            cpu_ids = env_ids.cpu()
+            masses[cpu_ids] = self._default_masses[cpu_ids] * scale(
+                cfg.rand_mass_range, self.robot.num_bodies
+            ).cpu()
+            self.robot.root_physx_view.set_masses(masses, cpu_ids)
+
+        if cfg.rand_friction_range != (1.0, 1.0):
+            materials = self.robot.root_physx_view.get_material_properties()
+            cpu_ids = env_ids.cpu()
+            factor = torch.empty(n, 1, 1).uniform_(*cfg.rand_friction_range)
+            # Columns are (static friction, dynamic friction, restitution); leave restitution alone.
+            materials[cpu_ids, :, :2] = (self._default_materials[cpu_ids, :, :2] * factor).clamp(0.0, 2.0)
+            self.robot.root_physx_view.set_material_properties(materials, cpu_ids)
+
     def _effort_fraction(self) -> torch.Tensor:
         """Mean squared torque as a fraction of each joint's limit."""
         applied = self.robot.data.applied_torque[:, self._actuated_ids]
@@ -290,6 +402,7 @@ class StandEnv(DirectRLEnv):
         if env_ids is None or len(env_ids) == self.num_envs:
             env_ids = self.robot._ALL_INDICES
         super()._reset_idx(env_ids)
+        self._randomise_physics(env_ids)
 
         joint_pos = self._default_joint_pos[env_ids].clone()
         joint_pos += torch.empty_like(joint_pos).uniform_(-0.1, 0.1)

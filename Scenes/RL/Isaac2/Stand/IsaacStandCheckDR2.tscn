@@ -1,0 +1,11 @@
+[gd_scene load_steps=2 format=3 uid="uid://ci1isaacstanddr2"]
+
+[ext_resource type="Script" path="res://Source/RL/Isaac/IsaacArena.cs" id="1_arena"]
+
+[node name="IsaacStandCheckDR2" type="Node3D"]
+script = ExtResource("1_arena")
+PolicyPath = "res://isaac_lab/exported/stand_d6_dr_policy.onnx"
+RigContractPath = "res://isaac_lab/assets/dummy_d6_rig.json"
+AutoQuitSeconds = 12.0
+ReportInterval = 2.0
+PolicyDelaySeconds = 2.0

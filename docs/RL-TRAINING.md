@@ -209,10 +209,10 @@ rewriting anything:
 
 ```ini
 # project.godot
-run/main_scene="res://Scenes/RL/Upright/RagdollPerturbationArena.tscn"
-run/main_scene.stand="res://Scenes/RL/Upright/RagdollStandTraining.tscn"
-run/main_scene.perturbation="res://Scenes/RL/Upright/RagdollPerturbationTraining.tscn"
-run/main_scene.walk="res://Scenes/RL/Locomotion/RagdollWalkTraining.tscn"
+run/main_scene="res://Scenes/RL/Jolt/Upright/RagdollPerturbationArena.tscn"
+run/main_scene.stand="res://Scenes/RL/Jolt/Upright/RagdollStandTraining.tscn"
+run/main_scene.perturbation="res://Scenes/RL/Jolt/Upright/RagdollPerturbationTraining.tscn"
+run/main_scene.walk="res://Scenes/RL/Jolt/Locomotion/RagdollWalkTraining.tscn"
 
 # export_presets.cfg - one preset per task, each with its own feature tag
 custom_features="stand"           # "Windows Stand"

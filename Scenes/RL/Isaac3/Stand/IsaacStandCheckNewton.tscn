@@ -1,0 +1,17 @@
+[gd_scene load_steps=2 format=3 uid="uid://ci1isaacstandnewton"]
+
+[ext_resource type="Script" path="res://Source/RL/Isaac/IsaacArena.cs" id="1_arena"]
+
+[node name="IsaacStandCheckNewton" type="Node3D"]
+script = ExtResource("1_arena")
+PolicyPath = "res://Models/balance_policy.onnx"
+RigContractPath = "res://isaac_lab/assets/dummy_d6_rig.json"
+PolicyContractPath = "res://Models/balance_policy.contract.json"
+HeightContacts = true
+BalanceAssist = 1.0
+ActionScaleOverride = 0.1
+HillVelocityFilter = 0.15
+AutoQuitSeconds = 20.0
+ReportInterval = 2.0
+PolicyDelaySeconds = 0.0
+WarmupSeconds = 0.0

@@ -1,0 +1,10 @@
+[gd_scene load_steps=2 format=3 uid="uid://ci1isaacparityd6"]
+
+[ext_resource type="Script" path="res://Source/RL/Isaac/IsaacParityTest.cs" id="1_parity"]
+
+[node name="IsaacParityTestD6" type="Node"]
+script = ExtResource("1_parity")
+ReferencePath = "res://isaac_lab/assets/reference_obs_d6.json"
+PolicyPath = "res://isaac_lab/exported/stand_d6_policy.onnx"
+CaptureAfterTicks = 1
+RigContractPath = "res://isaac_lab/assets/dummy_d6_rig.json"

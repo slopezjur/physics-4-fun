@@ -23,6 +23,25 @@ public partial class RagdollTelemetryHud : PanelContainer
 
     public IBalanceTelemetryProvider? TelemetryProvider => Balance;
 
+    /// <summary>
+    /// Which Isaac brain is driving this body, and whether it has taken over yet. Set by
+    /// <c>IsaacArena</c>; empty in every scene without one, where the block simply does not render.
+    ///
+    /// A plain string rather than a reference to the driver on purpose: this HUD is shared with the
+    /// Jolt track, whose scenes have no Isaac types in them at all. The arena already computes the
+    /// line for its console log, so it hands over the finished text and the HUD stays decoupled.
+    /// </summary>
+    public string BrainLine { get; set; } = string.Empty;
+
+    /// <summary>
+    /// True once the policy has actually been added to the tree - `IsaacArena.PolicyDelaySeconds`
+    /// means there is a window where the brain is loaded but the body is still running on Godot's
+    /// own balance. Worth distinguishing on screen: "loaded" and "driving" look identical
+    /// otherwise, and that gap is exactly where a scene looks like it is showing you a policy when
+    /// it is showing you the balance controller.
+    /// </summary>
+    public bool BrainEngaged { get; set; }
+
     private Label _telemetryLabel = null!;
     private Label _recStatusLabel = null!;
     private ProgressBar _progressBar = null!;
@@ -144,6 +163,10 @@ public partial class RagdollTelemetryHud : PanelContainer
 
         _telemetryLabel.Text =
             $"--- TELEMETRY METRICS ---\n" +
+            (string.IsNullOrEmpty(BrainLine)
+                ? string.Empty
+                : $"Brain: {BrainLine}\n" +
+                  $"Driving: {(BrainEngaged ? "YES - policy has the body" : "no - Godot balance still holding")}\n") +
             $"Engine: Jolt @ {physicsFps} Hz (FPS: {fps})\n" +
             $"State: {Ragdoll.CurrentState.ToString().ToUpper()}\n" +
             (Ragdoll.CurrentState == RagdollState.Recovering ? $"Get-Up Phase: {Ragdoll.CurrentGetUpPhase}\n" : string.Empty) +

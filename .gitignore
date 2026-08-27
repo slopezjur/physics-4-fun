@@ -77,3 +77,21 @@ isaac_lab/assets/.asset_hash
 # point of the track. The TorchScript twins are not: same policy, re-derivable from the checkpoint
 # with play.py --export_only, and they double the footprint for nothing.
 isaac_lab/exported/*.pt
+
+# --- Training artifacts -------------------------------------------------------
+# Checkpoints and TensorBoard logs are REGENERATED OUTPUT, not source. They were tracked once and
+# it put 2,272 *.pt files and 13 GB into the history, which is most of what `.git` weighs.
+#
+# The exported policy in Models/ stays tracked on purpose: it is the deliverable Godot loads, it is
+# ~1 MB, and a scene that references a file nobody has is broken for everyone who clones.
+isaac_lab_3/logs/
+isaac_lab/logs/
+rl/runs/
+*.pt
+*.tfevents.*
+
+# Scratch and probes. Kept out because they are written to answer one question and are misleading
+# once the answer is known - a stale reference_obs.json reads exactly like a current one.
+isaac_lab_3/exported/
+**/__pycache__/
+*.pyc

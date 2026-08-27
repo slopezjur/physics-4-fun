@@ -135,6 +135,29 @@ public partial class ActiveBone : RigidBody3D, Interfaces.IBoneState
     /// </summary>
     [Export] public float MaxShorteningVelocity { get; set; } = 15.0f;
 
+    /// <summary>
+    /// EMA smoothing on the joint velocity that feeds the Hill force-velocity law, in (0,1].
+    /// 1 uses the raw per-tick velocity, which is the original behaviour.
+    ///
+    /// <para><b>The Hill law should see the muscle's shortening rate, not solver noise.</b> A joint
+    /// whose axis is tightly limited chatters against its own constraint - measured at 15 to 68
+    /// rad/s on twist axes with the body still upright, against 7.5 as the peak across all 45 DOF
+    /// in Isaac. That is not motion the muscle is producing, but it reads as maximal shortening, so
+    /// the derating drives the ceiling to zero and `ActiveBone` then applies EXACTLY no torque. The
+    /// muscle switches off because of a numerical artifact, the body goes limp, and it topples -
+    /// measured as `fvScale` reaching 0.00 by t=1 s while the actuators were being asked for 2.23x
+    /// their ceiling.</para>
+    ///
+    /// <para>Filtering is the honest fix rather than raising
+    /// <see cref="MaxShorteningVelocity"/>: the limit is real biomechanics and worth keeping, it
+    /// simply needs a velocity signal that reflects the limb rather than the solver. The D term
+    /// already gets this treatment inside <see cref="PidController3D"/>.</para>
+    /// </summary>
+    [Export] public float HillVelocityFilterAlpha { get; set; } = 1.0f;
+
+    /// <summary>Smoothed relative joint velocity feeding the Hill law. See HillVelocityFilterAlpha.</summary>
+    private Vector3 _hillFilteredVelocity = Vector3.Zero;
+
     public float MuscleStrength { get; set; } = 1.0f;
 
     /// <summary>
@@ -155,6 +178,26 @@ public partial class ActiveBone : RigidBody3D, Interfaces.IBoneState
     /// Used for dynamic closed-loop balance without fighting the local PID.
     /// </summary>
     public Quaternion FeedForwardTargetOffset { get; set; } = Quaternion.Identity;
+
+    /// <summary>
+    /// An additional target offset owned exclusively by an external policy driver. Identity by
+    /// default, so every existing code path is unaffected.
+    ///
+    /// <para>Separate from <see cref="FeedForwardTargetOffset"/> because that one is NOT free: the
+    /// balance reflexes write it every tick (AnkleBalanceModule, HipStrategyModule,
+    /// DynamicSteppingModule, ArmReflexModule), as does HumanoidRagdoll when it clears them. So does
+    /// the trajectory layer with <see cref="TargetLocalRotation"/>. An outside writer targeting
+    /// either is overwritten within the same frame - measured as a policy whose output changed the
+    /// resulting motion by nothing at all, identical to three decimals against a control that
+    /// ignored the policy entirely.</para>
+    ///
+    /// <para>This exists so an Isaac-trained policy can act as a CORRECTION on top of the
+    /// procedural controller rather than replacing it. Godot's rest pose is not an equilibrium once
+    /// the balance layer is switched off - the body is on the floor in under 2 seconds - while
+    /// Isaac's is, so a policy trained there has no balance behaviour of its own to fall back on.
+    /// See IsaacPolicyDriver.AssistMode.</para>
+    /// </summary>
+    public Quaternion PolicyTargetOffset { get; set; } = Quaternion.Identity;
     public Vector3 LastAppliedTorque { get; private set; } = Vector3.Zero;
 
     /// <summary>
@@ -187,6 +230,13 @@ public partial class ActiveBone : RigidBody3D, Interfaces.IBoneState
     private Quaternion _restLocalRotation = Quaternion.Identity;
     private Quaternion _smoothedFeedForwardOffset = Quaternion.Identity;
     private Generic6DofJoint3D? _joint;
+
+    /// <summary>
+    /// The Generic6DofJoint3D connecting this bone to its parent, once resolved. Exposed so a
+    /// controller can drive the joint's own motors - which Jolt solves INSIDE the constraint solve -
+    /// instead of adding external torque. See IsaacPolicyDriver.JointMotorDrive.
+    /// </summary>
+    public Generic6DofJoint3D? Joint => _joint;
     private readonly List<ActiveBone> _distalChain = new();
 
     /// <summary>Gravity magnitude (m/s^2) used by the load-compensation feed-forward.</summary>
@@ -261,7 +311,8 @@ public partial class ActiveBone : RigidBody3D, Interfaces.IBoneState
 
         Quaternion parentGlobalRot = ParentBone.GlobalTransform.Basis.GetRotationQuaternion().Normalized();
         // Incorporate motor cortex feed-forward offset
-        Quaternion targetGlobalRot = (parentGlobalRot * TargetLocalRotation * _smoothedFeedForwardOffset).Normalized();
+        Quaternion targetGlobalRot =
+            (parentGlobalRot * TargetLocalRotation * _smoothedFeedForwardOffset * PolicyTargetOffset).Normalized();
         Quaternion currentGlobalRot = GlobalTransform.Basis.GetRotationQuaternion().Normalized();
 
         // Biomechanical relative angular velocity damping
@@ -310,7 +361,10 @@ public partial class ActiveBone : RigidBody3D, Interfaces.IBoneState
         // Hill force-velocity limit, applied here rather than to _pid.MaxTorque because the scale
         // depends on the direction of the torque actually being commanded, which is not known until
         // the PD and feed-forward terms have been summed.
-        LastForceVelocityScale = ComputeForceVelocityScale(totalTorque, relativeAngVel, MaxShorteningVelocity);
+        float hillAlpha = Mathf.Clamp(HillVelocityFilterAlpha, 0.001f, 1.0f);
+        _hillFilteredVelocity += (relativeAngVel - _hillFilteredVelocity) * hillAlpha;
+        LastForceVelocityScale =
+            ComputeForceVelocityScale(totalTorque, _hillFilteredVelocity, MaxShorteningVelocity);
         float velocityLimitedMax = maxTorque * LastForceVelocityScale;
 
         // Clamp the combined output so the pair together cannot exceed what the actuator can
@@ -679,6 +733,7 @@ public partial class ActiveBone : RigidBody3D, Interfaces.IBoneState
         TargetLocalRotation = _restLocalRotation;
         FeedForwardTargetOffset = Quaternion.Identity;
         _smoothedFeedForwardOffset = Quaternion.Identity;
+        PolicyTargetOffset = Quaternion.Identity;
         _pid.Reset();
     }
 
@@ -698,6 +753,7 @@ public partial class ActiveBone : RigidBody3D, Interfaces.IBoneState
         TargetLocalRotation = _restLocalRotation;
         FeedForwardTargetOffset = Quaternion.Identity;
         _smoothedFeedForwardOffset = Quaternion.Identity;
+        PolicyTargetOffset = Quaternion.Identity;
         _pid.Reset();
     }
 

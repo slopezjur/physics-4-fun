@@ -11,6 +11,8 @@ scenes; the contract file records that as a hard requirement, not a preference.
 
 from __future__ import annotations
 
+import os
+
 from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import ContactSensorCfg
@@ -117,3 +119,69 @@ class StandEnvCfg(DirectRLEnvCfg):
     # requires. Raise toward 0.25 only once the dummy reliably stands.
     rew_effort = -0.02
     rew_termination = -10.0
+
+    # ---------------------------------------------------------------- sim-to-sim randomisation
+    #
+    # All three default to 0.0, so every result recorded before this existed is reproducible. Set
+    # them through the P4F_* environment variables below for a transfer-hardening run.
+    #
+    # These target ONE measured discrepancy rather than randomising on principle. Driving the
+    # exported Stand policy in Godot, the observation's joint-velocity slice sits at 4-8 rad/s
+    # continuously, because Godot's procedural controller is always micro-correcting the body. The
+    # same policy in Isaac sits near zero at equilibrium - Isaac's rest pose is a true equilibrium,
+    # measured at 98.4% still standing after 8 seconds of all-zero actions. So the policy has never
+    # seen a body whose joints are always moving, and in Godot it ran permanently saturated:
+    # clamped actions of 1.65-1.75 every step against 0.55 at rest in Isaac.
+    #
+    # Observation noise alone would only teach it to tolerate a noisy READING. The micro-push makes
+    # the body genuinely never settle, so the velocities it learns against are real.
+
+    # Gaussian noise std added to the joint-velocity observation slice, rad/s.
+    obs_noise_joint_vel = 0.0
+
+    # Gaussian noise std added to the joint-position observation slice, rad.
+    obs_noise_joint_pos = 0.0
+
+    # Std of a continuous random force resampled every step and applied to the pelvis, N. Small on
+    # purpose: this is meant to stop the body ever being perfectly still, not to knock it over.
+    micro_push_force = 0.0
+
+    # ---- physics randomisation, resampled per episode per environment ----
+    #
+    # This is the standard sim-to-REAL recipe, applied to sim-to-sim. Nobody transfers a policy to a
+    # robot by matching the simulator to the hardware; they randomise the dynamics widely enough
+    # that the real robot is just another sample from the training distribution. Every earlier
+    # attempt here did the opposite - it tried to make one simulator match another exactly, six
+    # times, and failed six times.
+    #
+    # Stiffness is the widest range on purpose. It is the parameter the two engines most clearly
+    # disagree on: Godot runs Stable PD, whose denominator divides the authored gain by a factor its
+    # own comments put at 2.6x on the ankle and 5.4x on the knee, while Isaac's implicit drives
+    # deliver the authored number in full. A policy that has only balanced one stiffness has no
+    # reason to cope with a body a fifth as stiff; one trained across the range might.
+    #
+    # 1.0 on all four disables randomisation and reproduces every earlier result exactly.
+    rand_stiffness_range = (1.0, 1.0)
+    rand_damping_range = (1.0, 1.0)
+    rand_mass_range = (1.0, 1.0)
+    rand_friction_range = (1.0, 1.0)
+
+    def __post_init__(self) -> None:  # type: ignore[override]
+        parent = getattr(super(), "__post_init__", None)
+        if parent is not None:
+            parent()
+        self.obs_noise_joint_vel = float(os.environ.get("P4F_OBS_NOISE_JOINT_VEL", self.obs_noise_joint_vel))
+        self.obs_noise_joint_pos = float(os.environ.get("P4F_OBS_NOISE_JOINT_POS", self.obs_noise_joint_pos))
+        self.micro_push_force = float(os.environ.get("P4F_MICRO_PUSH", self.micro_push_force))
+
+        def _range(name: str, current: tuple[float, float]) -> tuple[float, float]:
+            raw = os.environ.get(name)
+            if not raw:
+                return current
+            lo, _, hi = raw.partition(",")
+            return (float(lo), float(hi))
+
+        self.rand_stiffness_range = _range("P4F_RAND_STIFFNESS", self.rand_stiffness_range)
+        self.rand_damping_range = _range("P4F_RAND_DAMPING", self.rand_damping_range)
+        self.rand_mass_range = _range("P4F_RAND_MASS", self.rand_mass_range)
+        self.rand_friction_range = _range("P4F_RAND_FRICTION", self.rand_friction_range)

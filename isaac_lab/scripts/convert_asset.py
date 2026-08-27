@@ -107,6 +107,18 @@ def main() -> None:
         raise SystemExit(f"[FAIL] joints missing from the imported articulation: {missing}")
     print("[OK] every joint in the rig contract is present in the USD")
 
+    # PhysX assigns its own DOF ordering at import, and the environments index `data.joint_pos` /
+    # `data.joint_vel` directly - so observation slots [10:55] and [55:100] are in THIS order, not
+    # the order the rig contract declares its joints in. Nothing else recorded it, and Godot cannot
+    # fill those 90 slots without it.
+    #
+    # Written here rather than in tscn_to_urdf.py because it is a property of the IMPORT, not of
+    # the URDF: only a live articulation knows it. convert.ps1 runs the generator first and this
+    # second, so appending to the file it just wrote is safe.
+    rig["physx_dof_order"] = list(robot.joint_names)
+    args.rig.write_text(json.dumps(rig, indent=2) + "\n", encoding="utf-8")
+    print(f"[OK] recorded physx_dof_order ({len(robot.joint_names)} DOF) in {args.rig.name}")
+
 
 if __name__ == "__main__":
     main()
