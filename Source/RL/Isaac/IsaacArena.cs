@@ -71,7 +71,6 @@ public partial class IsaacArena : Node3D
     /// <summary>Passed to the driver: command rest instead of the policy. See IsaacPolicyDriver.ZeroActionBaseline.</summary>
     [Export] public bool ZeroAction { get; set; }
 
-    /// <summary>Passed to the driver: compose on Godot's balance layer. See IsaacPolicyDriver.AssistMode.</summary>
     /// <summary>Passed to the driver. See IsaacPolicyDriver.DumpPoseAfterSeconds.</summary>
     [Export] public float DumpPoseAfterSeconds { get; set; }
 
@@ -89,32 +88,8 @@ public partial class IsaacArena : Node3D
     /// <summary>Passed to the driver: drive joints Isaac-style. See IsaacPolicyDriver.JointSpacePd.</summary>
     [Export] public bool JointSpacePd { get; set; }
 
-    /// <summary>Passed to the driver. See IsaacActionSpace.LockAxesBelow.</summary>
-    [Export] public float LockAxesBelow { get; set; }
-
-    /// <summary>Passed to the driver. See IsaacPolicyDriver.DisableHillLimit.</summary>
     /// <summary>Passed to the driver. See IsaacPolicyDriver.HillVelocityFilter.</summary>
     [Export] public float HillVelocityFilter { get; set; } = 1.0f;
-
-    /// <summary>Passed to the driver. See IsaacPolicyDriver.JointVelocityFilter.</summary>
-    [Export] public float JointVelocityFilter { get; set; } = 1.0f;
-
-    [Export] public bool DisableHillLimit { get; set; }
-
-    /// <summary>Passed to the driver. See IsaacPolicyDriver.DisableLoadCompensation.</summary>
-    [Export] public bool DisableLoadCompensation { get; set; }
-
-    /// <summary>Passed to the driver. See IsaacPolicyDriver.GainCompensation.</summary>
-    [Export] public float GainCompensation { get; set; }
-
-    /// <summary>Passed to the driver. See IsaacPolicyDriver.JointMotorDrive.</summary>
-    [Export] public bool JointMotorDrive { get; set; }
-
-    /// <summary>Passed to the driver. See IsaacPolicyDriver.MotorServoGain.</summary>
-    [Export] public float MotorServoGain { get; set; } = 20.0f;
-
-    /// <summary>Passed to the driver. See IsaacPolicyDriver.MotorMaxVelocity.</summary>
-    [Export] public float MotorMaxVelocity { get; set; } = 12.0f;
 
     /// <summary>
     /// Passed to the driver: seconds between per-slice observation diagnostics. Defaults to the
@@ -123,29 +98,6 @@ public partial class IsaacArena : Node3D
     /// </summary>
     [Export] public float DiagnosticInterval { get; set; } = -1.0f;
 
-    /// <summary>
-    /// Seconds to run before quitting, reporting head height as it goes. Zero runs forever, which
-    /// is what you want with a window open.
-    ///
-    /// Above zero this becomes a headless pass/fail instead of something to look at - which is the
-    /// only way to answer "did the mapping work" objectively. Watching a body fall tells you it
-    /// fell; a height trace tells you whether it was ever held up, and for how long.
-    /// </summary>
-    /// <summary>
-    /// Impulse delivered to the pelvis, N.s. 0 disables the disturbance. See
-    /// <see cref="PushAtSeconds"/>.
-    ///
-    /// <para><b>This is the test that separates "the policy is tolerated" from "the policy is
-    /// doing work".</b> With balance assist on, the dummy stands whether the policy is driving or
-    /// commanding nothing - so a clean 20-second stand proves only that the brain is not breaking
-    /// anything. A disturbance does not: if the policy recovers where zero action topples, that
-    /// difference IS the brain contributing, and it is the only measurement here that can show
-    /// it.</para>
-    ///
-    /// <para>18 N.s is the reference magnitude - the real Godot shot is the small ball, 3.0 kg at
-    /// 6 m/s - so the number is comparable with the Godot-native perturbation track rather than
-    /// being invented for this scene.</para>
-    /// </summary>
     /// <summary>
     /// Spawn Godot's real <see cref="Perturbation.BallGun"/> and fire actual balls at the dummy.
     ///
@@ -268,15 +220,7 @@ public partial class IsaacArena : Node3D
             DumpPoseAfterSeconds = DumpPoseAfterSeconds,
             AssistAuthority = AssistAuthority,
             JointSpacePd = JointSpacePd,
-            LockAxesBelow = LockAxesBelow,
-            DisableHillLimit = DisableHillLimit,
             HillVelocityFilter = HillVelocityFilter,
-            JointVelocityFilter = JointVelocityFilter,
-            DisableLoadCompensation = DisableLoadCompensation,
-            GainCompensation = GainCompensation,
-            JointMotorDrive = JointMotorDrive,
-            MotorServoGain = MotorServoGain,
-            MotorMaxVelocity = MotorMaxVelocity,
             DiagnosticInterval = DiagnosticInterval >= 0.0f ? DiagnosticInterval : 0.5f,
         };
 

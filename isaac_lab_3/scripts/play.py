@@ -49,6 +49,13 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--seconds", type=float, default=0.0, help="0 runs until the window is closed.")
     p.add_argument("--device", type=str, default="cuda:0")
+    p.add_argument(
+        "--task_defaults",
+        action="store_true",
+        help="Ignore the checkpoint's own params/env.yaml and use the task registry defaults. "
+        "Only useful for deliberately testing a policy OUTSIDE its training conditions - e.g. "
+        "how much of the stand survives without the balance assist it was trained with.",
+    )
     return p.parse_args()
 
 
@@ -87,6 +94,60 @@ def attach_viewer(env_cfg, which: str) -> None:
         env_cfg.sim.visualizer_cfgs = [ViserVisualizerCfg()]
 
 
+# Settings that change what the policy IS, as opposed to how the run is presented. Anything here
+# read from the task registry instead of the checkpoint's own run makes playback a different
+# experiment from the training it is supposed to be replaying.
+#
+# `balance_assist` is the one that made this necessary. It defaults to 0.0 through
+# `P4F_BALANCE_ASSIST`, while the whole `stand_assist` lineage trained at 1.0 - an external
+# stabilising wrench the policy learned to lean on. Replaying without it put a checkpoint that
+# holds 75% standing at 0% and on the floor in under two seconds, and it looked exactly like a
+# broken brain rather than a broken harness.
+TRAINED_CONDITIONS = (
+    "action_scale",
+    "action_rate_limit",
+    "obs_joint_vel_clip",
+    "balance_assist",
+    "balance_gain",
+    "balance_damping",
+    "balance_max_torque",
+    "balance_reaction",
+    "enforce_effort_limit",
+)
+
+
+def restore_trained_conditions(env_cfg, checkpoint: str) -> None:
+    """Re-apply the checkpoint's own `params/env.yaml` over the task defaults.
+
+    The same `run_config` idea `export.py` uses to build an honest contract - a policy is only
+    meaningful against the plant it was trained on, and the registry defaults are not that plant.
+    """
+    run = pathlib.Path(checkpoint).resolve().parent
+    env_yaml = run / "params" / "env.yaml"
+    if not env_yaml.is_file():
+        print(f"[play] WARNING no {env_yaml}; playing back against TASK DEFAULTS, which may not be "
+              "what this checkpoint was trained on.")
+        return
+
+    import yaml
+
+    with open(env_yaml, encoding="utf-8") as fh:
+        trained = yaml.unsafe_load(fh) or {}
+
+    changed = []
+    for key in TRAINED_CONDITIONS:
+        if key not in trained:
+            continue
+        was = getattr(env_cfg, key, None)
+        now = trained[key]
+        if was != now:
+            changed.append(f"{key} {was} -> {now}")
+        setattr(env_cfg, key, now)
+
+    if changed:
+        print("[play] restored the trained conditions: " + ", ".join(changed))
+
+
 def find_viewer(base):
     """The live `NewtonViewerGL`, or None when running headless or on another backend.
 
@@ -116,6 +177,8 @@ def main() -> None:
     env_cfg.scene.num_envs = args.num_envs
     env_cfg.sim.device = args.device
     env_cfg.playback = True  # measure the policy, not the observation noise
+    if args.checkpoint and not args.task_defaults:
+        restore_trained_conditions(env_cfg, args.checkpoint)
     attach_viewer(env_cfg, args.viewer)
 
     if not args.terminate:

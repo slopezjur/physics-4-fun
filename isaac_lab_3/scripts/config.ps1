@@ -530,14 +530,27 @@ function Select-Isaac3Checkpoint {
     param(
         [Parameter(Mandatory = $true)][string] $TaskName,
         [string] $Title = "Resume from which brain?",
-        [switch] $Interactive
+        [switch] $Interactive,
+        # Non-interactive: take the newest checkpoint of THIS task instead of the promoted one.
+        #
+        # The two defensible defaults disagree exactly when it matters. Defaulting to the promoted
+        # brain answers "what is shipping"; straight after a training run the question is "what did
+        # I just make", and promoted-first ordering buries the new run at row 2 where it looks like
+        # the training produced nothing at all.
+        [switch] $PreferNewest
     )
 
     $options = Get-Isaac3Candidates -WantTask $TaskName
     if (-not $options) {
         throw "No checkpoints of at least $MinIterations iterations under $LogRoot. Train one with .	rain.ps1."
     }
-    if (-not $Interactive) { return $options[0] }
+    if (-not $Interactive) {
+        if ($PreferNewest) {
+            $newest = $options | Where-Object SameTask | Sort-Object When -Descending | Select-Object -First 1
+            if ($newest) { return $newest }
+        }
+        return $options[0]
+    }
 
     Write-Host ""
     Write-Host "  $Title          task: $TaskName   logs -> $Experiment" -ForegroundColor Cyan

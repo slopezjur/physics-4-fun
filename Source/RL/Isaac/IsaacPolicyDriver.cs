@@ -72,28 +72,6 @@ public partial class IsaacPolicyDriver : Node
     [Export] public Vector3 Command { get; set; } = Vector3.Zero;
 
     /// <summary>
-    /// Remove Godot's Hill force-velocity derating for the duration of this run.
-    ///
-    /// <para><b>This is a plant correction, not a cheat, and it is the single largest measured
-    /// difference between the two actuators.</b> `ActiveBone` scales its torque ceiling down as a
-    /// joint turns in the direction it is being driven, reaching zero at
-    /// <see cref="ActiveBone.MaxShorteningVelocity"/> (15 rad/s) - and when that scale hits zero
-    /// `ActiveBone` sets the applied torque to exactly <c>Vector3.Zero</c>. The muscle switches
-    /// off.</para>
-    ///
-    /// <para>Isaac has no such model. Its drives are a PD against a flat torque ceiling, which is
-    /// what the policy was trained against, so leaving the derating on means driving the policy
-    /// through a plant it has never seen. Measured in a Godot run of the stand check:
-    /// <c>fvScale</c> falls to <b>0.00</b> by t=1.0 s while <c>demand</c> climbs to 2.23x the
-    /// ceiling and <c>deliver</c> sits at 0.53 - the actuators are being asked for more than twice
-    /// what they can give and are handing back nothing. Independently, sweeping the torque budget
-    /// in Isaac puts Godot's effective authority at 0.4-0.5 of nominal, which is the same
-    /// finding from the other side.</para>
-    ///
-    /// <para>The derating is a real biomechanical property and belongs in the Godot-native track.
-    /// It just is not part of the contract an Isaac policy was trained against.</para>
-    /// </summary>
-    /// <summary>
     /// EMA smoothing applied to the joint velocity feeding each bone's Hill force-velocity law.
     /// 1 leaves it raw (Godot's default). ~0.15 filters solver chatter out of it.
     ///
@@ -101,94 +79,6 @@ public partial class IsaacPolicyDriver : Node
     /// only the artifact. See <see cref="ActiveBone.HillVelocityFilterAlpha"/>.</para>
     /// </summary>
     [Export] public float HillVelocityFilter { get; set; } = 1.0f;
-
-    /// <summary>
-    /// EMA smoothing on the joint-velocity OBSERVATION, in (0,1]. 1 is raw. See
-    /// <see cref="IsaacObservation.JointVelocityFilter"/> - Godot reports ~5 rad/s on a motionless
-    /// standing body where Isaac reports ~0.2.
-    /// </summary>
-    [Export] public float JointVelocityFilter { get; set; } = 1.0f;
-
-    [Export] public bool DisableHillLimit { get; set; }
-
-    /// <summary>
-    /// Remove Godot's gravity feed-forward for the duration of this run.
-    ///
-    /// <para>`ActiveBone` adds a `loadCompensation` term that supplies the steady-state torque
-    /// needed to hold a joint against gravity, bounded at
-    /// <see cref="ActiveBone.LoadCompensationTorqueFraction"/> (0.5) of the bone's ceiling, and then
-    /// clamps `pd + loadCompensation` to that ceiling. **Isaac has no equivalent.** Its drives are a
-    /// plain PD, so the policy learned to command poses whose own tracking error generates the
-    /// holding torque - and in Godot that error is being cancelled by a term the policy does not
-    /// know about, while up to half the budget it does control is reserved for it.</para>
-    ///
-    /// <para>Like <see cref="DisableHillLimit"/>, this is a plant correction rather than a tuning
-    /// knob: the feed-forward is a good idea and belongs in the Godot-native track, it is simply not
-    /// part of the contract an Isaac policy was trained against.</para>
-    /// </summary>
-    [Export] public bool DisableLoadCompensation { get; set; }
-
-    /// <summary>
-    /// Raise each bone's gains so its EFFECTIVE stiffness matches the rig contract, undoing the SPD
-    /// denominator. 0 disables it; 1 targets the authored gain exactly.
-    ///
-    /// <para><b>The largest measured difference between the two actuators.</b> `PidController3D`
-    /// uses the Tan-Liu-Turk SPD form and divides both gains by
-    /// <c>1 + kd*dt/I + kp*dt^2/I</c>. Measured in the stand check, that denominator leaves the
-    /// controlled bones applying <b>kEff = 0.15</b> - fifteen per cent of the authored proportional
-    /// gain - while Isaac's XPBD applies the drive inside the solve at the full value. The policy
-    /// therefore trained against joints several times stiffer than the ones it is driving.</para>
-    ///
-    /// <para>Compensating is safe in a way that raising a plain PD gain would not be: SPD's
-    /// denominator grows with <c>kp</c>, so the loop stays stable as the gain rises. It is also
-    /// CAPPED by the same algebra - as <c>kp'</c> tends to infinity the effective gain tends to
-    /// <c>I/dt^2</c>, about 1440 N.m/rad for a 0.1 kg m^2 limb at 120 Hz, so a joint authored at
-    /// 1800 cannot be fully recovered. This closes most of the gap, not all of it.</para>
-    ///
-    /// <para>Solving <c>kp' / (1 + kd*dt/I + kp'*dt^2/I) = target</c> for <c>kp'</c> gives
-    /// <c>kp' = target * (1 + kd*dt/I) / (1 - target*dt^2/I)</c>, undefined once the target exceeds
-    /// the cap - which is why the denominator is floored below.</para>
-    /// </summary>
-    [Export] public float GainCompensation { get; set; }
-
-    /// <summary>
-    /// Drive the policy's joint targets through the joint's OWN angular motors instead of adding
-    /// external torque.
-    ///
-    /// <para><b>The structural difference between the two engines, not a tuning knob.</b> Isaac
-    /// applies its drives inside the XPBD solve; `ActiveBone` can only add an external torque that
-    /// Jolt then integrates. Every measurement pointed at that one fact: the commanded pose never
-    /// reaches the body (<c>trackErr</c> 0.40 rad mean, 1.01 worst, immediately, with the dummy
-    /// still upright at 0.79 m); effective stiffness is 110 N.m/rad against the 882 the rig
-    /// authors, because `PidController3D`'s SPD denominator divides both gains by
-    /// <c>1 + kd*dt/I + kp*dt^2/I</c>; and it cannot be fixed by raising gains, because as kp tends
-    /// to infinity the effective gain tends to <c>I/dt^2</c> - measured at ~700, BELOW the authored
-    /// 882.</para>
-    ///
-    /// <para>A Generic6DofJoint3D's angular motors are solved by Jolt as part of the constraint
-    /// system, so they have no <c>I/dt^2</c> ceiling and no explicit-integration stability limit -
-    /// the same class of actuator Isaac has. Implemented as a position servo on a velocity motor:
-    /// <c>target_velocity = MotorServoGain * (target - current)</c>, bounded by
-    /// <see cref="MotorMaxVelocity"/> and by each axis's effort limit from the rig contract.</para>
-    ///
-    /// <para><b>The rig's gains stop describing this plant.</b> A velocity servo is parameterised by
-    /// a rate, not by N.m/rad, so `stiffness` and `damping` no longer apply - which is exactly why a
-    /// policy wants retraining against it rather than being expected to transfer unchanged.</para>
-    /// </summary>
-    [Export] public bool JointMotorDrive { get; set; }
-
-    /// <summary>Servo gain, rad/s of commanded joint rate per rad of angle error.</summary>
-    [Export] public float MotorServoGain { get; set; } = 20.0f;
-
-    /// <summary>Ceiling on the commanded joint rate, rad/s. Bounds the slew out of a large error.</summary>
-    [Export] public float MotorMaxVelocity { get; set; } = 12.0f;
-
-    /// <summary>
-    /// Command rest on any joint axis whose half-range is below this, in radians. 0 disables it.
-    /// See <see cref="IsaacActionSpace.LockAxesBelow"/> - an experiment against Godot's twist-axis
-    /// chatter, not part of the contract.
-    /// </summary>
-    [Export] public float LockAxesBelow { get; set; }
 
     /// <summary>
     /// Seconds after which to dump the FULL 45-DOF joint pose once, as a JSON array. 0 disables it.
@@ -244,28 +134,6 @@ public partial class IsaacPolicyDriver : Node
     /// </summary>
     [Export] public bool ZeroActionBaseline { get; set; }
 
-    /// <summary>
-    /// Leave Godot's procedural balance layer running and compose the policy's action on top of it,
-    /// instead of taking the body over outright.
-    ///
-    /// <para><b>Why this exists.</b> `UpdateBoneTargetRotations` early-returns in the RL state, so
-    /// entering it disconnects balance, trajectories and posture in one go and the policy inherits
-    /// a body held up by nothing but joint targets. Isaac's body does not need that support - its
-    /// rest pose is a genuine equilibrium, measured at 98.4% still standing after 8 seconds of
-    /// all-zero actions, and still ~80% at a fifth of the stiffness. Godot's is not: the same
-    /// command puts it on the floor in under 2 seconds. An Isaac-trained policy therefore arrives
-    /// expecting passive stability that does not exist here.</para>
-    ///
-    /// <para>The original design worked this way. That early return's own comment notes the
-    /// trajectory layer used to write a base pose which "its action only composes on top of", and
-    /// it was removed because a standing target is unreachable for a PRONE get-up body. For Stand
-    /// the body is already upright, so the base pose is appropriate rather than saturating.</para>
-    ///
-    /// <para><b>The honest caveat:</b> the policy is then driving a different plant from the one it
-    /// was evaluated on. Zero action no longer means the rest pose, it means whatever the
-    /// procedural layer commands. Treat a success here as "the brain contributes something useful
-    /// on top of Godot's controller", not as a clean transfer.</para>
-    /// </summary>
     /// <summary>
     /// Balance-controller strength during the RL state, 0 to 1. 0 is Godot's default (off).
     ///
@@ -350,7 +218,6 @@ public partial class IsaacPolicyDriver : Node
     private IsaacActionSpace? _actions;
     private ActiveBone?[] _controlledBones = System.Array.Empty<ActiveBone?>();
     private Quaternion[] _offsets = System.Array.Empty<Quaternion>();
-    private bool _gainsCompensated;
     private bool _dumpedPose;
     private float _elapsed;
     private string _inputName = "obs";
@@ -359,16 +226,13 @@ public partial class IsaacPolicyDriver : Node
     private bool _loggedFirstStep;
     private float _sinceDiagnostic;
     private float _warmupRemaining;
+    /// <summary>Reporting only; see <see cref="IsaacDriverDiagnostics"/>. Null until _Ready finishes.</summary>
+    private IsaacDriverDiagnostics? _diagnostics;
+
     private float _trackingError;
     private float _appliedTorque;
 
     /// <summary>Slice bounds from obs_action_contract.md §3, for the per-slice diagnostic.</summary>
-    private static readonly (string Name, int From, int To)[] Slices =
-    {
-        ("gravity", 0, 3), ("linVel", 3, 6), ("angVel", 6, 9), ("height", 9, 10),
-        ("jointPos", 10, 55), ("jointVel", 55, 100), ("contacts", 100, 104),
-        ("prevAct", 104, 140), ("command", 140, 143),
-    };
 
     public override void _Ready()
     {
@@ -394,11 +258,9 @@ public partial class IsaacPolicyDriver : Node
         {
             UseHeightContacts = HeightContacts,
             JointVelocityClip = IsaacRigContract.LoadJointVelocityClip(PolicyContractPath),
-            JointVelocityFilter = JointVelocityFilter,
         };
         _actions = new IsaacActionSpace(_rig)
         {
-            LockAxesBelow = LockAxesBelow,
             ActionRateLimit = IsaacRigContract.LoadActionRateLimit(PolicyContractPath),
             ActionScale = ActionScaleOverride > 0.0f
                 ? ActionScaleOverride
@@ -413,6 +275,10 @@ public partial class IsaacPolicyDriver : Node
         {
             return;
         }
+
+        // After ResolveControlledBones, so the bone array it holds is the final one.
+        _diagnostics = new IsaacDriverDiagnostics(
+            Ragdoll!, _rig!, _actions!, _controlledBones, JointSpacePd);
 
         // The body must be in RL state or its own procedural controller keeps driving the bones and
         // fights every command this issues.
@@ -460,11 +326,6 @@ public partial class IsaacPolicyDriver : Node
         //
         // (StartReinforcementLearning() is likewise wrong here - it drops the body to prone.)
         NeutraliseUncommandedBones();
-        if (JointMotorDrive)
-        {
-            EnableJointMotors();
-        }
-
         if (HillVelocityFilter < 1.0f)
         {
             int filtered = 0;
@@ -597,40 +458,6 @@ public partial class IsaacPolicyDriver : Node
             reset++;
         }
 
-        if (DisableHillLimit)
-        {
-            int lifted = 0;
-            foreach (ActiveBone bone in Ragdoll!.GetBones())
-            {
-                if (!IsInstanceValid(bone))
-                {
-                    continue;
-                }
-                // Far above any rate a joint reaches, so ComputeForceVelocityScale stays at 1.
-                bone.MaxShorteningVelocity = 1.0e6f;
-                lifted++;
-            }
-            GD.Print($"[IsaacPolicyDriver] lifted the Hill force-velocity limit on {lifted} bone(s) - "
-                     + "Isaac's drives have no velocity derating");
-        }
-
-        if (DisableLoadCompensation)
-        {
-            int cleared = 0;
-            foreach (ActiveBone bone in Ragdoll!.GetBones())
-            {
-                if (!IsInstanceValid(bone))
-                {
-                    continue;
-                }
-                // Bounds the feed-forward at zero, which removes it without touching ActiveBone.
-                bone.LoadCompensationTorqueFraction = 0.0f;
-                cleared++;
-            }
-            GD.Print($"[IsaacPolicyDriver] removed the gravity feed-forward on {cleared} bone(s) - "
-                     + "Isaac's drives are a plain PD");
-        }
-
         GD.Print($"[IsaacPolicyDriver] held {reset} uncommanded bone(s) at rest, matching Isaac's "
                  + "zero-target PD on the passive DOF");
     }
@@ -646,100 +473,6 @@ public partial class IsaacPolicyDriver : Node
             if (IsInstanceValid(bone))
             {
                 bone.TargetLocalRotation = bone.GetRestLocalRotation();
-            }
-        }
-    }
-
-    /// <summary>
-    /// Zeroes <see cref="ActiveBone.MuscleStrength"/> on every bone the policy drives, so its own
-    /// PD contributes nothing and the joint-space controller is the only thing applying torque.
-    ///
-    /// ActiveBone short-circuits at <c>MuscleStrength &lt;= 0.001f</c>, so this silences it outright
-    /// rather than merely weakening it. Uncommanded bones keep their actuator: nothing else would
-    /// hold the head and hands.
-    /// </summary>
-    /// <summary>
-    /// Turns on the angular motors of every joint the policy drives, and silences ActiveBone on
-    /// those bones so the motor is the only thing acting.
-    ///
-    /// <para>The force limit per axis comes from the rig contract's own <c>effort</c>, so the motor
-    /// is bounded by the same ceiling the Isaac task enforces. Uncommanded bones keep their muscle:
-    /// nothing else would hold the head and hands.</para>
-    /// </summary>
-    private void EnableJointMotors()
-    {
-        int enabled = 0;
-        foreach (ActiveBone? bone in _controlledBones)
-        {
-            if (bone == null || !IsInstanceValid(bone) || bone.Joint == null || !IsInstanceValid(bone.Joint))
-            {
-                continue;
-            }
-
-            // The joint motor replaces the muscle rather than fighting it. ActiveBone short-circuits
-            // at MuscleStrength <= 0.001, so this silences it outright.
-            bone.MuscleStrength = 0.0f;
-
-            int baseIndex = IndexOfControlledBone(bone);
-            for (int axis = 0; axis < IsaacRigContract.AxesPerBone; axis++)
-            {
-                char name = AxisName(axis);
-                float effort = baseIndex >= 0
-                    ? _rig!.ActuatedJoints[baseIndex + axis].Effort
-                    : DefaultMotorForce;
-                bone.Joint.Set($"angular_motor_{name}/enabled", true);
-                bone.Joint.Set($"angular_motor_{name}/force_limit", effort);
-                bone.Joint.Set($"angular_motor_{name}/target_velocity", 0.0f);
-            }
-            enabled++;
-        }
-
-        GD.Print($"[IsaacPolicyDriver] joint-motor drive: enabled motors on {enabled} joint(s), "
-                 + "solved inside Jolt's constraint solver like Isaac's XPBD drives");
-    }
-
-    /// <summary>
-    /// Position servo on each joint motor: commanded rate proportional to the remaining angle error.
-    ///
-    /// The error is measured the same way the observation measures joint angle - deviation from the
-    /// rest pose, in Godot's sense - so the target the policy asked for and the angle it is compared
-    /// against are the same quantity. Anything else reintroduces the frame confusion the DOF-order
-    /// contract exists to prevent.
-    /// </summary>
-    private void DriveJointMotors()
-    {
-        if (_actions == null)
-        {
-            return;
-        }
-
-        for (int i = 0; i < _controlledBones.Length && i < _actions.TargetEuler.Length; i++)
-        {
-            ActiveBone? bone = _controlledBones[i];
-            if (bone == null || !IsInstanceValid(bone) || bone.Joint == null || !IsInstanceValid(bone.Joint))
-            {
-                continue;
-            }
-
-            Vector3 current = IsaacObservation.DeviationFromRest(bone);
-            Vector3 target = _actions.TargetEuler[i];
-
-            for (int axis = 0; axis < IsaacRigContract.AxesPerBone; axis++)
-            {
-                char name = AxisName(axis);
-                float error = Component(target, name) - Component(current, name);
-
-                // **Negated: the motor's positive sense is opposite to `DeviationFromRest`.**
-                // Measured rather than reasoned about - driving it unnegated took the tracking
-                // error to 2.15 rad mean and 3.52 worst and folded the knee to its stop, while
-                // negating gives 0.09/0.27 falling to 0.03/0.16. `DeviationFromRest` uses a
-                // swing-twist decomposition of the child relative to its parent; Jolt's angular
-                // motor drives body A relative to body B about the joint frame's axis, which is the
-                // opposite convention. Nothing errors either way, and both look like "the servo is
-                // running" in a log.
-                float velocity = Mathf.Clamp(
-                    -MotorServoGain * error, -MotorMaxVelocity, MotorMaxVelocity);
-                bone.Joint.Set($"angular_motor_{name}/target_velocity", velocity);
             }
         }
     }
@@ -775,100 +508,6 @@ public partial class IsaacPolicyDriver : Node
         }
         GD.Print($"[IsaacPolicyDriver] joint-space PD: silenced {silenced} Godot actuator(s)");
     }
-
-    /// <summary>
-    /// Per-DOF PD in joint space, the way Isaac drives the articulation.
-    ///
-    /// <code>tau = (kp * (target - current) - kd * rate) / (1 + kd*dt/I + kp*dt^2/I)</code>, clamped
-    /// to the joint's effort limit, applied about the bone's own local axes and reacted onto the
-    /// parent - the same action and reaction pair ActiveBone uses. Gains come from the rig contract,
-    /// which is the same file Isaac's drives were built from.
-    ///
-    /// <para><b>The denominator is Tan-Liu-Turk SPD and it is mandatory, not a refinement.</b> The
-    /// naive form <c>tau = kp*error - kd*rate</c> is what this method used first, and it is
-    /// unconditionally unstable at this rig's gains. Isaac applies its drives INSIDE the XPBD
-    /// solve - position-based, implicit, stable at any stiffness - while Godot can only add an
-    /// external torque that Jolt then integrates explicitly. At the hip's kp=1800 with a limb
-    /// inertia near 0.1 kg m^2, the undamped natural frequency is ~134 rad/s against a 120 Hz tick,
-    /// so one step advances the oscillator by more than a radian of phase and it diverges.</para>
-    ///
-    /// <para>Measured with a ZERO action - every joint commanded to the rest pose it is already
-    /// sitting in, which should cost no torque at all: all 36 actuators pinned at their effort
-    /// limit (693 Nm = 400 x sqrt 3), relative joint rates of 91 rad/s, 1.35 rad of tracking error,
-    /// and the dummy on the floor in under two seconds. That is the controller shaking the body
-    /// apart on its own, with no policy involved.</para>
-    ///
-    /// <para>SPD is the standard explicit-integration equivalent of the implicit drive Isaac uses,
-    /// and it is what <see cref="PidController3D"/> already runs for the Godot-native track, so
-    /// both paths in this project now share one formulation.</para>
-    /// </summary>
-    /// <summary>
-    /// Applies <see cref="GainCompensation"/>. Deferred to the first physics tick on purpose:
-    /// `ActiveBone.LastEffectiveInertia` is only populated once the bone has run its muscle update,
-    /// and reading it at load time gives zero.
-    ///
-    /// <para><b>Raises the proportional gain ONLY.</b> The first version scaled kp and kd together
-    /// to preserve the damping ratio, which was self-defeating: the SPD denominator is
-    /// <c>1 + kd*dt/I + kp*dt^2/I</c> and the kd term DOMINATES it - measured at 3.4 of a total
-    /// 5.7 - so raising kd inflates the very denominator being compensated. It solved for a gain
-    /// 222,229x the authored one and made the effective stiffness worse, 0.15 to 0.04.</para>
-    ///
-    /// <para><b>And the target is capped, because there is a hard ceiling.</b> As kp tends to
-    /// infinity the effective gain tends to <c>I/dt^2</c> - measured at about 700 N.m/rad against an
-    /// authored mean of 882, so the rig's stiffness is simply not reachable in Godot at 120 Hz by
-    /// any gain. Asking for more than the ceiling makes the solved gain negative or infinite. This
-    /// targets a fraction of the ceiling instead, which is honest about what the engine can do.</para>
-    /// </summary>
-    private void ApplyGainCompensation()
-    {
-        float dt = 1.0f / Mathf.Max(1, Engine.PhysicsTicksPerSecond);
-        int raised = 0;
-        float authored = 0.0f;
-        float achieved = 0.0f;
-
-        foreach (ActiveBone bone in Ragdoll!.GetBones())
-        {
-            if (!IsInstanceValid(bone) || bone.ProportionalGain <= 0.0f)
-            {
-                continue;
-            }
-
-            float inertia = Mathf.Max(1e-5f, bone.LastEffectiveInertia);
-            float ceiling = inertia / (dt * dt);
-            // Never chase the asymptote: at the ceiling the solved gain diverges, and the closer the
-            // target the more violent the loop becomes for a vanishing return.
-            float target = Mathf.Min(bone.ProportionalGain * GainCompensation, ceiling * CeilingFraction);
-
-            float damping = 1.0f + (bone.DerivativeGain * dt / inertia);
-            float headroom = 1.0f - (target * dt * dt / inertia);
-            if (headroom <= 0.0f)
-            {
-                continue;
-            }
-
-            float solved = target * damping / headroom;
-            authored += bone.ProportionalGain;
-            achieved += target;
-            if (solved > bone.ProportionalGain)
-            {
-                bone.ProportionalGain = solved;  // kd deliberately untouched - see the summary above
-                raised++;
-            }
-        }
-
-        if (raised > 0)
-        {
-            GD.Print($"[IsaacPolicyDriver] raised kp on {raised} bone(s) so effective stiffness goes "
-                     + $"{achieved / raised:F0} against an authored {authored / raised:F0} "
-                     + "- Isaac applies its drives at the full authored gain");
-        }
-    }
-
-    /// <summary>
-    /// Largest share of the <c>I/dt^2</c> ceiling <see cref="GainCompensation"/> will target.
-    /// Approaching 1 sends the solved gain to infinity for no useful gain in stiffness.
-    /// </summary>
-    private const float CeilingFraction = 0.6f;
 
     private void ApplyJointSpaceTorque(float delta)
     {
@@ -1010,12 +649,6 @@ public partial class IsaacPolicyDriver : Node
             return;
         }
 
-        if (GainCompensation > 0.0f && !_gainsCompensated)
-        {
-            _gainsCompensated = true;
-            ApplyGainCompensation();
-        }
-
         // Decimation, matching `decimation = 2` on the Isaac side. The commanded targets persist
         // between policy steps, so the PD drives keep tracking on the tick in between - which is
         // exactly what the trainer does.
@@ -1034,10 +667,6 @@ public partial class IsaacPolicyDriver : Node
 
         // At the FULL physics rate, like the PD above: the target persists between policy steps and
         // the motor keeps closing on it, which is what Isaac's drives do between decimated steps.
-        if (JointMotorDrive)
-        {
-            DriveJointMotors();
-        }
     }
 
     private void Step(float delta)
@@ -1112,7 +741,7 @@ public partial class IsaacPolicyDriver : Node
         if (LogFirstStep && !_loggedFirstStep)
         {
             _loggedFirstStep = true;
-            LogStep(obs, actions);
+            _diagnostics?.LogFirstStep(obs, actions, _trackingError, _appliedTorque);
         }
 
         if (DiagnosticInterval > 0.0f)
@@ -1121,7 +750,7 @@ public partial class IsaacPolicyDriver : Node
             if (_sinceDiagnostic >= DiagnosticInterval)
             {
                 _sinceDiagnostic = 0.0f;
-                LogSlices(obs, actions);
+                _diagnostics?.LogSlices(obs, actions, _trackingError, _appliedTorque);
             }
         }
     }
@@ -1154,336 +783,6 @@ public partial class IsaacPolicyDriver : Node
     /// flipped roll sign produces a plausible-looking vector and a body that merely moves wrongly.
     /// Gravity should read (0,0,-1) upright, pelvis height 0.82, joint positions ~0 at rest.
     /// </summary>
-    private void LogStep(float[] obs, float[] actions)
-    {
-        float maxJoint = 0.0f;
-        for (int i = 10; i < 55 && i < obs.Length; i++)
-        {
-            maxJoint = Mathf.Max(maxJoint, Mathf.Abs(obs[i]));
-        }
-
-        float maxAction = 0.0f;
-        foreach (float a in actions)
-        {
-            maxAction = Mathf.Max(maxAction, Mathf.Abs(a));
-        }
-
-        GD.Print($"[IsaacPolicyDriver] first step: gravity=({obs[0]:F3},{obs[1]:F3},{obs[2]:F3}) "
-                 + $"pelvisHeight={obs[9]:F3} maxJointPos={maxJoint:F3} maxAction={maxAction:F3} "
-                 + $"worstJoint={WorstDof(obs, 10, 55)}");
-    }
-
-    /// <summary>
-    /// Largest magnitude per observation slice, next to the resulting action magnitude. Reading the
-    /// two together is the point: an action far outside [-1,1] with every slice in a plausible
-    /// range means the mapping is wrong, while the same action alongside one slice reading orders
-    /// of magnitude high means the policy is simply being shown something training never contained.
-    /// </summary>
-    /// <summary>
-    /// Where the actuators' torque budget is actually going, across the controlled bones.
-    ///
-    /// <para>Sweeping the torque budget in Isaac locates Godot at an effective
-    /// <c>effort_scale</c> of 0.4-0.5 - it delivers roughly HALF the authority its
-    /// <see cref="ActiveBone.MaxTorque"/> numbers promise, even though those numbers are identical
-    /// to the rig contract's <c>effort</c> values. This reports the candidates for the missing
-    /// half, so the answer is measured rather than reasoned about:</para>
-    ///
-    /// <list type="bullet">
-    /// <item><description><c>demand</c> - PD plus feed-forward, as a fraction of the bone's
-    /// ceiling. Above 1.0 means the actuator is being asked for more than it can ever give.</description></item>
-    /// <item><description><c>deliver</c> - what survived every clamp, same units. The gap between
-    /// this and <c>demand</c> IS the missing authority.</description></item>
-    /// <item><description><c>fvScale</c> - the Hill force-velocity derating. It falls as a joint
-    /// moves fast, so a chattering body loses torque exactly when it needs it most.</description></item>
-    /// </list>
-    /// </summary>
-    private string TorqueBudgetReport()
-    {
-        float demand = 0.0f;
-        float deliver = 0.0f;
-        float worstFv = 1.0f;
-        int counted = 0;
-
-        foreach (ActiveBone? bone in _controlledBones)
-        {
-            if (bone == null || !IsInstanceValid(bone))
-            {
-                continue;
-            }
-
-            float ceiling = bone.MaxTorque * bone.MuscleStrength;
-            if (ceiling <= 0.0f)
-            {
-                continue;
-            }
-
-            demand = Mathf.Max(demand,
-                (bone.LastPdTorque + bone.LastLoadCompensationTorque).Length() / ceiling);
-            deliver = Mathf.Max(deliver, bone.LastAppliedTorque.Length() / ceiling);
-            worstFv = Mathf.Min(worstFv, bone.LastForceVelocityScale);
-            counted++;
-        }
-
-        return counted == 0
-            ? string.Empty
-            : $" demand={demand:F2} deliver={deliver:F2} fvScale={worstFv:F2}"
-              + $" kEff={EffectiveGainFraction():F2}" + StiffnessReport() + TrackingReport() + BalanceReport();
-    }
-
-    /// <summary>
-    /// What fraction of its authored proportional gain each joint actually applies, averaged.
-    ///
-    /// <para><b>This is the suspected home of the missing authority.</b> `ActiveBone` drives through
-    /// `PidController3D`, which uses the Tan-Liu-Turk SPD form and divides BOTH gains by
-    /// <c>1 + kd*dt/I + kp*dt^2/I</c>. For the knee - kp=1800, kd=36, dt=1/120 - a limb inertia near
-    /// 0.1 kg m^2 gives a denominator around 5.25, so the effective stiffness is under a fifth of
-    /// the authored value. Isaac's XPBD applies the drive inside the solve at the full gain, with no
-    /// such division.</para>
-    ///
-    /// <para>It also explains a number that looked reassuring: <c>demand</c> reads only ~0.18 of the
-    /// ceiling, which seemed to say the actuators were not even working hard. They are not - the
-    /// denominator divided the request down before the ceiling ever came into it.</para>
-    ///
-    /// <para>Near 1.0 means Godot is applying what the rig contract says. Well below it means the
-    /// policy is driving a much softer joint than the one it trained against, and that no amount of
-    /// raising <see cref="ActiveBone.MaxTorque"/> will help, because the request never reaches the
-    /// ceiling.</para>
-    /// </summary>
-    private float EffectiveGainFraction()
-    {
-        float total = 0.0f;
-        int counted = 0;
-        float dt = 1.0f / Mathf.Max(1, Engine.PhysicsTicksPerSecond);
-
-        foreach (ActiveBone? bone in _controlledBones)
-        {
-            if (bone == null || !IsInstanceValid(bone) || bone.ProportionalGain <= 0.0f)
-            {
-                continue;
-            }
-
-            float inertia = Mathf.Max(1e-5f, bone.LastEffectiveInertia);
-            float denominator = 1.0f
-                                + (bone.DerivativeGain * dt / inertia)
-                                + (bone.ProportionalGain * dt * dt / inertia);
-            total += 1.0f / denominator;
-            counted++;
-        }
-
-        return counted == 0 ? 1.0f : total / counted;
-    }
-
-    /// <summary>
-    /// Horizontal offset of the whole-body centre of mass from the midpoint between the feet, and
-    /// the feet's height above the floor.
-    ///
-    /// <para><b>The balance question, which every joint-level diagnostic misses.</b> Zero-action
-    /// traces show the two engines failing in different ways: Isaac SAGS - drops 8 cm, joints stay
-    /// near rest, angular velocity near zero, holds for a second - while Godot TIPS, holding its
-    /// height while angular velocity grows monotonically from the first sample. A topple means the
-    /// centre of mass is leaving the support polygon, which is upstream of anything the actuator
-    /// does.</para>
-    ///
-    /// <para>An offset well inside the foot span is a body that can sag but not fall over; one
-    /// outside it is falling over regardless of how well the joints track.</para>
-    /// </summary>
-    private string BalanceReport()
-    {
-        if (Ragdoll == null || !IsInstanceValid(Ragdoll))
-        {
-            return string.Empty;
-        }
-
-        var com = Vector3.Zero;
-        float mass = 0.0f;
-        foreach (ActiveBone bone in Ragdoll.GetBones())
-        {
-            if (!IsInstanceValid(bone))
-            {
-                continue;
-            }
-            com += bone.GlobalPosition * bone.Mass;
-            mass += bone.Mass;
-        }
-
-        if (mass <= 0.0f)
-        {
-            return string.Empty;
-        }
-        com /= mass;
-
-        ActiveBone? left = Ragdoll.FindBone("Foot_L");
-        ActiveBone? right = Ragdoll.FindBone("Foot_R");
-        if (left == null || right == null || !IsInstanceValid(left) || !IsInstanceValid(right))
-        {
-            return string.Empty;
-        }
-
-        Vector3 mid = (left.GlobalPosition + right.GlobalPosition) * 0.5f;
-        float offset = new Vector2(com.X - mid.X, com.Z - mid.Z).Length();
-        float footHeight = Mathf.Min(left.GlobalPosition.Y, right.GlobalPosition.Y);
-        float strength = 0.0f;
-        int bones = 0;
-        foreach (ActiveBone bone in Ragdoll.GetBones())
-        {
-            if (IsInstanceValid(bone))
-            {
-                strength += bone.MuscleStrength;
-                bones++;
-            }
-        }
-
-        return $" comOff={offset:F3}m feet={footHeight:F3}m mass={mass:F1}kg"
-               + $" muscle={(bones > 0 ? strength / bones : 0.0f):F2}";
-    }
-
-    /// <summary>
-    /// How far each joint sits from the angle the policy actually commanded, radians.
-    ///
-    /// <para>The question every other diagnostic dances around: <b>does the body ever adopt the pose
-    /// the policy asked for?</b> Torque can be unclamped and gains can be whatever they are, but if
-    /// the joints never reach their targets then the policy's intent is not reaching the body at
-    /// all, and no amount of matching the actuator model will help.</para>
-    ///
-    /// <para>Reported as mean and worst across the controlled bones. Isaac's drives hold their
-    /// targets closely once settled - joint velocity decays to 0.18 rad/s - so a large error here is
-    /// a difference in kind, not degree.</para>
-    /// </summary>
-    private string TrackingReport()
-    {
-        if (_actions == null)
-        {
-            return string.Empty;
-        }
-
-        float total = 0.0f;
-        float worst = 0.0f;
-        int counted = 0;
-
-        for (int i = 0; i < _controlledBones.Length && i < _actions.TargetEuler.Length; i++)
-        {
-            ActiveBone? bone = _controlledBones[i];
-            if (bone == null || !IsInstanceValid(bone) || bone.ParentBone == null)
-            {
-                continue;
-            }
-
-            float error = (_actions.TargetEuler[i] - IsaacObservation.DeviationFromRest(bone)).Length();
-            total += error;
-            worst = Mathf.Max(worst, error);
-            counted++;
-        }
-
-        return counted == 0 ? string.Empty : $" trackErr={total / counted:F2}/{worst:F2}rad";
-    }
-
-    /// <summary>
-    /// Absolute effective stiffness per bone against the gain the rig contract authored, and the
-    /// hard ceiling <c>I/dt^2</c> that no gain can exceed.
-    ///
-    /// <para>Reported because the FRACTION alone misleads once you try to compensate: raising
-    /// <c>kp</c> also raises the SPD denominator, so the fraction falls while the absolute value
-    /// barely moves. The ceiling is the number that matters - as <c>kp</c> tends to infinity the
-    /// effective gain tends to <c>I/dt^2</c>, so a limb light enough at 120 Hz simply cannot be
-    /// driven as stiffly as the contract asks, by any gain.</para>
-    /// </summary>
-    private string StiffnessReport()
-    {
-        float dt = 1.0f / Mathf.Max(1, Engine.PhysicsTicksPerSecond);
-        float authored = 0.0f;
-        float effective = 0.0f;
-        float ceiling = 0.0f;
-        int counted = 0;
-
-        foreach (ActiveBone? bone in _controlledBones)
-        {
-            if (bone == null || !IsInstanceValid(bone) || bone.ProportionalGain <= 0.0f)
-            {
-                continue;
-            }
-
-            float inertia = Mathf.Max(1e-5f, bone.LastEffectiveInertia);
-            float denominator = 1.0f
-                                + (bone.DerivativeGain * dt / inertia)
-                                + (bone.ProportionalGain * dt * dt / inertia);
-            authored += bone.ProportionalGain;
-            effective += bone.ProportionalGain / denominator;
-            ceiling += inertia / (dt * dt);
-            counted++;
-        }
-
-        if (counted == 0)
-        {
-            return string.Empty;
-        }
-        return $" kp={authored / counted:F0}->{effective / counted:F0} ceiling={ceiling / counted:F0}";
-    }
-
-    /// <summary>
-    /// Name and value of the largest-magnitude entry in an observation slice, as
-    /// <c>Name:value</c>. The DOF order is the policy's own, so the index maps straight onto the
-    /// contract's joint list and the answer is directly comparable with Isaac.
-    /// </summary>
-    private string WorstDof(float[] obs, int from, int to)
-    {
-        int worst = -1;
-        float peak = -1.0f;
-        for (int i = from; i < to && i < obs.Length; i++)
-        {
-            float magnitude = Mathf.Abs(obs[i]);
-            if (magnitude > peak)
-            {
-                peak = magnitude;
-                worst = i - from;
-            }
-        }
-
-        if (worst < 0 || _rig == null || worst >= _rig.DofOrder.Count)
-        {
-            return "n/a";
-        }
-
-        IsaacRigContract.JointSpec spec = _rig.DofOrder[worst];
-        return $"{spec.Bone}.{spec.GodotAxis}:{peak:F1}";
-    }
-
-    private void LogSlices(float[] obs, float[] actions)
-    {
-        var line = new System.Text.StringBuilder("[IsaacPolicyDriver] ");
-        foreach ((string name, int from, int to) in Slices)
-        {
-            float peak = 0.0f;
-            for (int i = from; i < to && i < obs.Length; i++)
-            {
-                peak = Mathf.Max(peak, Mathf.Abs(obs[i]));
-            }
-            line.Append($"{name}={peak:F2} ");
-        }
-
-        float maxAction = 0.0f;
-        foreach (float a in actions)
-        {
-            maxAction = Mathf.Max(maxAction, Mathf.Abs(a));
-        }
-        line.Append($"| maxAction={maxAction:F2}");
-
-        // Name the worst joint-velocity DOF, not just its magnitude.
-        //
-        // The slice peak alone cannot distinguish "the whole body is moving" from "one light distal
-        // bone is chattering", and those need opposite fixes. Measured against Isaac running the
-        // same policy at the same instant - Godot 33.90 rad/s against Isaac's 2.95, on a body still
-        // standing at 0.81 m - the difference has to be localised before it can be explained.
-        line.Append($" worstDof={WorstDof(obs, 55, 100)}");
-        line.Append(TorqueBudgetReport());
-        if (JointSpacePd)
-        {
-            line.Append($" trackErr={_trackingError:F3}rad torque={_appliedTorque:F0}Nm");
-            _trackingError = 0.0f;
-            _appliedTorque = 0.0f;
-        }
-        GD.Print(line.ToString());
-    }
-
     public override void _ExitTree()
     {
         _session?.Dispose();

@@ -29,6 +29,9 @@ param(
     [int] $Envs = 0,
     # Show the checkpoint menu instead of taking the one that is in Godot.
     [switch] $Pick,
+    # Open the NEWEST checkpoint of this task instead of the one promoted to Godot. What you want
+    # straight after training: the default answers "what is shipping", not "what did I just make".
+    [switch] $Latest,
     # Watch the UNTRAINED body instead of a checkpoint - the zero-action baseline. This is the
     # comparison every result on this track is measured against, so it is worth being able to see.
     [switch] $ZeroAction
@@ -56,13 +59,27 @@ if ($ZeroAction) {
         # -Interactive only when asked. Without -Pick this neither renders nor prompts, so
         # watch.ps1 stays usable unattended - and cannot be answered by a null stdin returning
         # empty and silently taking row 1, which is how a stray training run got launched once.
-        $picked = Select-Isaac3Checkpoint -TaskName $Task -Title "Watch which brain?" -Interactive:$Pick
+        $picked = Select-Isaac3Checkpoint -TaskName $Task -Title "Watch which brain?" `
+                                          -Interactive:$Pick -PreferNewest:$Latest
         if (-not $picked) { exit 0 }
         $Checkpoint = $picked.File
         $where = "{0}/{1}  model_{2}  scale {3}{4}" -f `
                  ($picked.Experiment -replace '^p4f_newton_', ''), $picked.Run,
                  $picked.Iteration, $picked.ActionScale,
                  $(if ($picked.Promoted) { "  <- the brain in Godot" } else { "" })
+
+        # **Say when a newer checkpoint exists but is not the one opening.** Defaulting to the
+        # promoted brain is right for "show me what is shipping" and silently wrong right after a
+        # training run - the new checkpoint sorts to row 2 and the run looks like it produced
+        # nothing. Nothing is hidden that the user is not told about.
+        $newest = Get-Isaac3Candidates -WantTask $Task |
+                  Where-Object SameTask | Sort-Object When -Descending | Select-Object -First 1
+        if ($newest -and $newest.File -ne $picked.File) {
+            Write-Host ("[watch] NOTE a newer {0} checkpoint exists: {1}/{2} model_{3}" -f `
+                        $Task, ($newest.Experiment -replace '^p4f_newton_', ''),
+                        $newest.Run, $newest.Iteration) -ForegroundColor Yellow
+            Write-Host "[watch]      opening the promoted one. Use -Latest for the new one, or -Pick to choose." -ForegroundColor Yellow
+        }
     } else {
         $info  = Get-Isaac3RunInfo -RunDir (Split-Path -Parent $Checkpoint)
         $where = "{0}  scale {1}" -f (Split-Path -Leaf $Checkpoint), $info.ActionScale
