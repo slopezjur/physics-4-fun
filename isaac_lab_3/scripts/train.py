@@ -50,6 +50,16 @@ def parse_args() -> argparse.Namespace:
         help="Seed the networks from another task's checkpoint, without its optimizer state.",
     )
     p.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Override one env-cfg field, e.g. --set balance_max_torque=75. Preferred over the "
+        "P4F_* environment variables: it is explicit at the call site, it lands in the run's own "
+        "params/env.yaml, and an unknown key is an error rather than a silent no-op. Three separate "
+        "bugs on this project came from an env var quietly falling back to its default.",
+    )
+    p.add_argument(
         "--experiment",
         type=str,
         default="",
@@ -107,6 +117,24 @@ def main() -> None:
         agent_cfg.max_iterations = args.iterations
     if args.experiment:
         agent_cfg.experiment_name = args.experiment
+    for pair in args.set:
+        if "=" not in pair:
+            raise SystemExit(f"--set expects KEY=VALUE, got '{pair}'")
+        key, _, raw = pair.partition("=")
+        key, raw = key.strip(), raw.strip()
+        if not hasattr(env_cfg, key):
+            raise SystemExit(f"--set '{key}' is not a field of this task's env cfg.")
+        current = getattr(env_cfg, key)
+        if isinstance(current, bool):
+            value = raw.lower() in ("1", "true", "yes", "on")
+        elif isinstance(current, int) and not isinstance(current, bool):
+            value = int(raw)
+        elif isinstance(current, float):
+            value = float(raw)
+        else:
+            value = raw
+        setattr(env_cfg, key, value)
+        print(f"[train] override {key} {current} -> {value}")
     if args.push >= 0.0:
         env_cfg.push_velocity = args.push
         env_cfg.push_ang_velocity = args.push * (5.0 / 3.0)

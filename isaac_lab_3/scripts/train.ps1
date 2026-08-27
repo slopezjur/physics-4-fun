@@ -20,7 +20,14 @@ param(
     [string] $InitFrom,
     # Overrides $MaxMinutes for this command only, e.g. .\train.ps1 -Minutes 5
     [double] $Minutes = -1,
-    [int] $Envs = 0
+    [int] $Envs = 0,
+    # Override env-cfg fields for this run, e.g. -Set balance_max_torque=75,balance_reaction=True.
+    # Recorded in the run's params/env.yaml, unlike the P4F_* environment variables.
+    [string[]] $Set = @(),
+    # XPBD solver iterations for this run only. **Part of the trained dynamics** - a policy trained
+    # at 8 is driving a different body from one trained at 2, and the two are not interchangeable.
+    # 0 keeps $SolverIterations from config.ps1.
+    [int] $Solver = 0
 )
 # Capture BEFORE dot-sourcing - config.ps1 defines $Envs and $MaxMinutes itself, so reading the
 # parameters afterwards returns the config values and every override is silently ignored.
@@ -47,6 +54,7 @@ if ($InitFrom -and -not (Test-Path -LiteralPath $InitFrom)) {
     Write-Host "[train] seeding from $seedExperiment/$($seedRun.Name)" -ForegroundColor DarkGray
 }
 
+if ($Solver -gt 0) { $SolverIterations = $Solver }
 $env:P4F_XPBD_ITERATIONS = "$SolverIterations"
 
 $cmd = @("$PSScriptRoot/train.py", '--task', $TaskId, '--num_envs', $Envs,
@@ -55,6 +63,7 @@ if ($RunSuffix)       { $cmd += @('--run_name', $RunSuffix) }
 if ($ResumeFrom)      { $cmd += @('--resume', $ResumeFrom) }
 if ($InitFrom)        { $cmd += @('--init_from', $InitFrom) }
 if ($ExperimentName)  { $cmd += @('--experiment', $ExperimentName) }
+foreach ($pair in $Set) { $cmd += @('--set', $pair) }
 
 $budget = if ($MaxMinutes -gt 0) { "$MaxMinutes min" } else { "no time cap" }
 Write-Host "[train] $Task -> $Experiment : $Envs envs, $budget, XPBD iterations $SolverIterations" -ForegroundColor Cyan

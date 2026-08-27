@@ -443,8 +443,23 @@ class StandEnv(DirectRLEnv):
         `_action` is already clamped, so this reads the unclamped tensor. Without it PPO's Gaussian
         mean drifts to infinity: the environment clamps, so once a component is outside, pushing it
         further changes nothing that executes and therefore costs nothing.
+
+        **Quadratic close in, linear far out - because a pure square blew the whole reward apart.**
+        Measured on the first honest-physics run: raw actions reached about +/-22, so the squared
+        term contributed ~441 per component per step across 36 of them, and `action_clip` reached
+        -10,810 per episode against `upright` and `head_height` of order 1. PPO then optimises "do
+        not emit large numbers" instead of "stand up" - and the give-away was that the body terms
+        were still improving underneath it (upright 0.38 -> 1.15) while total reward collapsed.
+
+        The square is kept where the barrier does its real work, just outside the usable range,
+        because that is where the gradient needs to be sharp. Beyond one full unit of excess it
+        becomes linear: the push-back never vanishes (which is the failure the barrier exists to
+        prevent) but it can no longer outgrow every other term. The join at `excess = 1` is
+        continuous in value and slope, so nothing kinks.
         """
-        return torch.sum(torch.relu(self._raw_action.abs() - 1.0) ** 2, dim=1)
+        excess = torch.relu(self._raw_action.abs() - 1.0)
+        bounded = torch.where(excess <= 1.0, excess.pow(2), 2.0 * excess - 1.0)
+        return torch.sum(bounded, dim=1)
 
     def _effort_fraction(self) -> torch.Tensor:
         """Mean squared PD torque as a fraction of each joint's limit.

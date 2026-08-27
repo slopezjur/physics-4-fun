@@ -57,19 +57,68 @@ $Python = Resolve-Isaac3Python
 $Task = "stand"
 
 # --- Training scale ----------------------------------------------------------
-# MEASURED on this machine (RTX 4080 SUPER 16 GB), Stand under XPBD, 8 iterations per row:
+# MEASURED on this machine (RTX 4080 SUPER 16 GB, 32 GB system), Stand under XPBD at 2 solver
+# iterations, via `scripts/benchmark.py --envs ... --iterations 25`. Whole sweep in one session on
+# an IDLE machine - 10.8 GB RAM and 0.9 GB VRAM baseline before the first row.
 #
-#    num_envs    steps/s
-#       1024      76800
-#       4096	  222700   <- the default
-#		8192
-#		16384
-#		24576
-#		32768
+#   num_envs    steps/s   per env   iters/min   proc RAM    VRAM
+#       1024     61,804        60       150.9      1.9 GB   1.6 GB
+#       2048    125,381        61       153.1      2.1 GB   1.9 GB   <- last linear point
+#       4096    215,165        53       131.3      2.3 GB   2.5 GB
+#       8192    361,757        44       110.4      2.8 GB   3.5 GB
+#      12288    454,420        37        92.5      3.3 GB   4.6 GB
+#      16384    512,821        31        78.3      3.8 GB   5.6 GB   <- what the night chain used
+#      24576    566,127        23        57.6      4.8 GB   7.8 GB
+#      32768    622,179        19        47.5      6.0 GB   9.9 GB
+#
+# `iters/min` is DERIVED: steps/s divided by (num_envs * num_steps_per_env), with the rollout at 24.
+# It is a collection rate, not an end-to-end training rate - the night chain observed ~29 iters/min
+# at 16384 against the 78 here, because a real iteration also pays the PPO update and the
+# checkpoint write. Use the column for comparing rows, not for predicting wall-clock.
+#
+# **MEASURE ON AN IDLE MACHINE.** An earlier sweep of the same rows, taken with background work
+# running (14.9 GB RAM idle instead of 10.8), read ~50% LOW at every single count - 334,282 at
+# 16384 against 512,821 here. That is far larger than any difference between adjacent rows, so a
+# contaminated table does not merely shift: it will point at the wrong env count entirely. Check
+# the idle baseline the benchmark prints before trusting a row.
+#
+# **Scaling is linear to 2048 and degrades steadily after.** Per-env throughput holds at 60-61k
+# through 2048, then falls: 53k / 44k / 37k / 31k / 23k / 19k. Past 2048 each added environment
+# buys less than the one before it, and by 32768 an environment is worth under a third of what it
+# is worth at 1024.
+#
+# **More envs is a genuine trade-off, not a free win, and this table cannot settle it.** 32768 has
+# the best throughput in the table by a wide margin - 622k steps/s against 513k at 16384 - and the
+# worst update rate, 47.5/min against 78.3. Which matters depends on something nothing here
+# measures: a bigger batch gives each PPO update a lower-variance gradient, so fewer-but-better
+# updates may beat more-but-noisier ones, or may not. The only configuration with a DEMONSTRATED
+# result on this project is 16384, which is what the night chain that produced the working brain
+# ran at - that is history, not evidence of optimality.
+#
+# If you want to raise it, the check is a learning one: same task, same wall-clock, two env counts,
+# compare where the reward curve gets to. Throughput alone will always favour the largest count
+# that fits.
+#
+# **Trust `proc RAM`; `sys RAM` and `VRAM` include the desktop.** Process RAM is reproducible across
+# sessions at the same env count (3.8 GB at 16384 in both the clean and contaminated sweeps) while
+# the system totals moved by 4-7 GB with background load. The 2.3.2 track's ceiling was system RAM,
+# and an env count that fits at startup can still die on an allocation hours into an unattended
+# run - 32768 commits 6.0 GB of process RAM and 9.9 GB of VRAM, so leave headroom.
 #
 # For comparison the 2.3.2 PhysX track measured 110,000 at 4,096 on the URDF rig and about 204,000
-# at 8,192 on the D6 rig. XPBD on the D6 rig is roughly 2x the PhysX figure at the same env count,
-# which is the opposite of what an iterative position-based solver is usually assumed to cost.
+# at 8,192 on the D6 rig. XPBD on the D6 rig is roughly 2x both (215k and 362k), which is the
+# opposite of what an iterative position-based solver is usually assumed to cost - though those
+# PhysX figures came from different solver settings and were not re-taken idle.
+#
+# **Every row above was taken at $SolverIterations = 2, with balance_reaction OFF.** Both matter.
+# Solver iterations are per-tick constraint work, so 8 costs materially more than 2 and this whole
+# table would need re-taking before it could advise an env count for an 8-iteration run - which the
+# honest-physics line (reaction ON at full 300 N.m) requires to be stable at all. Do not carry these
+# numbers across that boundary.
+#
+# Conditions in full, so a future row can be compared like for like:
+#   task Stand, XPBD iterations 2, action_scale 0.4 (task default), balance_assist 0.0,
+#   balance_reaction off, num_steps_per_env 24, episode length ~44 steps, machine idle.
 #
 # Re-measure before assuming this transfers to another task: the 2.3.2 config records that a table
 # taken from the wrong task is exactly how its own env count got set wrong once.
