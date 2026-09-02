@@ -227,6 +227,18 @@ public sealed class IsaacObservation : IRlObservationBuilder
                 rate = _filteredJointVelocity[i];
             }
 
+            if (!JointVelocityEnabled)
+            {
+                obs.Add(0.0f);
+                continue;
+            }
+
+            if (JointVelocityMinRange > 0.0f && (spec.Upper - spec.Lower) < JointVelocityMinRange)
+            {
+                obs.Add(0.0f);
+                continue;
+            }
+
             obs.Add(JointVelocityClip > 0.0f ? Mathf.Clamp(rate, -JointVelocityClip, JointVelocityClip) : rate);
         }
     }
@@ -267,6 +279,31 @@ public sealed class IsaacObservation : IRlObservationBuilder
     /// the same physical quantity in both engines.</para>
     /// </summary>
     public float JointVelocityFilter { get; set; } = 1.0f;
+
+    /// <summary>
+    /// False zeroes observation slice [55:100] entirely. **Must match `obs_joint_vel_enabled` in
+    /// the Isaac task config** - a policy trained with the channel masked must be deployed with it
+    /// masked, and vice versa.
+    ///
+    /// <para>This is the third attempt at the joint-velocity mismatch and the only one that makes
+    /// the two engines agree by construction. Godot reads 20-68 rad/s on tightly-limited twist axes
+    /// where Isaac peaks at 7.5. Filtering measurably worsens transfer; noise at Godot's scale
+    /// erases a signal that only spans 0.2-3 rad/s in training. A channel carrying zero in both
+    /// engines cannot disagree.</para>
+    /// </summary>
+    public bool JointVelocityEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Zero the joint-velocity observation for any joint whose contract limit range is narrower
+    /// than this, in radians. 0 disables it. **Must match `obs_joint_vel_min_range` in the Isaac
+    /// task config**, and both derive the mask from the same limits so they agree by construction.
+    ///
+    /// <para>The targeted form of <see cref="JointVelocityEnabled"/>. Godot's chatter is not spread
+    /// across the channel; it is the tightly limited axes bouncing off their own stops - measured
+    /// at 68 rad/s on `Shin_R.y`, whose range is 0.2 rad. Twelve of 45 DOF are narrower than
+    /// 0.5 rad and they are exactly the ones the chatter measurements name.</para>
+    /// </summary>
+    public float JointVelocityMinRange { get; set; }
 
     /// <summary>Smoothed joint velocities, one per DOF. See <see cref="JointVelocityFilter"/>.</summary>
     private float[]? _filteredJointVelocity;

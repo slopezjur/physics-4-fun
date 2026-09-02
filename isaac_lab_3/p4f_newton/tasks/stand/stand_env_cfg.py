@@ -145,6 +145,64 @@ class StandEnvCfg(DirectRLEnvCfg):
     # fixed yardstick as a monotonic slide across four segments - 31.6, 26.6, 24.2, 22.7 - each
     # resuming from the last, so it compounded. 0.3 is a fifth of the early signal and a sensible
     # fraction of what the channel actually carries.
+    # **False zeroes observation slice [55:100] entirely, in Isaac AND in Godot.**
+    #
+    # The joint-velocity channel is the one measured irreconcilable difference between the engines:
+    # Godot's tightly-limited twist axes chatter against their stops at 20-68 rad/s where Isaac's
+    # peak across all 45 DOF is 7.5. Both remedies are closed. Filtering it in Godot adds a ~0.11 s
+    # lag to a balance-critical signal and measurably makes transfer WORSE (the promoted balance
+    # brain stands at authority 0.10 unfiltered and falls at 0.50, 0.30 and 0.15). Hardening with
+    # noise was tried at 1.5 std and degraded a fixed yardstick monotonically - 31.6, 26.6, 24.2,
+    # 22.7 - because Isaac's signal only spans 0.2-3 rad/s, so noise that matches Godot's scale
+    # erases the channel rather than toughening it.
+    #
+    # So: remove it from BOTH engines instead. A channel that carries nothing cannot disagree. The
+    # objection to noise - that the policy loses its fast feedback - describes a policy that had
+    # the channel and lost it; one trained from the start without it learns to balance on gravity,
+    # height, joint ANGLE and contacts, all four of which the two engines already agree on.
+    #
+    # Godot must mask the same slice: see `IsaacObservation.JointVelocityEnabled`.
+    obs_joint_vel_enabled = True
+
+    # Zero the joint-velocity observation for any joint whose limit range is NARROWER than this,
+    # in radians. 0 disables it. **This is the targeted version of `obs_joint_vel_enabled`.**
+    #
+    # Masking the whole channel works but costs too much: measured over six chained legs the policy
+    # plateaus at 73-81% standing against 99% unmasked, because 33 of the 45 DOF carry feedback it
+    # genuinely needs. The chatter is not spread across the channel - it is specifically the tightly
+    # limited axes bouncing off their own stops, `Shin_R.y` at 68 rad/s on a 0.2 rad range. Twelve
+    # joints are narrower than 0.5 rad (both shins' y/z at 0.2, both feet's at 0.4, and the hands),
+    # and they are exactly the ones named in the chatter measurements.
+    #
+    # Godot derives the same mask from the same contract limits, so the two agree by construction
+    # rather than by a copied list. See `IsaacObservation.JointVelocityMinRange`.
+    # Selects which joints count as "narrow", in radians of limit range. **Selection only** - what
+    # HAPPENS to them is decided by `obs_joint_vel_mask_narrow` and `obs_joint_vel_narrow_noise`.
+    # These were one knob at first, which silently made the two treatments mutually exclusive: the
+    # chatter was injected and then multiplied by the mask's zero, so the first chatter run was
+    # really just another mask run wearing a different experiment name.
+    obs_joint_vel_min_range = 0.0
+
+    # Zero the narrow joints' velocity observation. Refuted for transfer - see the ladder results -
+    # kept because the negative result is worth being able to reproduce.
+    obs_joint_vel_mask_narrow = False
+
+    # Noise (rad/s, std) added to the joint-velocity observation of the NARROW joints only - the
+    # ones `obs_joint_vel_min_range` identifies. 0 disables it.
+    #
+    # **This reproduces Godot rather than sanitising it, which is the only reading left.** Three
+    # ways of removing the discrepancy all made transfer worse: filtering in Godot (brain drops from
+    # authority 0.10 to 0.05), noise across all 45 channels at std 1.5 (monotonic degradation), and
+    # masking - full or narrow - which fails every rung of the ladder despite scoring 82.6% in
+    # Isaac where a 68% unmasked policy stood at 0.05. A policy that transfers worse the more the
+    # channel is cleaned is a policy that USES the channel.
+    #
+    # So give it Godot's channel in training. The failed noise test dosed all 45 DOF equally and
+    # erased a 0.2-3 rad/s signal; the measured chatter is confined to the tightly limited axes -
+    # `Shin_R.y` at 68 rad/s on a 0.2 rad range - while the wide joints stay clean in both engines.
+    # 20.0 is the middle of the 8-68 rad/s Godot actually delivers there.
+    obs_joint_vel_narrow_noise = 0.0
+
     obs_joint_vel_clip = 15.0
     obs_joint_vel_noise = 0.3
 

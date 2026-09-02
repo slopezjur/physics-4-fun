@@ -12,6 +12,7 @@ Normally driven by `train.ps1`, which supplies every argument from `config.ps1`.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import pathlib
 import sys
@@ -58,6 +59,18 @@ def parse_args() -> argparse.Namespace:
         "P4F_* environment variables: it is explicit at the call site, it lands in the run's own "
         "params/env.yaml, and an unknown key is an error rather than a silent no-op. Three separate "
         "bugs on this project came from an env var quietly falling back to its default.",
+    )
+    p.add_argument(
+        "--max_action_std",
+        type=float,
+        default=0.4,
+        help="Upper bound on the Gaussian exploration std. 0 disables the bound. **Not a tuning "
+        "knob - it is the fix for a measured runaway.** rsl_rl leaves `log_std_param` a free "
+        "parameter with no ceiling, and when a curriculum pushes reward negative the entropy term "
+        "is the only one left with a clear gradient, so std inflates, actions get wilder, reward "
+        "gets worse, and it inflates further. Measured over 13 chained segments: every segment that "
+        "ended with std >= 0.91 scored 0%% and every segment that ended <= 0.32 scored 96-100%%, "
+        "with std peaking at 6.25.",
     )
     p.add_argument(
         "--experiment",
@@ -123,6 +136,37 @@ def main() -> None:
     # run silently trains a different body than the checkpoint came from.
     if args.resume:
         restore(env_cfg, args.resume, label="train")
+    # **Carry the curriculum ceiling across the restart.** Written by this script at the end of a
+    # run, beside the checkpoints, and read back here - so resume.ps1, night.py and a hand-typed
+    # --resume all pick it up rather than only one of them. Read BEFORE apply_overrides so an
+    # explicit `--set push_curriculum_start=` still wins.
+    # Which recorded value feeds which cfg field, and how to describe it. One table so a new
+    # curriculum needs an entry rather than another copy of this block.
+    CURRICULUM_CARRY = {
+        "impulse_ceiling": ("push_curriculum_start", "_impulse_ceiling", "N.s"),
+        "cmd_speed_ceiling": ("cmd_speed_start", "_cmd_speed_ceiling", "m/s"),
+    }
+
+    if args.resume:
+        _carry = pathlib.Path(args.resume).resolve().parent / "curriculum.json"
+        if _carry.is_file():
+            try:
+                _saved = json.loads(_carry.read_text(encoding="utf-8"))
+            except (ValueError, OSError) as exc:
+                print(f"[train] WARNING could not read {_carry}: {exc}; every ramp restarts from "
+                      "its task default and will re-hunt the level it already found.")
+                _saved = {}
+            for _key, (_field, _attr, _unit) in CURRICULUM_CARRY.items():
+                if _key not in _saved or not hasattr(env_cfg, _field):
+                    continue
+                try:
+                    _prev = float(_saved[_key])
+                except (TypeError, ValueError):
+                    continue
+                if _prev > 0.0:
+                    setattr(env_cfg, _field, _prev)
+                    print(f"[train] curriculum resumes at {_prev:.3f} {_unit}")
+
     apply_overrides(env_cfg, args.set, label="train")
     if args.push >= 0.0:
         env_cfg.push_velocity = args.push
@@ -210,6 +254,39 @@ def main() -> None:
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
 
+    # **Bound the exploration std after every update.**
+    #
+    # Wrapped around `alg.update` rather than patched into rsl_rl: the clamp has to land after the
+    # optimizer step that moved the parameter, and this is the only seam that sees every step
+    # without a fork. Clamping the PARAMETER, not the sampled action - capping actions after the
+    # fact would leave the runaway inside the policy and merely hide it from the environment, and
+    # `deterministic_output` returns the MEAN, so a policy whose mean has been dragged out of
+    # [-1, 1] stays broken at evaluation time where no sampling happens at all.
+    if args.max_action_std > 0.0:
+        import math
+
+        _dist = runner.alg.actor.distribution
+        _ceiling = args.max_action_std
+        _inner = runner.alg.update
+
+        if hasattr(_dist, "log_std_param"):
+            _limit = math.log(_ceiling)
+
+            def _clamp():
+                _dist.log_std_param.clamp_(max=_limit)
+        else:
+            def _clamp():
+                _dist.std_param.clamp_(max=_ceiling)
+
+        def _update_then_clamp(*a, **kw):
+            out = _inner(*a, **kw)
+            with torch.no_grad():
+                _clamp()
+            return out
+
+        runner.alg.update = _update_then_clamp
+        print(f"[train] exploration std bounded at {_ceiling}")
+
     total = agent_cfg.max_iterations
     deadline = time.time() + args.max_minutes * 60.0 if args.max_minutes > 0 else None
 
@@ -233,6 +310,23 @@ def main() -> None:
                 f"{max(0.0, remaining):.1f} min left"
             )
         print(f"[train] stopped after {done} iterations ({(time.time() - started) / 60.0:.1f} min)")
+
+    # Record where the ramp got to, for whatever resumes from these checkpoints. Written before
+    # env.close() while the env is still alive, and failure here must not lose the training run -
+    # the checkpoints are already on disk and are the thing that matters.
+    _state = {}
+    for _key, (_field, _attr, _unit) in CURRICULUM_CARRY.items():
+        _reached = getattr(env.unwrapped, _attr, None)
+        if _reached is not None:
+            _state[_key] = float(_reached)
+            print(f"[train] curriculum ceiling {float(_reached):.3f} {_unit} recorded for the next run")
+    if _state:
+        try:
+            (pathlib.Path(log_dir) / "curriculum.json").write_text(
+                json.dumps(_state, indent=2), encoding="utf-8",
+            )
+        except OSError as exc:
+            print(f"[train] WARNING could not record the curriculum ceiling: {exc}")
 
     env.close()
 

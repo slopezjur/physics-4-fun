@@ -134,7 +134,7 @@ $Iterations = 0
 # run here is a real result, not a smoke test.
 #
 # The run stops on a checkpoint boundary rather than being killed, so it always ends resumable.
-$MaxMinutes = 1
+$MaxMinutes = 15
 
 # Suffix appended to the run directory, e.g. "2026-08-27_00-15-02_baseline". Empty = timestamp only.
 $RunSuffix = ""
@@ -154,7 +154,7 @@ $ResumeFrom = ""
 #
 # Change this only at a retrain boundary, never between training and playback. A policy replayed
 # against different iterations is driving a body it never saw.
-$SolverIterations = 2
+$SolverIterations = 8
 
 # --- Watching ----------------------------------------------------------------
 # Environments to render. The training default would draw an unusable grid.
@@ -480,7 +480,20 @@ function Get-Isaac3Brain {
 # ---------------------------------------------------------------- candidates
 
 function Get-Isaac3Candidates {
-    param([Parameter(Mandatory = $true)][string] $WantTask)
+    param(
+        [Parameter(Mandatory = $true)][string] $WantTask,
+        # List every run of each lineage rather than only its newest.
+        [switch] $All,
+        # Checkpoints listed per run, highest iteration first.
+        [int] $PerRun = 1
+    )
+    # **Declared, not inherited.** These used to be read out of the CALLER's scope by PowerShell's
+    # dynamic scoping. resume.ps1 happens to declare both as parameters, so the menu worked there;
+    # watch.ps1 declares neither, so inside it $All was $null and $PerRun was $null - which
+    # [Math]::Max(1, $null) turns into 1. The same function therefore offered a different, much
+    # smaller menu depending on which script called it, with nothing to say so: a checkpoint two
+    # runs back was structurally unreachable from watch.ps1. Same trap as the $Envs and
+    # $Experiment shadowing both scripts warn about in their headers.
 
     $wantBrain = Get-Isaac3Brain $WantTask
     $promoted = Get-Isaac3Promoted -TaskName $WantTask
@@ -593,6 +606,9 @@ function Select-Isaac3Checkpoint {
         [Parameter(Mandatory = $true)][string] $TaskName,
         [string] $Title = "Resume from which brain?",
         [switch] $Interactive,
+        # Widen the menu. Forwarded to Get-Isaac3Candidates rather than left to scope.
+        [switch] $All,
+        [int] $PerRun = 1,
         # Non-interactive: take the newest checkpoint of THIS task instead of the promoted one.
         #
         # The two defensible defaults disagree exactly when it matters. Defaulting to the promoted
@@ -602,7 +618,7 @@ function Select-Isaac3Checkpoint {
         [switch] $PreferNewest
     )
 
-    $options = Get-Isaac3Candidates -WantTask $TaskName
+    $options = Get-Isaac3Candidates -WantTask $TaskName -All:$All -PerRun $PerRun
     if (-not $options) {
         throw "No checkpoints of at least $MinIterations iterations under $LogRoot. Train one with .	rain.ps1."
     }

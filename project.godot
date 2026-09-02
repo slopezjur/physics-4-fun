@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="Physics4Fun"
-run/main_scene="uid://duxtqg6efh63j"
+run/main_scene="uid://dfnw5cik17fxd"
 config/features=PackedStringArray("4.7", "C#", "Forward Plus")
 config/icon="res://icon.svg"
 run/main_scene.perturbation="res://Scenes/RL/Jolt/Upright/RagdollPerturbationTraining.tscn"
@@ -37,8 +37,6 @@ enabled=PackedStringArray("res://addons/godot_rl_agents/plugin.cfg")
 
 common/physics_ticks_per_second=120
 3d/physics_engine="Jolt Physics"
-jolt_physics_3d/simulation/velocity_steps=30
-jolt_physics_3d/simulation/position_steps=16
 
 [rendering]
 

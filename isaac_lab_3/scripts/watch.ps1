@@ -32,6 +32,14 @@ param(
     # Open the NEWEST checkpoint of this task instead of the one promoted to Godot. What you want
     # straight after training: the default answers "what is shipping", not "what did I just make".
     [switch] $Latest,
+    # Widen the menu, same meaning as in resume.ps1.
+    #
+    # **Without these the picker cannot reach most checkpoints.** The menu lists one run per
+    # lineage and one checkpoint per run, so anything but the newest run's final model is
+    # unreachable - `perturb_honest2/night11/model_7350` was invisible while `night13/model_9310`
+    # was the only offer, even though 7350 measured better in Godot.
+    [switch] $All,
+    [int] $PerRun = 1,
     # Watch the UNTRAINED body instead of a checkpoint - the zero-action baseline. This is the
     # comparison every result on this track is measured against, so it is worth being able to see.
     [switch] $ZeroAction
@@ -60,7 +68,8 @@ if ($ZeroAction) {
         # watch.ps1 stays usable unattended - and cannot be answered by a null stdin returning
         # empty and silently taking row 1, which is how a stray training run got launched once.
         $picked = Select-Isaac3Checkpoint -TaskName $Task -Title "Watch which brain?" `
-                                          -Interactive:$Pick -PreferNewest:$Latest
+                                          -Interactive:$Pick -PreferNewest:$Latest `
+                                          -All:$All -PerRun $PerRun
         if (-not $picked) { exit 0 }
         $Checkpoint = $picked.File
         $where = "{0}/{1}  model_{2}  scale {3}{4}" -f `
@@ -72,7 +81,7 @@ if ($ZeroAction) {
         # promoted brain is right for "show me what is shipping" and silently wrong right after a
         # training run - the new checkpoint sorts to row 2 and the run looks like it produced
         # nothing. Nothing is hidden that the user is not told about.
-        $newest = Get-Isaac3Candidates -WantTask $Task |
+        $newest = Get-Isaac3Candidates -WantTask $Task -All:$All -PerRun $PerRun |
                   Where-Object SameTask | Sort-Object When -Descending | Select-Object -First 1
         if ($newest -and $newest.File -ne $picked.File) {
             Write-Host ("[watch] NOTE a newer {0} checkpoint exists: {1}/{2} model_{3}" -f `

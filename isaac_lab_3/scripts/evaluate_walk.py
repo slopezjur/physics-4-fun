@@ -48,6 +48,17 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seconds", type=float, default=12.0)
     p.add_argument("--speed", type=float, default=0.8, help="Commanded forward speed, m/s.")
     p.add_argument("--yaw", type=float, default=0.0, help="Commanded yaw rate, rad/s.")
+    p.add_argument(
+        "--conditions_from",
+        type=str,
+        default="",
+        help="Checkpoint whose params/env.yaml supplies the plant. Defaults to --checkpoint; the "
+        "zero-action baseline needs it explicitly, having no checkpoint of its own.",
+    )
+    p.add_argument(
+        "--set", action="append", default=[], metavar="KEY=VALUE",
+        help="Override an env-cfg field after the trained conditions are restored.",
+    )
     p.add_argument("--device", type=str, default="cuda:0")
     p.add_argument("--json", type=str, default="")
     return p.parse_args()
@@ -59,6 +70,7 @@ def main() -> dict:
         raise SystemExit("Pass --checkpoint or --zero_action.")
 
     from isaaclab_tasks.utils import load_cfg_from_registry
+    from p4f_newton.state import quat_rotate_inverse, yaw_only
     from p4f_newton.tasks.walk.walk_env import WalkEnv
 
     # Unbounded, as evaluate_stand.py runs: what training reports is bounded by episode ends, and a
@@ -82,6 +94,22 @@ def main() -> dict:
     env_cfg.scene.num_envs = args.num_envs
     env_cfg.sim.device = args.device
     env_cfg.playback = True  # measure the policy, not the observation noise
+
+    # **Score the policy on the body it was trained on.** Walk inherits StandEnvCfg, so it inherits
+    # the same trap: the registry defaults are action_scale 0.4, balance_assist 0.0,
+    # balance_reaction False, while every honest lineage here trains at 0.15 / 1.0 / True. Scoring
+    # one against the other hands the policy 2.7x its action authority with the stabiliser off. This
+    # exact substitution read a checkpoint holding 75% standing as 0% earlier in this project, and
+    # evaluate_stand.py carried the same defect until it was fixed - this is the second copy.
+    from run_conditions import apply_overrides, restore
+
+    conditions = args.conditions_from or args.checkpoint
+    if conditions:
+        restore(env_cfg, conditions, label="eval")
+    elif args.zero_action:
+        print("[eval] WARNING baseline scored on TASK DEFAULTS; pass --conditions_from <checkpoint> "
+              "to measure it on the same body as the policies it is compared against.")
+    apply_overrides(env_cfg, args.set, label="eval")
 
     env = gym.make(args.task, cfg=env_cfg)
     policy = None
@@ -124,11 +152,18 @@ def main() -> dict:
             obs = env.step(action)[0]
 
         data = base.robot.data
-        vel = data.body_com_lin_vel_w.torch[:, pelvis_id, :2]
-        # Along the commanded direction in WORLD terms: the command is +x in the heading frame and
-        # the dummy starts facing +x, so for a straight-line command these agree. A yaw command
-        # makes this an underestimate, which is why `distance` is reported beside it.
-        tracked += vel[:, 0]
+        # **`rig.root_lin_vel_w`, not `data.body_com_lin_vel_w`.** This module's own env docstring
+        # records that the Isaac Lab velocity buffers are frozen under XPBD and read a plausible
+        # zero - WalkEnv derives everything through NewtonRigState for exactly that reason, and the
+        # evaluator reading the frozen buffer is why it reported ~0 m/s while the training gate
+        # measured real forward progress. Two instruments that cannot agree are worse than one.
+        # **Body frame, not world.** The command is +x in the HEADING frame, so the speed that
+        # answers "is it obeying" is the heading-frame forward component. Taking world x assumed
+        # the dummy still faces its spawn direction; a dummy that has turned around and is walking
+        # competently forward then reads as large NEGATIVE speed. That is exactly what this
+        # reported - -0.44 m/s at 92% upright with 5.9 m travelled, which is not a failure profile.
+        vel_b = quat_rotate_inverse(yaw_only(base.rig.root_quat_w), base.rig.root_lin_vel_w)
+        tracked += vel_b[:, 0]
 
         head = data.body_com_pos_w.torch[:, head_id, 2] - base.scene.env_origins[:, 2]
         ok = (head >= FALL_HEAD_HEIGHT) & (base.rig.upright() >= tilt_cos)
@@ -141,6 +176,15 @@ def main() -> dict:
         counted += 1
 
     travelled = (base.rig.root_pos_w - start)[:, :2]
+    # A single diverged environment turns the mean into nan and destroys the one metric here that
+    # is trustworthy. Report how many rather than silently dropping them: a run with divergences is
+    # a different measurement from a clean one, and the count is the thing worth acting on.
+    _finite = torch.isfinite(travelled).all(dim=1)
+    _diverged = int((~_finite).sum().item())
+    if _diverged:
+        print(f"  DIVERGED         : {_diverged} of {base.num_envs} envs produced non-finite "
+              f"positions; the figures below exclude them.")
+        travelled = travelled[_finite]
     result = {
         "checkpoint": pathlib.Path(args.checkpoint).name if args.checkpoint else "ZERO-ACTION",
         "commanded_speed": args.speed,

@@ -60,7 +60,7 @@ if ($EnvsOverride -gt 0)    { $Envs = $EnvsOverride }
 # ---------------------------------------------------------------- selection
 
 if (-not $Checkpoint) {
-    $picked = Select-Isaac3Checkpoint -TaskName $Task -Interactive
+    $picked = Select-Isaac3Checkpoint -TaskName $Task -Interactive -All:$All -PerRun $PerRun
     if (-not $picked) { exit 0 }
     $Checkpoint  = $picked.File
     $sameTask    = $picked.SameTask

@@ -48,6 +48,50 @@ class WalkEnvCfg(StandEnvCfg):
     # Below this commanded speed an episode counts as a stand-still command.
     cmd_deadband = 0.1
 
+    # Blend factor for the forward-progress average used by `_drive`.
+    #
+    # **0.008, a ~2 s time constant at 60 Hz, widened from 0.02 (~0.83 s).** At 0.83 s the loophole
+    # was narrowed but not closed: measured over two legs, `mean drive` kept climbing to 0.83 while
+    # net displacement FELL from 0.052 to 0.036 m/s - an oscillation slower than the window still
+    # gets paid for its forward half. The averaging window has to be longer than the slowest rocking
+    # the policy can find, not merely longer than a stride.
+    drive_smoothing = 0.008
+
+    # --- command curriculum ---
+    # **A fixed command range lets the policy harvest its easy end.** `_drive` scores achieved over
+    # commanded, so a 0.15 m/s command is satisfied trivially while 0.8 is not. Measured over five
+    # chained legs: upright at a 0.4 m/s command rose 10% -> 85% and episode length 143 -> 393,
+    # while steps FELL 79 -> 33 and distance fell 0.47 -> 0.36 m. The policy was not learning to
+    # walk; it was learning to stand still through the movement commands it could not satisfy and
+    # collect on the small ones it could.
+    #
+    # This is the same mistake the Perturb impulse ceiling made - sizing the demand against the
+    # target scenario rather than against what the policy can currently do. Same remedy: sample
+    # inside a ceiling that only widens once the policy is actually tracking near the top of it.
+    cmd_curriculum = True
+
+    # Where the ramp starts, and the top it may reach (the configured `cmd_lin_vel_x` upper bound).
+    # Negative start means "use cmd_speed_min".
+    cmd_speed_start = -1.0
+    cmd_speed_min = 0.25
+    cmd_speed_max = 1.0
+
+    # Episodes with a moving command, near the ceiling, before one decision. Same sizing logic as
+    # Perturb's window: matched to how fast the policy learns, not how fast episodes finish.
+    cmd_curriculum_window = 16384
+
+    # An episode counts as "near the ceiling" when its commanded speed reached this fraction of it,
+    # and counts as a success when it did not fall AND averaged at least `cmd_success_drive` of the
+    # commanded speed. Tracking is what has to improve; staying upright is necessary, not sufficient
+    # - a policy that stands still through the command satisfies uprightness and learns nothing.
+    cmd_curriculum_band = 0.8
+    cmd_success_drive = 0.5
+
+    cmd_curriculum_raise_above = 0.60
+    cmd_curriculum_lower_below = 0.30
+    cmd_curriculum_raise_factor = 1.08
+    cmd_curriculum_lower_factor = 0.90
+
     # --- reward shape: PRODUCT, not additive ---
     #
     # `docs/RL-SESSION-INVARIANTS.md` records this as a rule for Walk specifically, and
@@ -69,7 +113,10 @@ class WalkEnvCfg(StandEnvCfg):
     # turning in place - a zero linear command scores `drive` through the stillness kernel, so the
     # product reduces to yaw tracking alone.
     rew_track = 5.0
-    rew_feet_air_time = 1.0
+    # **10.0, raised from 1.0.** At the measured flight time the term was contributing about 0.05
+    # per episode against a `track` term of 13 - arithmetically incapable of changing behaviour
+    # whatever its threshold. Weight and threshold had to move together; either alone does nothing.
+    rew_feet_air_time = 10.0
 
     # `drive` saturates at the commanded speed rather than growing with it. The first thing a policy
     # discovers is that diving forward produces speed; capping means exceeding the command buys
@@ -109,5 +156,26 @@ class WalkEnvCfg(StandEnvCfg):
     # A step must clear this much air before it earns anything, and stops earning beyond the cap.
     # The threshold separates a real step from a foot skimming the floor; the cap stops the term
     # paying for hanging in the air as long as possible.
-    feet_air_time_threshold = 0.2
-    feet_air_time_cap = 0.3
+    #
+    # **0.10, lowered from 0.20, because at 0.20 the term paid exactly zero.** Measured over two
+    # chained 15-minute legs (1,400 iterations): `Episode_Reward/feet_air_time` was 0.000 in every
+    # single window while `track` grew 7.0 -> 8.5. The evaluator meanwhile counted ~40 touchdowns
+    # per 12 s episode, about 1.7 Hz per foot - so the feet ARE lifting, in fast shuffles whose
+    # flight never reaches 0.2 s.
+    #
+    # A threshold that gates all reward until the behaviour already exists supplies no gradient
+    # toward it: the term was dead weight, not a shaping signal. 0.10 s is still a real lift rather
+    # than a skim, and it starts paying for the longer end of the shuffles the policy already
+    # produces, which is what gives it somewhere to climb. The cap moves with it so the payable
+    # band keeps its width.
+    # **Set from the measured distribution, not guessed.** Mean flight at touchdown is 0.023 s -
+    # 1.4 policy steps at 60 Hz, a foot leaving the floor for barely one tick. The threshold was
+    # 0.20 and then 0.10; both were far above anything the gait produces, so the term paid exactly
+    # zero for every leg of this session and supplied no gradient at all. I changed it twice by
+    # guessing before measuring it, which is the mistake this comment exists to prevent.
+    #
+    # 0.02 sits just under the current distribution so a longer-than-typical step earns something,
+    # and the cap at 0.15 leaves a long way to climb - the reward grows all the way from a skim to
+    # a real swing phase instead of saturating immediately.
+    feet_air_time_threshold = 0.02
+    feet_air_time_cap = 0.15

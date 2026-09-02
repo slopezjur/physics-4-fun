@@ -41,7 +41,23 @@ from .stand_env_cfg import FALL_HEAD_HEIGHT, FALL_TILT_DEG, REST_HEAD_HEIGHT, St
 # foot passing 6 cm above it, and it will read true for a hand near the floor that is not touching.
 # For Stand, where the feet are planted and the hands hang at 0.62 m, that is a good approximation.
 # It would need revisiting for get-up, where hands genuinely bear load.
-CONTACT_HEIGHT = 0.06
+# **0.034, not 0.06 — calibrated to where the foot ACTUALLY rests in this engine.**
+#
+# The 0.06 above was derived from the foot box's half-height on the assumption that a resting foot
+# sits at 0.040, which is what Godot measures. Isaac does not: the foot spawns at 0.0442 and sinks
+# to 0.014 within five steps and stays there, because XPBD lets the contact penetrate ~3 cm. Raising
+# solver iterations halves it at best (0.0141 at 8, 0.0285 at 16, then back to 0.023 by 48) and
+# never reaches Godot's 0.040, so it is a property of the solver rather than a setting.
+#
+# The consequence is not the penetration, it is the FLAG TIMING. A threshold of 0.06 over a foot
+# resting at 0.040 gives Godot 2.0 cm of clearance before the flag drops; the same threshold over a
+# foot resting at 0.014 gives Isaac 4.6 cm. The policy learns "my foot is off the ground" at more
+# than twice the real height, which is invisible while standing - a planted foot never approaches
+# either threshold - and wrong on every step of a gait.
+#
+# 0.014 + 0.020 restores Godot's margin. This is the same principle as matching the muscle model:
+# reproduce Godot's semantics in Isaac rather than assume the geometry agrees.
+CONTACT_HEIGHT = 0.034
 
 # Absolute bound on any observation component. See `StandEnv._sanitised` - this exists to stop a
 # diverged environment corrupting the observation normaliser, not to shape the observation.
@@ -65,6 +81,28 @@ class StandEnv(DirectRLEnv):
         self._act_lower = limits[self._actuated_ids, 0]
         self._act_upper = limits[self._actuated_ids, 1]
         self._act_default = self.robot.data.default_joint_pos.torch[0, self._actuated_ids]
+
+        # Narrow-joint mask for the velocity observation, in newton_dof_order (== robot.joint_names,
+        # which is what export.py records and Godot reads). Built once.
+        _lim = self.robot.data.soft_joint_pos_limits.torch[0]
+        _width = _lim[:, 1] - _lim[:, 0]
+        _min_range = float(getattr(self.cfg, "obs_joint_vel_min_range", 0.0))
+        _mask_narrow = bool(getattr(self.cfg, "obs_joint_vel_mask_narrow", False))
+        self._joint_vel_mask = (
+            (_width >= _min_range).float().unsqueeze(0)
+            if _min_range > 0.0 and _mask_narrow
+            else None
+        )
+        # The complement: which DOF get Godot-sized chatter injected during training.
+        self._joint_vel_narrow = (
+            (_width < _min_range).float().unsqueeze(0) if _min_range > 0.0 else None
+        )
+        if _min_range > 0.0:
+            _n = int((_width < _min_range).sum().item())
+            _what = "MASKED" if _mask_narrow else "left live"
+            _noise = float(getattr(self.cfg, "obs_joint_vel_narrow_noise", 0.0))
+            print(f"[stand] {_n} of {_width.numel()} DOF are narrower than {_min_range} rad: "
+                  f"{_what}, chatter noise {_noise} rad/s")
 
         self._head_id = self.robot.body_names.index("Head")
         self._pelvis_id = self.robot.body_names.index("Pelvis")
@@ -410,11 +448,23 @@ class StandEnv(DirectRLEnv):
         Noise is training-only. An evaluation or an export must measure the policy, not the
         sampling, and Godot adds no noise of its own.
         """
+        if not getattr(self.cfg, "obs_joint_vel_enabled", True):
+            # Masked, not omitted: the 143-float layout is frozen and shared with the exported
+            # graph and Godot's reader, so the slice has to stay the same width.
+            return torch.zeros_like(self._joint_vel)
+
         vel = self._joint_vel
         if self.cfg.obs_joint_vel_noise > 0.0 and not self.cfg.playback:
             vel = vel + torch.randn_like(vel) * self.cfg.obs_joint_vel_noise
+        narrow_noise = float(getattr(self.cfg, "obs_joint_vel_narrow_noise", 0.0))
+        if narrow_noise > 0.0 and self._joint_vel_narrow is not None and not self.cfg.playback:
+            vel = vel + torch.randn_like(vel) * narrow_noise * self._joint_vel_narrow
+
         clip = self.cfg.obs_joint_vel_clip
-        return vel.clamp(-clip, clip) if clip > 0.0 else vel
+        vel = vel.clamp(-clip, clip) if clip > 0.0 else vel
+        if self._joint_vel_mask is not None:
+            vel = vel * self._joint_vel_mask
+        return vel
 
     def _contacts(self) -> torch.Tensor:
         """Hand_L, Hand_R, Foot_L, Foot_R ground flags — see CONTACT_HEIGHT for why this is height."""

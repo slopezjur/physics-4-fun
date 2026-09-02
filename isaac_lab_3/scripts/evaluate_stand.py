@@ -78,6 +78,22 @@ def parse_args() -> argparse.Namespace:
         "default (nominal when measuring). Sweep it to estimate Godot's effective authority.",
     )
     p.add_argument(
+        "--conditions_from",
+        type=str,
+        default="",
+        help="Checkpoint whose params/env.yaml supplies the plant. Defaults to --checkpoint. **The "
+        "zero-action baseline needs this**: it has no checkpoint of its own, so without it the "
+        "baseline is measured on a different body than the rows it is the baseline FOR, and the "
+        "comparison that gives every later number its meaning is silently invalid.",
+    )
+    p.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Override an env-cfg field after the trained conditions are restored.",
+    )
+    p.add_argument(
         "--push",
         type=float,
         default=-1.0,
@@ -107,6 +123,26 @@ def main() -> dict:
     env_cfg.scene.num_envs = args.num_envs
     env_cfg.sim.device = args.device
     env_cfg.playback = True  # measure the policy, not the observation noise
+
+    # **Score the policy on the body it was trained on, not on the task defaults.**
+    #
+    # The registry defaults are action_scale 0.4, balance_assist 0.0, balance_reaction False. The
+    # honest lineage trains at 0.15 / 1.0 / True. Scoring one against the other hands the policy
+    # 2.7x its action authority with the stabiliser switched off, and the run reports a number that
+    # describes nothing. This exact substitution put a checkpoint holding 75% standing at 0% in
+    # playback earlier - it reads as a broken brain rather than as a broken measurement, which is
+    # what makes it expensive.
+    #
+    # Restored BEFORE the explicit flags below so that passing --action_rate_limit still wins: the
+    # recorded conditions are the default, not an override of an override.
+    from run_conditions import apply_overrides, restore
+
+    conditions = args.conditions_from or args.checkpoint
+    if conditions:
+        restore(env_cfg, conditions, label="eval")
+    elif args.zero_action:
+        print("[eval] WARNING baseline scored on TASK DEFAULTS; pass --conditions_from <checkpoint> "
+              "to measure it on the same body as the policies it is compared against.")
     if args.action_rate_limit >= 0.0:
         env_cfg.action_rate_limit = args.action_rate_limit
     if args.push >= 0.0:
@@ -120,6 +156,8 @@ def main() -> dict:
         env_cfg.effort_scale_range = (args.effort_scale, args.effort_scale)
         env_cfg.playback = False  # honour the range above; playback would pin it to nominal
         env_cfg.obs_joint_vel_noise = 0.0  # ... but still measure the policy, not the sampler
+
+    apply_overrides(env_cfg, args.set, label="eval")
 
     env = gym.make(args.task, cfg=env_cfg)
     policy = None

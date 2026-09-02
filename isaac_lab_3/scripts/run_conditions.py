@@ -27,6 +27,14 @@ TRAINED_CONDITIONS = (
     "action_scale",
     "action_rate_limit",
     "obs_joint_vel_clip",
+    # **Whether the policy can see joint velocity at all.** A policy trained with slice [55:100]
+    # masked and scored with it live is being fed 45 floats it has never seen, and reads as broken
+    # rather than as masked - measured at 46.9% for a checkpoint whose training was healthy. This
+    # is the same restore-the-plant trap as action_scale and balance_assist, on a new field.
+    "obs_joint_vel_enabled",
+    "obs_joint_vel_min_range",
+    "obs_joint_vel_mask_narrow",
+    "obs_joint_vel_narrow_noise",
     "balance_assist",
     "balance_gain",
     "balance_damping",

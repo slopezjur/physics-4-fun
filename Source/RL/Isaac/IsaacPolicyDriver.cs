@@ -81,6 +81,46 @@ public partial class IsaacPolicyDriver : Node
     [Export] public float HillVelocityFilter { get; set; } = 1.0f;
 
     /// <summary>
+    /// Low-pass alpha for the joint velocities written into observation slice [55:100]. 1.0 is off.
+    ///
+    /// <para><b>The filter existed and was wired to nothing.</b> `IsaacObservation.JointVelocityFilter`
+    /// was implemented and documented - including the measurement that motivates it - but no arena,
+    /// driver or scene ever set it, so it sat at its 1.0 default and every deployment fed the policy
+    /// raw solver velocity.</para>
+    ///
+    /// <para>Measured with the observation clip lifted, while the dummy stood still at pelvis 0.83:
+    /// joint velocities of 8, 18, 20 and 35 rad/s on Spine.x and Shin_L.y. Isaac's maximum across 64
+    /// environments in the same posture is 7.9. The clip at 15 hid roughly half of it. So 45 of 143
+    /// observation floats reported thrashing to a policy trained on a body that does not thrash.</para>
+    ///
+    /// <para><b>MEASURED, AND IT MAKES TRANSFER WORSE. Leave it at 1.0.</b> With the promoted
+    /// balance brain on the Stand check at authority 0.10: filter 1.00 STANDS, 0.50 falls, 0.30
+    /// falls, 0.15 falls - and at 0.15 the brain needed the authority dropped to 0.05 to stand at
+    /// all. The reasoning above is sound and the chatter is real; the remedy is not. An EMA at
+    /// alpha 0.15 is a ~0.11 s time constant, and the lag it adds to a balance-critical signal
+    /// costs more than the noise it removes.</para>
+    ///
+    /// <para>Kept wired rather than deleted because it was previously implemented, documented and
+    /// reachable from nothing, which is how it survived long enough to look like an answer. The
+    /// knob is now settable and OFF by default, and this paragraph is the reason to leave it
+    /// there.</para>
+    /// </summary>
+    [Export] public float JointVelocityFilter { get; set; } = 1.0f;
+
+    /// <summary>
+    /// Feed observation slice [55:100] to the policy at all. **Must match the task config's
+    /// `obs_joint_vel_enabled` for the checkpoint being run.** See
+    /// <see cref="IsaacObservation.JointVelocityEnabled"/>.
+    /// </summary>
+    [Export] public bool JointVelocityEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Mask the joint-velocity observation on joints narrower than this, in radians. 0 is off.
+    /// **Must match `obs_joint_vel_min_range` for the checkpoint being run.**
+    /// </summary>
+    [Export] public float JointVelocityMinRange { get; set; }
+
+    /// <summary>
     /// Seconds after which to dump the FULL 45-DOF joint pose once, as a JSON array. 0 disables it.
     ///
     /// <para><b>Why this exists.</b> While Godot's balance layer holds a successful stand - head
@@ -258,7 +298,20 @@ public partial class IsaacPolicyDriver : Node
         {
             UseHeightContacts = HeightContacts,
             JointVelocityClip = IsaacRigContract.LoadJointVelocityClip(PolicyContractPath),
+            JointVelocityFilter = JointVelocityFilter,
+            JointVelocityEnabled = JointVelocityEnabled,
+            JointVelocityMinRange = JointVelocityMinRange,
         };
+        if (!JointVelocityEnabled)
+        {
+            GD.Print("[IsaacPolicyDriver] joint velocity channel MASKED - obs[55:100] is zero, "
+                     + "matching a policy trained with obs_joint_vel_enabled=False");
+        }
+        if (JointVelocityFilter < 1.0f)
+        {
+            GD.Print($"[IsaacPolicyDriver] joint velocity filter {JointVelocityFilter:F2} on the "
+                     + "observation - the policy reads the limb, not the solver");
+        }
         _actions = new IsaacActionSpace(_rig)
         {
             ActionRateLimit = IsaacRigContract.LoadActionRateLimit(PolicyContractPath),

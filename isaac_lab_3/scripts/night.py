@@ -60,6 +60,16 @@ def parse_args() -> argparse.Namespace:
         "apart. -1 keeps the task default. A balance policy scored without a disturbance is not "
         "being asked to balance - a statue passes every criterion.",
     )
+    p.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Applied to every training segment AND every evaluation, e.g. --set "
+        "balance_reaction=True. Both halves matter: a segment trained without it is a different "
+        "experiment wearing the same name, and a score measured without it describes a different "
+        "body than the one that was trained.",
+    )
     p.add_argument("--xpbd_iterations", type=int, default=2)
     return p.parse_args()
 
@@ -128,22 +138,28 @@ def main() -> None:
     note(f"session {session}; segments of {args.minutes} min until {args.until}; "
          f"{args.num_envs} envs, xpbd iterations {args.xpbd_iterations}")
 
-    # Baseline first. Every later row is meaningless without it.
-    note("scoring the zero-action baseline ...")
-    code, text = run(
-        [PYTHON, str(HERE / "evaluate_stand.py"), "--task", args.task, "--zero_action",
-         "--num_envs", str(args.eval_envs), "--json", str(results)],
-        env, console)
-    for line in text.splitlines():
-        if "standing success" in line or "mean head height" in line:
-            note("  baseline " + line.strip())
-
+    # Resolved BEFORE the baseline, because the baseline has to be measured on the same body as
+    # the policies it is the baseline for - and the only record of that body is the checkpoint the
+    # chain starts from.
     rows: list[dict] = []
     resume = args.resume or (newest_checkpoint(args.experiment) or "")
+    baseline_conditions = resume or args.init_from or ""
     if resume:
         note(f"chain starts from {pathlib.Path(resume).name}")
     elif args.init_from:
         note(f"chain seeds from {pathlib.Path(args.init_from).name} (weights only)")
+
+    # Baseline first. Every later row is meaningless without it.
+    note("scoring the zero-action baseline ...")
+    code, text = run(
+        [PYTHON, str(HERE / "evaluate_stand.py"), "--task", args.task, "--zero_action",
+         "--num_envs", str(args.eval_envs), "--json", str(results)]
+        + (["--conditions_from", str(baseline_conditions)] if baseline_conditions else [])
+        + [a for pair in args.set for a in ("--set", pair)],
+        env, console)
+    for line in text.splitlines():
+        if "standing success" in line or "mean head height" in line:
+            note("  baseline " + line.strip())
 
     for segment in range(1, args.max_segments + 1):
         remaining_min = (stop_at - time.time()) / 60.0
@@ -158,6 +174,8 @@ def main() -> None:
                "--experiment", args.experiment,
                "--num_envs", str(args.num_envs), "--max_minutes", f"{minutes:.2f}",
                "--run_name", f"night{segment:02d}", "--push", f"{args.push:.3f}"]
+        for pair in args.set:
+            cmd += ["--set", pair]
         if resume:
             cmd += ["--resume", str(resume)]
         elif segment == 1 and args.init_from:
@@ -177,7 +195,8 @@ def main() -> None:
         code, text = run(
             [PYTHON, str(HERE / "evaluate_stand.py"), "--task", args.task,
              "--checkpoint", str(ckpt), "--num_envs", str(args.eval_envs), "--json", str(results),
-             "--push", f"{args.push:.3f}"],
+             "--push", f"{args.push:.3f}"]
+            + [a for pair in args.set for a in ("--set", pair)],
             env, console)
 
         row: dict = {"segment": segment, "checkpoint": ckpt.name}

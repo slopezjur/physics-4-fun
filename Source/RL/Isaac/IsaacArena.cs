@@ -53,9 +53,15 @@ public partial class IsaacArena : Node3D
     [Export] public string ChamberPath { get; set; } = "res://Scenes/TestChamber.tscn";
 
     /// <summary>
-    /// Velocity command written into the observation's last three slots. Leave at zero for Stand
-    /// and Perturbation; Walk and Run were trained reading it, so those want a forward component
-    /// (the training command range is +/-0.6 m/s).
+    /// Velocity command written into the observation's last three slots: (x forward, y lateral,
+    /// z yaw rate). Leave at zero for Stand and Perturbation; Walk and Run were trained reading it,
+    /// so those want a forward component.
+    ///
+    /// <para>Walk's sampled training ranges are x in [-0.3, 1.0] m/s, y in [-0.3, 0.3] m/s and yaw
+    /// in [-0.5, 0.5] rad/s (see `WalkEnvCfg`). This comment previously said "+/-0.6 m/s", which
+    /// matched no task - commanding outside the trained range asks for behaviour the policy never
+    /// saw, and a wrong constant in a doc comment is exactly how the 18-vs-22.5 N.s ball error
+    /// propagated through this track.</para>
     /// </summary>
     [Export] public Vector3 Command { get; set; } = Vector3.Zero;
 
@@ -91,6 +97,15 @@ public partial class IsaacArena : Node3D
     /// <summary>Passed to the driver. See IsaacPolicyDriver.HillVelocityFilter.</summary>
     [Export] public float HillVelocityFilter { get; set; } = 1.0f;
 
+    /// <summary>Passed to the driver. See IsaacPolicyDriver.JointVelocityFilter.</summary>
+    [Export] public float JointVelocityFilter { get; set; } = 1.0f;
+
+    /// <summary>Passed to the driver. See IsaacPolicyDriver.JointVelocityEnabled.</summary>
+    [Export] public bool JointVelocityEnabled { get; set; } = true;
+
+    /// <summary>Passed to the driver. See IsaacPolicyDriver.JointVelocityMinRange.</summary>
+    [Export] public float JointVelocityMinRange { get; set; }
+
     /// <summary>
     /// Passed to the driver: seconds between per-slice observation diagnostics. Defaults to the
     /// driver's own 0.5 s. Drop it to ~0.03 to compare against `slice_stats.py` step by step -
@@ -109,8 +124,14 @@ public partial class IsaacArena : Node3D
     /// aiming rather than balance.</para>
     ///
     /// <para>BallGun's defaults already ARE the shot the Godot track fires: `SmallBallProbability`
-    /// is 1.0, so every shot is the small ball - 3.0 kg at 6 m/s = <b>18 N.s</b>, aimed at a
-    /// uniformly chosen bone from 2 m out.</para>
+    /// is 1.0, so every shot is the small ball - 3.0 kg at 6 m/s, aimed at a uniformly chosen bone
+    /// from 2 m out.</para>
+    ///
+    /// <para><b>That transfers 22.5 N.s, not the 18 the momentum alone suggests.</b> BallGun
+    /// applies `(velocity - reflected) * ballMass` and `reflected` carries `BallRestitution`, so a
+    /// head-on hit delivers `m*v*(1+e)` = 3.0 * 6.0 * 1.25. This line used to read "= 18 N.s" and
+    /// the Isaac-side curriculum inherited the error: its ceiling was capped at 18, so the training
+    /// disturbance never once reached the magnitude this arena actually throws.</para>
     /// </summary>
     [Export] public bool SpawnBallGun { get; set; }
 
@@ -221,6 +242,9 @@ public partial class IsaacArena : Node3D
             AssistAuthority = AssistAuthority,
             JointSpacePd = JointSpacePd,
             HillVelocityFilter = HillVelocityFilter,
+            JointVelocityFilter = JointVelocityFilter,
+            JointVelocityEnabled = JointVelocityEnabled,
+            JointVelocityMinRange = JointVelocityMinRange,
             DiagnosticInterval = DiagnosticInterval >= 0.0f ? DiagnosticInterval : 0.5f,
         };
 
@@ -270,7 +294,8 @@ public partial class IsaacArena : Node3D
             };
             AddChild(gun);
             GD.Print($"[IsaacArena] BallGun firing every {BallInterval:F1}s "
-                     + $"(first at {BallFirstShotSeconds:F1}s) - 3.0 kg at 6 m/s = 18 N.s");
+                     + $"(first at {BallFirstShotSeconds:F1}s) - 3.0 kg at 6 m/s, "
+                     + $"transferring 22.5 N.s per head-on hit");
         }
 
         if (PushImpulse > 0.0f && !_pushed && _elapsed >= PushAtSeconds

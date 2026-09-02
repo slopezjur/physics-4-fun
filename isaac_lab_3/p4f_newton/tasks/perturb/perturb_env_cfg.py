@@ -67,6 +67,78 @@ class PerturbEnvCfg(StandEnvCfg):
         (lambda m: (0.0, m))(float(os.environ.get("P4F_PUSH_MAX", "10.0")))
     )
 
+    # --- curriculum ---
+    # **The ceiling is measured, not chosen.** `push_impulse_range` above is only where the ramp
+    # STARTS. A fixed ceiling is what produced two dead checkpoints: at 25 N.s the mean shot was
+    # 12.3 against a policy that survived 8, most episodes were unwinnable, and the policy correctly
+    # learned that nothing it did mattered - mean episode length collapsed 274 -> 32 over one run.
+    #
+    # So the ceiling tracks the measured survival rate instead. Raise it only while the policy is
+    # winning comfortably, lower it the moment it is not, and the sampled range stays centred on the
+    # edge of what the policy can currently do - which is where learning actually happens.
+    push_curriculum = True
+
+    # Where the ramp STARTS, in N.s. Negative means "use push_impulse_range[1]".
+    #
+    # **The ceiling has to survive a process restart or a chained run cannot make progress.** It
+    # lives in the env instance, so every resume used to re-initialise it from the config and then
+    # spend minutes re-hunting a level it had already found. Measured over 13 chained 15-minute
+    # segments: the ceiling ended at 13.62, 7.35, 9.68, 9.53, 13.19, 7.00, ... 10.17 - orbiting its
+    # 10.0 default with no upward trend across three and a half hours, while the policy underneath
+    # was genuinely improving. The brain accumulated; the difficulty did not.
+    #
+    # train.py writes the final value to `curriculum.json` beside the checkpoints and reads it back
+    # on --resume, so any resume path picks it up, not just night.py chains.
+    push_curriculum_start = -1.0
+
+    # Episodes that were actually HIT before one decision is taken. Episodes that fell before the
+    # first shot carry no information about the impulse and are not counted.
+    #
+    # **Sized against how fast the policy LEARNS, not how fast episodes finish.** The first version
+    # used 8192, which at 24576 envs is one decision every ~13 seconds. The ceiling then climbed
+    # 3.2 -> 18.0 N.s in about four minutes - far faster than PPO could consolidate any of it - and
+    # the policy collapsed at the top: survival went 76% -> 37% -> 12% -> 2% while the ramp was
+    # already retreating, which is the signature that the policy is degrading rather than the task
+    # being hard. Once collapsed it could not recover, because the ceiling falls 15% per window
+    # while the behaviour it needed was already gone.
+    #
+    # 65536 makes it roughly one decision every two minutes at this env count, so the disturbance
+    # moves on the same timescale as the policy. A curriculum that outruns learning is not a
+    # curriculum; it is a random schedule.
+    push_curriculum_window = 65536
+
+    # Raise above this survival rate, lower below the floor, hold in between. The gap is deliberate:
+    # a single threshold oscillates, because crossing it in one direction immediately makes the
+    # task harder and pushes the rate back across.
+    push_curriculum_raise_above = 0.70
+    push_curriculum_lower_below = 0.40
+
+    # Multiplicative, so a step is the same *relative* difficulty change at 3 N.s and at 15. Raising
+    # is slower than lowering on purpose - overshooting the ceiling is the failure that costs a run,
+    # and undershooting only costs time.
+    push_curriculum_raise_factor = 1.05
+    push_curriculum_lower_factor = 0.85
+
+    # Floor keeps the task from collapsing into Stand if the policy has a bad patch. Ceiling is the
+    # real Godot shot - 3.0 kg at 6 m/s - and there is nothing to gain from training past the
+    # disturbance the deployed arena actually delivers.
+    # An episode counts as "at the ceiling" when its hardest shot reached this fraction of it.
+    # 0.9 keeps the band narrow enough to mean the top of the range while still gathering samples:
+    # under uniform[0, C] roughly one shot in ten qualifies.
+    push_curriculum_band = 0.9
+
+    push_curriculum_min = 2.0
+
+    # **23.0, because the Godot ball delivers 22.5 N.s and not the 18 everyone writes down.**
+    #
+    # BallGun transfers `(velocity - reflected) * ballMass`, and `reflected` carries
+    # `BallRestitution = 0.25`, so a head-on hit is `m*v*(1+e)` = 3.0 * 6.0 * 1.25 = 22.5 N.s.
+    # BallGun's own docs state the (1+e) factor, but IsaacArena and the summary comments both print
+    # "3.0 kg at 6 m/s = 18 N.s" - which drops it, and every target on this track inherited the
+    # error. A ceiling of 18 means the curriculum never once delivers a shot as hard as the one the
+    # deployment actually throws.
+    push_curriculum_max = 23.0
+
     # Bones a shot may target, uniform per episode - `BallGun.SmallBallTargetBones` verbatim.
     #
     # A limb hit is a genuinely different disturbance from a torso shove: less effective mass behind
