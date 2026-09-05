@@ -26,6 +26,7 @@ from isaaclab.envs import DirectRLEnv
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 
 from p4f_newton.assets import ACTUATED_JOINTS, CONTACT_BONES, REST_PELVIS_HEIGHT
+from p4f_newton.gravity_ff import GravityFeedForward, _rotate as _rotate_wxyz
 from p4f_newton.state import NewtonRigState, quat_rotate_inverse, yaw_only
 
 from .stand_env_cfg import FALL_HEAD_HEIGHT, FALL_TILT_DEG, REST_HEAD_HEIGHT, StandEnvCfg
@@ -57,7 +58,15 @@ from .stand_env_cfg import FALL_HEAD_HEIGHT, FALL_TILT_DEG, REST_HEAD_HEIGHT, St
 #
 # 0.014 + 0.020 restores Godot's margin. This is the same principle as matching the muscle model:
 # reproduce Godot's semantics in Isaac rather than assume the geometry agrees.
-CONTACT_HEIGHT = 0.034
+# **Recalibrated 2026-09-05 for the corrected foot collider.** The USD box colliders were half
+# their authored size (see isaac_lab/scripts/build_d6_usd.py); with the foot fixed to its real
+# 0.22 x 0.12 x 0.08 m, Isaac's planted foot rests at 0.0286 m instead of 0.0081, and the old 0.034
+# left only 5 mm of clearance before a planted foot read as airborne.
+#
+# What has to agree between the engines is the CLEARANCE, not the absolute height, because the two
+# feet rest at different depths (XPBD lets the foot sink ~1 cm; Jolt does not). Godot: planted 0.040,
+# threshold 0.060, clearance 0.020. Isaac: planted 0.0286 + 0.020 = 0.0486, rounded to 0.05.
+CONTACT_HEIGHT = 0.05
 
 # Absolute bound on any observation component. See `StandEnv._sanitised` - this exists to stop a
 # diverged environment corrupting the observation normaliser, not to shape the observation.
@@ -107,6 +116,34 @@ class StandEnv(DirectRLEnv):
         self._head_id = self.robot.body_names.index("Head")
         self._pelvis_id = self.robot.body_names.index("Pelvis")
         self._contact_ids = [self.robot.body_names.index(name) for name in CONTACT_BONES]
+        # Actuator telemetry, comparable with Godot's `fvScale` / `demand`. Zero-initialised so a
+        # reader never meets an undefined attribute on a step before the first `_apply_action`.
+        self._last_hill = torch.ones((), device=self.device)
+        self._last_demand = torch.zeros((), device=self.device)
+
+        # Smoothed joint velocity feeding the Hill law, mirroring `ActiveBone._hillFilteredVelocity`.
+        # Zero at reset, as Godot's is.
+        self._hill_vel = torch.zeros(self.num_envs, len(ACTUATED_JOINTS), device=self.device)
+        self._gravity_ff = (
+            GravityFeedForward(self.robot, self.device, list(CONTACT_BONES))
+            if (self.cfg.gravity_feedforward > 0.0 or self.cfg.joint_compliance > 0.0)
+            else None
+        )
+        # Maps each actuated DOF onto (bone row in the feed-forward model, axis 0/1/2). The DOF
+        # names are `joint_<Bone>:<axis>` and the D6 axes ARE the joint's three rotations, so the
+        # per-DOF load is a component of that bone's torque in the joint's frame.
+        if self._gravity_ff is not None:
+            bone_rows = {name: k for k, name in enumerate(self._gravity_ff.bones)}
+            rows, axes = [], []
+            for dof in ACTUATED_JOINTS:
+                bone, _, axis = dof.removeprefix("joint_").rpartition(":")
+                rows.append(bone_rows.get(bone, -1))
+                axes.append(int(axis))
+            self._cmp_row = torch.tensor(rows, device=self.device, dtype=torch.long)
+            self._cmp_axis = torch.tensor(axes, device=self.device, dtype=torch.long)
+            self._cmp_valid = self._cmp_row >= 0
+            self._cmp_row = self._cmp_row.clamp(min=0)
+
         self._foot_ids = [self.robot.body_names.index(n) for n in ("Foot_L", "Foot_R")]
         # Reaction partners for the balance wrench - see `_apply_balance_assist`. Thighs, not feet:
         # a pelvis attitude torque is produced by the HIP, so the thigh is what it pushes against.
@@ -118,6 +155,8 @@ class StandEnv(DirectRLEnv):
         self._effort_limit = self.robot.data.joint_effort_limits.torch[0].clamp(min=1e-6)
         # Per-episode torque budget scale. Resampled in `_reset_idx`; see `effort_scale_range`.
         self._effort_scale = torch.ones(self.num_envs, 1, device=self.device)
+        # Per-episode command-gain draw; see `action_scale_range`.
+        self._action_scale = torch.ones(self.num_envs, 1, device=self.device)
         self._stiffness = self.robot.data.joint_stiffness.torch[0]
         self._damping = self.robot.data.joint_damping.torch[0]
 
@@ -145,6 +184,21 @@ class StandEnv(DirectRLEnv):
         # Built lazily: `NewtonManager._model` does not exist until the simulation has been
         # initialised, which happens inside `super().__init__` after `_setup_scene`.
         self._state: NewtonRigState | None = None
+
+        # After `_state` exists, because the capture reads live body orientations through `rig`.
+        if self._gravity_ff is not None:
+            # **The joint's axes live in its REST frame, not the parent body's.**
+            # `rest_local = parent_quat^-1 * body_quat` at the rest configuration - the same
+            # definition Godot's `ActiveBone._restLocalRotation` captures at `_Ready`. Left and
+            # right limbs have MIRRORED rest orientations, so resolving the load in the parent's
+            # frame selects a different physical axis on each side: measured, that produced
+            # `UpperArm_L:0 +0.436` against `UpperArm_R:0 -0.232` where Godot is exactly symmetric
+            # at +0.159 on both. Captured here, at construction, because the articulation still
+            # stands at its authored pose - no reset noise has been applied yet.
+            quat0 = self.rig.body_quat_w_all()[0]
+            parent0 = quat0[self._gravity_ff.parent_ids]
+            child0 = quat0[self._gravity_ff.body_ids]
+            self._cmp_rest = _quat_mul(_quat_conj(parent0), child0).unsqueeze(0)
         self._joint_pos = torch.zeros(self.num_envs, self.robot.num_joints, device=self.device)
         self._joint_vel = torch.zeros_like(self._joint_pos)
 
@@ -236,15 +290,79 @@ class StandEnv(DirectRLEnv):
         span = torch.where(
             self._action >= 0.0, self._act_upper - self._act_default, self._act_default - self._act_lower
         )
-        target = self._act_default + self.cfg.action_scale * self._action * span
+        target = self._act_default + self.cfg.action_scale * self._action_scale * self._action * span
+        if self.cfg.target_damping > 0.0:
+            # `tau = kp(target - q) - kd*qd` is `kp(target - kd*qd/kp - q)`; see `target_damping`.
+            kp = self._stiffness[self._actuated_ids].clamp(min=1e-6)
+            kd = self._damping[self._actuated_ids]
+            _, qd = self.rig.joint_state()
+            target = target - self.cfg.target_damping * (kd / kp) * qd[:, self._actuated_ids]
+
+        if self.cfg.joint_compliance > 0.0 and self._gravity_ff is not None:
+            target = target - self.cfg.joint_compliance * self._compliance_deflection()
         if self.cfg.enforce_effort_limit:
             target = self._effort_limited(target)
         # Kept for the effort proxy below, which has no `applied_torque` to read.
         self._joint_target[:, self._actuated_ids] = target
         self.robot.set_joint_position_target_index(target=target, joint_ids=self._actuated_ids)
 
+        if self._gravity_ff is not None:
+            self._apply_gravity_feedforward()
+
         if self.cfg.balance_assist > 0.0:
             self._apply_balance_assist()
+
+    @staticmethod
+    def _quat_helpers_note() -> None:
+        """See `_quat_mul` / `_quat_conj` at module scope."""
+
+    def _compliance_deflection(self) -> torch.Tensor:
+        """`(num_envs, n_actuated)` target displacement that reproduces Godot's sag under load.
+
+        A joint carrying load `L` under effective gain `kEff` settles at `target + L/kEff`. XPBD
+        holds its target instead, so displacing the target by that deflection puts the joint where
+        Godot's compliant drive would put it. `torques()` returns the COMPENSATION `-L`, hence the
+        subtraction at the call site.
+
+        The load is resolved in the PARENT's frame, which is the frame a D6 joint's three axes are
+        expressed in, and the three axes of a bone are exactly its three actuated DOFs.
+        """
+        ff = self._gravity_ff
+        quat_all = self.rig.body_quat_w_all()
+        comp_w = ff.torques(
+            self.rig.body_link_pos_w_all(), quat_all, self._contacts(), clamp=False
+        )
+
+        # World -> parent frame: rotate by the conjugate of the parent's orientation.
+        frame_q = _quat_mul(quat_all[:, ff.parent_ids], self._cmp_rest.expand(quat_all.shape[0], -1, -1))
+        comp_j = _rotate_wxyz(_quat_conj(frame_q), comp_w)
+
+        tau = comp_j.gather(
+            1, self._cmp_row.view(1, -1, 1).expand(comp_j.shape[0], -1, 3)
+        ).gather(2, self._cmp_axis.view(1, -1, 1).expand(comp_j.shape[0], -1, 1)).squeeze(-1)
+
+        kp = self._stiffness[self._actuated_ids].clamp(min=1e-6)
+        return torch.where(self._cmp_valid, tau / kp, torch.zeros_like(tau))
+
+    def _apply_gravity_feedforward(self) -> None:
+        """Godot's load compensation, applied as an equal-and-opposite joint torque pair.
+
+        Called from `_apply_action`, i.e. once per PHYSICS substep, because the solver zeroes
+        `State.body_f` every step - the same reason the balance assist lives there.
+
+        `+tau` on the bone and `-tau` on its parent IS a joint torque, and it is what Godot does
+        explicitly through its own reaction term. Applying only the `+tau` half would be angular
+        momentum from nowhere, which the balance assist's own comment already warns about.
+        """
+        ff = self._gravity_ff
+        torque = ff.torques(
+            self.rig.body_link_pos_w_all(),
+            self.rig.body_quat_w_all(),
+            self._contacts(),
+        ) * self.cfg.gravity_feedforward
+
+        ids = torch.tensor(ff.body_ids + ff.parent_ids, device=self.device, dtype=torch.long)
+        self.rig.add_body_torques(ids, torch.cat((torque, -torque), dim=1))
 
     def _apply_balance_assist(self) -> None:
         """Pelvis attitude PD, ported verbatim from Godot's `PelvisStabilizationModule`.
@@ -347,9 +465,24 @@ class StandEnv(DirectRLEnv):
         grouped = torque.view(-1, bones, axes)
         norm = torch.linalg.vector_norm(grouped, dim=-1, keepdim=True)
         budget = effort.view(-1, bones, axes)[..., 0].unsqueeze(-1)
-        budget = budget * self._hill_scale(grouped, qd.view(-1, bones, axes), norm)
+        # The Hill law sees the SMOOTHED velocity, not the raw one - Godot filters it before
+        # `ComputeForceVelocityScale` and the check scenes set alpha 0.15. Feeding it the raw value
+        # held Isaac's actuator at a median 58% of ceiling through a gait against Godot's 97-100%.
+        alpha = min(max(self.cfg.hill_velocity_filter, 0.001), 1.0)
+        self._hill_vel += (qd - self._hill_vel) * alpha
+        hill = self._hill_scale(grouped, self._hill_vel.view(-1, bones, axes), norm)
+        budget = budget * hill
         scale = (budget / norm.clamp(min=1e-6)).clamp(max=1.0)
         allowed = (grouped * scale).view_as(torque)
+
+        # Telemetry in the SAME units Godot's driver prints, so the two actuators can be compared
+        # under motion rather than only at rest. `fvScale` is the worst Hill derating on the body and
+        # `demand` the peak torque request as a fraction of the bone's ceiling - the two numbers that
+        # separate "these engines agree while standing" from "these engines agree during a gait".
+        # Godot logs them per policy step in `IsaacDriverDiagnostics.TorqueBudgetReport`.
+        self._last_hill = hill.amin().detach()
+        ceiling = effort.view(-1, bones, axes)[..., 0].clamp(min=1e-6)
+        self._last_demand = (norm.squeeze(-1) / ceiling).amax().detach()
 
         # Invert the PD law for the target that delivers exactly the allowed torque.
         reachable = q + (allowed + kd * qd) / kp.clamp(min=1e-6)
@@ -748,6 +881,11 @@ class StandEnv(DirectRLEnv):
             len(env_ids), 1, device=self.device
         ).uniform_(low, high)
 
+        a_low, a_high = (1.0, 1.0) if self.cfg.playback else self.cfg.action_scale_range
+        self._action_scale[env_ids] = torch.empty(
+            len(env_ids), 1, device=self.device
+        ).uniform_(a_low, a_high)
+
         self._balance_ang_vel[env_ids] = 0.0
         self._action[env_ids] = 0.0
         self._previous_action[env_ids] = 0.0
@@ -761,3 +899,23 @@ class StandEnv(DirectRLEnv):
         extras["Diagnostics/divergences"] = float(self._divergences)
         self._divergences = 0
         self.extras["log"] = extras
+
+
+def _quat_conj(q: torch.Tensor) -> torch.Tensor:
+    """Conjugate of a wxyz quaternion, i.e. the inverse for a unit quaternion."""
+    return q * torch.tensor([1.0, -1.0, -1.0, -1.0], device=q.device, dtype=q.dtype)
+
+
+def _quat_mul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    """Hamilton product of two wxyz quaternions, broadcasting over leading dimensions."""
+    aw, ax, ay, az = a.unbind(-1)
+    bw, bx, by, bz = b.unbind(-1)
+    return torch.stack(
+        (
+            aw * bw - ax * bx - ay * by - az * bz,
+            aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+        ),
+        dim=-1,
+    )

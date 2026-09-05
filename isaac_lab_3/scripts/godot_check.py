@@ -33,10 +33,21 @@ PROJECT_ROOT = ISAAC3_ROOT.parent
 # stripped one.
 SCENE = "res://Scenes/RL/Isaac3/Stand/IsaacStandCheckNewton.tscn"
 
+# NOT the `_console` build, deliberately. An export of this project was written into the Godot
+# INSTALL folder on 2026-08-26, and it took the console executable's own basename:
+# `Godot_v4.7.1-stable_mono_win64_console.pck`. Godot auto-mounts a pack whose basename matches the
+# running executable, so that binary boots as a SELF-CONTAINED GAME and ignores `--path` for project
+# settings - `physics_ticks_per_second`, the Jolt solver steps, everything.
+#
+# It is nearly invisible: scenes, ONNX models and the C# assembly still load from disk, so code
+# edits take effect while project.godot edits do nothing. On 2026-09-03 that made a 120 -> 480 Hz
+# change produce output byte-identical to the baseline, which reads as "no effect" rather than
+# "never applied". `ProjectSettings.GlobalizePath("res://")` returns EMPTY under the hijacked binary;
+# `IsaacPolicyDriver` prints it as `root ...` in its config line, so check there first.
 GODOT = pathlib.Path(
     os.environ.get(
         "P4F_GODOT",
-        r"D:\Programas\Godot_v4.7.1-stable_mono_win64\Godot_v4.7.1-stable_mono_win64_console.exe",
+        r"D:\Programas\Godot_v4.7.1-stable_mono_win64\Godot_v4.7.1-stable_mono_win64.exe",
     )
 )
 

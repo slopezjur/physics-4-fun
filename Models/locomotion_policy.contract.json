@@ -1,6 +1,6 @@
 {
-  "generated": "2026-09-02T17:45:18+00:00",
-  "source_checkpoint": "D:\\Proyectos\\Godot\\physics-4-fun\\isaac_lab_3\\logs\\rsl_rl\\p4f_newton_walk_contact\\2026-09-02_19-28-02_contactA\\model_14161.pt",
+  "generated": "2026-09-05T08:40:31+00:00",
+  "source_checkpoint": "D:\\Proyectos\\Godot\\physics-4-fun\\isaac_lab_3\\logs\\rsl_rl\\p4f_newton_walk_clean\\2026-09-05_04-10-24\\model_28941.pt",
   "task": "P4F-Dummy-Walk-Newton-v0",
   "engine": "isaac-lab-3 / newton / xpbd",
   "solver_iterations": 8,

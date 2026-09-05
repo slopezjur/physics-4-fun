@@ -57,6 +57,29 @@ class WalkEnvCfg(StandEnvCfg):
     # the policy can find, not merely longer than a stride.
     drive_smoothing = 0.008
 
+    # Width of the two-sided speed kernel, m/s. 0 keeps the old one-sided saturating ratio.
+    #
+    # **Overspeed was FREE, and flight is what bought it.** `_drive` divides achieved speed by the
+    # command and clamps to 1, so exceeding the command earns nothing - but costs nothing either.
+    # Measured 2026-09-04 under a 0.30 m/s command, the gait ran at 1.16-1.49 m/s with 21% of its
+    # steps airborne. Running that far over the command requires leaving the ground, and leaving the
+    # ground is the one event Jolt and XPBD disagree about, so the reward was silently paying for
+    # the untransferable part of the gait.
+    #
+    # With this set, `tracking` becomes `exp(-((v - v_cmd)/sigma)^2)`: it peaks AT the commanded
+    # speed and falls off on both sides, so there is a cost to running 4x too fast and the policy
+    # has a reason to keep its feet down.
+    #
+    # 0.5 m/s rather than something tighter: at the measured 1.16 m/s overspeed a sigma of 0.25 puts
+    # the reward at e^-10, which is numerically zero and supplies no gradient to climb back. 0.5
+    # gives 0.07 there - small, but a slope the policy can follow toward the command.
+    # **0.5 by default.** Measured: the old one-sided `_drive` clamped at 1, so exceeding the
+    # command earned nothing and COST nothing, and the gait ran 1.16-1.49 m/s under a 0.30 m/s
+    # command. With the kernel the speed came onto the command (0.56 m/s). Defaulted rather than
+    # left to `--set` for the same reason as `rew_feet_air_time`: reward shape is not in
+    # `TRAINED_CONDITIONS` (only this field is), so a forgotten flag silently changes the objective.
+    drive_overspeed_sigma = 0.5
+
     # --- command curriculum ---
     # **A fixed command range lets the policy harvest its easy end.** `_drive` scores achieved over
     # commanded, so a 0.15 m/s command is satisfied trivially while 0.8 is not. Measured over five
@@ -116,7 +139,88 @@ class WalkEnvCfg(StandEnvCfg):
     # **10.0, raised from 1.0.** At the measured flight time the term was contributing about 0.05
     # per episode against a `track` term of 13 - arithmetically incapable of changing behaviour
     # whatever its threshold. Weight and threshold had to move together; either alone does nothing.
-    rew_feet_air_time = 10.0
+    # **0.0, and this is the default on purpose.** The term pays per touchdown for how long that
+    # foot was airborne, and a two-footed HOP collects it on BOTH feet every cycle - which is what
+    # every policy in this project's history learned to do (1.2% single support, feet in phase
+    # 98.8%). Setting it to zero, with `rew_single_support` present to keep the feet alternating,
+    # halved the flight phase (22.4% -> 10.4%) and did NOT cause the sliding this term was
+    # introduced to prevent: a slide cannot alternate contacts.
+    #
+    # It was left at 10.0 for most of 2026-09-05 and overridden per-run with `--set`, which meant
+    # any resume that forgot the flag silently reinstated the hop. Reward weights are not in
+    # `TRAINED_CONDITIONS`, so nothing would have caught it.
+    rew_feet_air_time = 0.0
+
+    # **Penalty for having BOTH feet off the ground at once - the difference between a walk and a
+    # bound.** `feet_air_time` pays per touchdown for that foot's swing, which is exactly right and
+    # is left alone; nothing, however, was costing the policy anything for leaving the ground
+    # entirely. Measured 2026-09-04 on `walk_spd/model_18050`: the gait spends **45.8% of its steps
+    # with neither foot down**, at 0.86 m/s under a 0.30 m/s command. That is a bounding run, and it
+    # is the least transferable gait there is - it depends on flight phases and impacts that Jolt
+    # and XPBD do not resolve the same way. In Godot the same policy stands still.
+    #
+    # Sized from that measurement rather than guessed, which is the mistake the `feet_air_time`
+    # comments above exist to prevent: at 45.8% of a ~700-step episode this costs
+    # `5.0 * (1/60) * 320 ~= 27` against a `feet_air_time` of 73 and a `track` of 35. Enough to make
+    # bounding the worse option, not enough to make stepping unprofitable - a swing phase still has
+    # one foot down and pays nothing here.
+    # **Measured and it did NOT work. Left at 0.0 with the result recorded rather than deleted.**
+    # Trained 2100 iterations at -5.0: `Episode_Reward/double_flight` sat at -20.7 to -21.3 for the
+    # whole run and never fell, i.e. the policy absorbed the cost instead of avoiding it - airtime
+    # still pays +75.7 against it. Godot transfer got worse, not better (9.5% upright at authority
+    # 0.10, against 100% for the checkpoint it resumed from). The flight phase is not held in place
+    # by this term being absent, so adding it does not remove the flight phase.
+    # **Measured TWICE and it does not work. Left at 0.0; do not try a third weight.**
+    #
+    # The flight phase is why no mobile policy transfers - across ~12 checkpoints in 8 lineages on
+    # the corrected plant every policy that MOVES falls in Godot and every policy that stands still
+    # survives, and Isaac's gait runs 0.86 m/s under a 0.30 m/s command with 45.8% of its steps
+    # airborne. So penalising double flight looks like the obvious lever. It is not.
+    #
+    #   weight -5.0,  2100 iterations: the term sat at -20.7 and NEVER fell. Godot transfer 9.5%.
+    #   weight -20.0,  ~20 minutes:    the term went the WRONG WAY, -62.9 -> -71.9, while `track`
+    #                                  climbed 22.9 -> 25.1 and mean reward fell to -8.99. The
+    #                                  policy bought speed and paid the penalty out of it.
+    #
+    # A penalty makes the current optimum cheaper without building a path to a different one. The
+    # `feet_air_time` term is simultaneously PAYING for airtime, and a grounded walk is a distant
+    # optimum that descends before it climbs - which `rew_track`'s own comment already warns about
+    # for the additive form. Getting a grounded gait needs a formulation that makes walking the
+    # reachable optimum (a contact schedule, a phase reference, a gait prior), not a scalar penalty.
+    rew_double_flight = 0.0
+
+    # **Pay for SINGLE SUPPORT - exactly one foot down. This is what makes it a walk.**
+    #
+    # Measured 2026-09-04 on `walk_spd/model_18050`, 12 s of its own gait in Isaac:
+    #
+    #     both feet down   52.9%
+    #     only left down    0.3%
+    #     only right down   1.0%      <- single support, the defining phase of walking
+    #     neither down     45.8%      <- flight
+    #     feet in the SAME state 98.8% of the time
+    #
+    # The policy is not walking. It is HOPPING, both feet together, at about 2.9 Hz. Every
+    # double-flight burst lasts exactly 0.167 s and so does every single-foot swing, which is only
+    # possible if the feet leave and land in phase. A synchronised two-footed hop lives or dies on
+    # simultaneous impulsive landings, which is the single place Jolt and XPBD differ most - so it
+    # is the least transferable thing the policy could have found, and it is the only mobile
+    # behaviour in the entire checkpoint archive.
+    #
+    # **Why a reward and not the penalty that failed.** `rew_double_flight` was measured twice
+    # (-5.0 and -20.0) and made things worse both times: a penalty makes the current optimum cheaper
+    # without building a path to a different one, so the policy just bought speed and paid the tax.
+    # This pays for the TARGET behaviour instead, and the path to it is short - the feet are already
+    # offset by one policy step, so sliding that offset toward half a cycle raises this term
+    # monotonically. The gradient climbs from where the policy already is.
+    #
+    # Zero for double support and zero for flight, so it cannot be collected by standing still or by
+    # hopping. Gated on a commanded motion for the same reason `feet_air_time` is: the cheapest way
+    # to collect it otherwise is to stand on one leg.
+    #
+    # Sized against the terms it competes with: a walk holding ~70% single support over a 600-step
+    # episode scores about `10 * (1/60) * 0.7 * 600 = 70`, against `feet_air_time` +73 and
+    # `track` +35.
+    rew_single_support = 10.0
 
     # `drive` saturates at the commanded speed rather than growing with it. The first thing a policy
     # discovers is that diving forward produces speed; capping means exceeding the command buys

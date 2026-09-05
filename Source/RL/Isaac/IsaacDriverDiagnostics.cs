@@ -69,6 +69,92 @@ internal sealed class IsaacDriverDiagnostics
             GD.Print($"[IsaacPolicyDriver] first step: gravity=({obs[0]:F3},{obs[1]:F3},{obs[2]:F3}) "
                      + $"pelvisHeight={obs[9]:F3} maxJointPos={maxJoint:F3} maxAction={maxAction:F3} "
                      + $"worstJoint={WorstDof(obs, 10, 55)}");
+
+            LogPlantTable();
+        }
+
+        /// <summary>Vector as `x|y|z`, invariant-formatted so the parser never meets a comma decimal.</summary>
+        private static string FormatVector(Vector3 v) =>
+            v.X.ToString("G6", System.Globalization.CultureInfo.InvariantCulture) + "|"
+            + v.Y.ToString("G6", System.Globalization.CultureInfo.InvariantCulture) + "|"
+            + v.Z.ToString("G6", System.Globalization.CultureInfo.InvariantCulture);
+
+        /// <summary>
+        /// One line per bone giving the Stable-PD denominator and the gains Godot ACTUALLY applies.
+        ///
+        /// <para>The aggregate <c>kEff</c> in the periodic log is a mean, and a mean is the wrong
+        /// summary here: the denominator divides by each bone's own inertia, so the reduction ranges
+        /// from roughly a third at the thigh to a hundredth at the hand. Scaling Isaac's gains by a
+        /// single averaged factor would therefore be wrong for almost every joint - which is exactly
+        /// the trap the single "0.176" figure in `p4f_newton/assets.py` sets.</para>
+        ///
+        /// <para>Emitted once, from the first-step log, so it needs no keypress. The
+        /// <c>RagdollTelemetryRecorder</c> dumps the same quantities per bone but only on a manual
+        /// <c>T</c>, which a headless check run cannot press. Deliberately machine-parseable:
+        /// `isaac_lab_3/scripts/derive_plant.py` reads these lines straight out of a run log to
+        /// generate the Isaac-side gain table.</para>
+        /// </summary>
+        private void LogPlantTable()
+        {
+            float dt = 1.0f / Mathf.Max(1, Engine.PhysicsTicksPerSecond);
+            GD.Print($"[PLANT] physicsHz={Engine.PhysicsTicksPerSecond} dt={dt:G6}");
+
+            // Every bone, not just `_bones`. The driver commands 12 and holds the other 4 (pelvis,
+            // head, hands) at rest via NeutraliseUncommandedBones - but Isaac drives all 45 DOF with
+            // a zero-target PD, so the passive bones' gains are part of the plant too and their
+            // scale factors have to be generated alongside the rest.
+            foreach (ActiveBone bone in _ragdoll.GetBones())
+            {
+                if (!GodotObject.IsInstanceValid(bone) || bone.ProportionalGain <= 0.0f)
+                {
+                    continue;
+                }
+
+                // Same fallback the telemetry recorder uses: the per-tick value once the body has
+                // integrated, the captured tensor before that. A zero here would silently invert the
+                // denominator's meaning, so it must never reach the division.
+                float inertia = bone.LastEffectiveInertia > 0.0f
+                    ? bone.LastEffectiveInertia
+                    : bone.CapturedInertia;
+                inertia = Mathf.Max(1e-5f, inertia);
+
+                float kp = bone.ProportionalGain;
+                float kd = bone.DerivativeGain;
+                float denominator = 1.0f + (kd * dt / inertia) + (kp * dt * dt / inertia);
+
+                // `parent` and `mass` ride along because the Isaac side needs the same skeleton and
+                // the same masses to reproduce Godot's gravity feed-forward, and `dummy_d6_rig.json`
+                // carries neither - it has joints and gains but no body graph. Emitting them here
+                // keeps ONE source of truth (the Godot scene) instead of a hand-copied hierarchy in
+                // Python that silently drifts the first time a bone is reparented.
+                string parent = bone.ParentBone != null && GodotObject.IsInstanceValid(bone.ParentBone)
+                    ? bone.ParentBone.BoneName
+                    : "-";
+
+                GD.Print($"[PLANT] bone={bone.BoneName} kp={kp:G6} kd={kd:G6} inertia={inertia:G6}"
+                         + $" denom={denominator:G6} kpEff={kp / denominator:G6}"
+                         + $" kdEff={kd / denominator:G6} scale={1.0f / denominator:G6}"
+                         + $" maxTorque={bone.MaxTorque:G6} parent={parent} mass={bone.Mass:G6}"
+                         // WORLD-space offset from the bone to its joint anchor, not
+                         // `ToLocal(...)`. The D6 builder works in world offsets too
+                         // (`to_usd(pivot - body.pos)`), and USD bodies spawn UNROTATED, so a
+                         // converted world offset at the rest pose IS the body-local offset Isaac
+                         // needs. Emitting Godot's rotated bone-local triple instead sent the
+                         // feed-forward's lever arms somewhere else entirely.
+                         + $" pivotOffset={FormatVector(bone.JointPivotWorld - bone.GlobalPosition)}"
+                         // The bone's own world position, so the Isaac side can check it is in the
+                         // SAME POSE before trusting any per-bone comparison. Two rigs that disagree
+                         // about where a limb is will disagree about every lever arm, and that looks
+                         // identical to a broken feed-forward.
+                         + $" posWorld={FormatVector(bone.GlobalPosition)}"
+                         // The gravity feed-forward Godot is ACTUALLY applying to this bone, right
+                         // now, in this pose. `gravity_ff.py` reproduces the same computation on the
+                         // Isaac side, and a per-bone magnitude comparison is the only way to know
+                         // whether it reproduces it or merely resembles it. A whole-body outcome
+                         // cannot tell a correct feed-forward from one that is half the right size.
+                         + $" ffMag={bone.LastLoadCompensationTorque.Length():G6}"
+                         + $" supportShare={bone.SupportedMassShare:G6}");
+            }
         }
     
         /// <summary>
@@ -95,30 +181,48 @@ internal sealed class IsaacDriverDiagnostics
             float deliver = 0.0f;
             float worstFv = 1.0f;
             int counted = 0;
-    
+
+            // Body-wide split of the holding torque between the PD term and the gravity
+            // feed-forward. Isaac's `ImplicitActuatorCfg` is a PD and NOTHING else - it has no
+            // feed-forward - so this fraction is the size of an actuator mismatch that no gain
+            // scaling can close.
+            //
+            // It matters far more now than it used to. While Isaac trained at the full authored
+            // gains, its joints were stiff enough to hold a pose on the PD term alone and the
+            // missing feed-forward barely showed. Matching Isaac's gains DOWN onto Godot's measured
+            // Stable-PD plant (2026-09-03, spine 600 -> 121) makes the springs roughly six times
+            // softer, and a soft spring cannot hold a limb against gravity where a feed-forward can.
+            // So the correction that closed the stiffness gap is expected to promote this one.
+            float ffTorque = 0.0f;
+            float pdTorque = 0.0f;
+
             foreach (ActiveBone? bone in _bones)
             {
                 if (bone == null || !GodotObject.IsInstanceValid(bone))
                 {
                     continue;
                 }
-    
+
                 float ceiling = bone.MaxTorque * bone.MuscleStrength;
                 if (ceiling <= 0.0f)
                 {
                     continue;
                 }
-    
+
                 demand = Mathf.Max(demand,
                     (bone.LastPdTorque + bone.LastLoadCompensationTorque).Length() / ceiling);
                 deliver = Mathf.Max(deliver, bone.LastAppliedTorque.Length() / ceiling);
                 worstFv = Mathf.Min(worstFv, bone.LastForceVelocityScale);
+                ffTorque += bone.LastLoadCompensationTorque.Length();
+                pdTorque += bone.LastPdTorque.Length();
                 counted++;
             }
+
+            float ffShare = (ffTorque + pdTorque) > 1e-6f ? ffTorque / (ffTorque + pdTorque) : 0.0f;
     
             return counted == 0
                 ? string.Empty
-                : $" demand={demand:F2} deliver={deliver:F2} fvScale={worstFv:F2}"
+                : $" demand={demand:F2} deliver={deliver:F2} fvScale={worstFv:F2} ffShare={ffShare:F2}"
                   + $" kEff={EffectiveGainFraction():F2}" + StiffnessReport() + TrackingReport(trackingError, appliedTorque) + BalanceReport();
         }
     
@@ -375,4 +479,113 @@ internal sealed class IsaacDriverDiagnostics
             }
             GD.Print(line.ToString());
         }
+
+        /// <summary>
+        /// Per-DOF trace of observation slices [10:55] and [55:100] to a CSV, one row per policy step.
+        ///
+        /// <para><b>Written to settle whether Godot's joint-velocity channel is measuring motion or
+        /// inventing it.</b> The two slices are the SAME 45 DOFs in the same order, so an angle and
+        /// its own rate can be compared directly. A DOF reporting 15 rad/s whose angle moves by far
+        /// less than 15/60 rad over the step is not rotating at 15 rad/s; the observation is wrong,
+        /// and the fix is a measurement fix rather than a physics one.</para>
+        ///
+        /// <para>Off unless <c>DofTracePath</c> is set. Opened once and held: reopening per step
+        /// turned a 20 s run into minutes of file churn, which perturbs the very timing under test.</para>
+        /// </summary>
+        internal void TraceDofs(float[] obs, double elapsed, string path)
+        {
+            if (_trace == null)
+            {
+                if (_traceFailed)
+                {
+                    return;
+                }
+
+                try
+                {
+                    _trace = new System.IO.StreamWriter(path, append: false);
+                }
+                catch (System.Exception e)
+                {
+                    _traceFailed = true;
+                    GD.PrintErr($"[IsaacPolicyDriver] DOF trace could not open '{path}': {e.Message}");
+                    return;
+                }
+
+                // The WHOLE observation, not just the joint slices. Localising which of the 143
+                // floats Godot presents differently from Isaac is the only way to find an
+                // observation-side gap without guessing which slice to look at first.
+                var header = new System.Text.StringBuilder("t");
+                string[] fixedNames =
+                {
+                    "grav_x", "grav_y", "grav_z", "linVel_x", "linVel_y", "linVel_z",
+                    "angVel_x", "angVel_y", "angVel_z", "height",
+                };
+                foreach (string name in fixedNames)
+                {
+                    header.Append(',').Append(name);
+                }
+
+                for (int i = 0; i < _rig.DofOrder.Count; i++)
+                {
+                    IsaacRigContract.JointSpec s = _rig.DofOrder[i];
+                    header.Append($",pos_{s.Bone}.{s.GodotAxis}");
+                }
+
+                for (int i = 0; i < _rig.DofOrder.Count; i++)
+                {
+                    IsaacRigContract.JointSpec s = _rig.DofOrder[i];
+                    header.Append($",vel_{s.Bone}.{s.GodotAxis}");
+                }
+
+                header.Append(",c_HandL,c_HandR,c_FootL,c_FootR");
+                for (int i = 0; i < 36; i++)
+                {
+                    header.Append($",act{i}");
+                }
+
+                header.Append(",cmd_x,cmd_y,cmd_yaw");
+
+                // **Foot WORLD height, which the observation does not carry.** The contact flags are
+                // derived from it by a threshold, so a flag that never clears cannot distinguish
+                // "the foot is not rising" from "the foot rises but not far enough". Measured
+                // 2026-09-05, Godot swings its knee as far as Isaac does and still registers zero
+                // foot strikes, and no existing trace can say which of those two it is.
+                header.Append(",footZ_L,footZ_R,pelvisZ");
+                _trace.WriteLine(header.ToString());
+            }
+
+            var row = new System.Text.StringBuilder(
+                elapsed.ToString("0.0000", System.Globalization.CultureInfo.InvariantCulture));
+            for (int i = 0; i < obs.Length; i++)
+            {
+                row.Append(',').Append(obs[i].ToString(
+                    "0.0000", System.Globalization.CultureInfo.InvariantCulture));
+            }
+
+            ActiveBone? footL = _ragdoll.FindBone("Foot_L");
+            ActiveBone? footR = _ragdoll.FindBone("Foot_R");
+            row.Append(',').Append(Fmt(footL != null && GodotObject.IsInstanceValid(footL)
+                ? footL.GlobalPosition.Y : 0.0f));
+            row.Append(',').Append(Fmt(footR != null && GodotObject.IsInstanceValid(footR)
+                ? footR.GlobalPosition.Y : 0.0f));
+            row.Append(',').Append(Fmt(_ragdoll.Pelvis != null && GodotObject.IsInstanceValid(_ragdoll.Pelvis)
+                ? _ragdoll.Pelvis.GlobalPosition.Y : 0.0f));
+
+            _trace.WriteLine(row.ToString());
+        }
+
+        private static string Fmt(float v) =>
+            v.ToString("0.0000", System.Globalization.CultureInfo.InvariantCulture);
+
+        /// <summary>Closes the DOF trace so the tail of the run is not lost to the buffer.</summary>
+        internal void CloseTrace()
+        {
+            _trace?.Flush();
+            _trace?.Dispose();
+            _trace = null;
+        }
+
+        private System.IO.StreamWriter? _trace;
+        private bool _traceFailed;
 }

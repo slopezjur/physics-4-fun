@@ -30,8 +30,21 @@ namespace Physics4Fun.RL.Isaac;
 /// </summary>
 public partial class IsaacPolicyDriver : Node
 {
-    /// <summary>Physics ticks per policy step. 120 Hz physics / 2 = the 60 Hz training rate.</summary>
-    public const int PhysicsTicksPerPolicyStep = 2;
+    /// <summary>
+    /// Physics ticks per policy step, derived so the policy always runs at its trained 60 Hz.
+    ///
+    /// <para>Was a const 2, correct only while physics ran at 120 Hz. The frozen Isaac contract
+    /// fixes the POLICY rate at 60 Hz; it says nothing about the physics rate, and the physics rate
+    /// is a lever worth pulling. Godot's Stable PD divides both gains by
+    /// <c>1 + Kd*dt/I + Kp*dt^2/I</c>, so a smaller dt collapses the denominator toward 1 and moves
+    /// Godot's EFFECTIVE gains up toward the authored values Isaac trains against. Measured at
+    /// 120 Hz the body applies 15% of its authored gain; the damping term contributes 4.11 of the
+    /// 6.45 denominator and falls linearly with dt.</para>
+    ///
+    /// <para>Deriving it means changing <c>physics_ticks_per_second</c> alone keeps the contract
+    /// intact instead of silently retraining the policy rate along with it.</para>
+    /// </summary>
+    public static int PhysicsTicksPerPolicyStep => Mathf.Max(1, Engine.PhysicsTicksPerSecond / 60);
 
     /// <summary>The body this drives. Required.</summary>
     [Export] public HumanoidRagdoll? Ragdoll { get; set; }
@@ -81,6 +94,61 @@ public partial class IsaacPolicyDriver : Node
     [Export] public float HillVelocityFilter { get; set; } = 1.0f;
 
     /// <summary>
+    /// Scales every bone's gravity feed-forward. 1 keeps Godot's biomechanics (the default and the
+    /// shipping behaviour); 0 removes the feed-forward entirely.
+    ///
+    /// <para><b>A MEASUREMENT INSTRUMENT, NOT A FIX.</b> The standing rule on this project is that
+    /// transfer gets fixed Isaac -> Godot - model Godot's actuator on the Isaac side - and never by
+    /// switching Godot's biomechanics off until the body matches Isaac's plain PD. That drift
+    /// already happened once, on 2026-08-27, one defensible step at a time
+    /// (<c>DisableHillLimit</c> -> <c>DisableLoadCompensation</c> -> <c>JointMotorDrive</c>), and
+    /// those knobs were removed for that reason. This one exists to ANSWER A QUESTION, not to ship
+    /// at 0.</para>
+    ///
+    /// <para>The question: Godot's feed-forward supplies 45-68% of the body's holding torque
+    /// (measured as <c>ffShare</c>), and Isaac's `ImplicitActuatorCfg` has none. Once Isaac's gains
+    /// were matched down onto Godot's Stable-PD plant on 2026-09-03, a policy trained without the
+    /// feed-forward must learn to supply that torque itself through its position targets - and then
+    /// receives Godot's feed-forward ON TOP of its own, roughly double what the pose needs. Setting
+    /// this to 0 for one run says whether that is what topples the body. If it is, the fix is to
+    /// implement the feed-forward in Isaac, not to leave this at 0.</para>
+    /// </summary>
+    [Export(PropertyHint.Range, "0,1,0.05")] public float LoadCompensation { get; set; } = 1.0f;
+
+    /// <summary>
+    /// Restrict Godot's balance layer to the part Isaac actually models: pelvis stabilisation.
+    ///
+    /// <para><b>`BalanceAssist` does far more than its name suggests.</b> It puts the ragdoll in
+    /// `RagdollState.Balanced` and wakes the WHOLE balance layer at full strength - dynamic
+    /// stepping, weight transfer, ankle ground-reaction, hip strategy, arm reflexes and gaze - each
+    /// of which writes <see cref="ActiveBone.FeedForwardTargetOffset"/>. Those offsets compose into
+    /// every joint target alongside the policy's own
+    /// (<c>TargetLocalRotation * feedForward * PolicyTargetOffset</c>).</para>
+    ///
+    /// <para>Isaac models exactly ONE of them: `StandEnv._apply_balance_assist` is a pelvis attitude
+    /// PD applied as a body torque, ported from `PelvisStabilizationModule`. So a policy trained in
+    /// Isaac has never seen the other five, and in Godot it is composed with a procedural balance
+    /// controller it knows nothing about.</para>
+    ///
+    /// <para>That asymmetry is regime-dependent in exactly the way the transfer results are. For
+    /// STANDING the extra modules help - keeping the body upright is their whole purpose, so a
+    /// standing policy is assisted by them. For WALKING they fight it: stepping and weight transfer
+    /// are trying to hold a stationary balanced stance while the policy is trying to translate. That
+    /// is a candidate explanation for a brain that stands at authority 0.03 and falls at 0.05.</para>
+    ///
+    /// <para>True leaves Godot's full layer running (the shipping behaviour). False zeroes the
+    /// joint-level modules and keeps pelvis stabilisation, which is the configuration Isaac trains
+    /// against.</para>
+    /// </summary>
+    [Export] public bool BalanceJointModules { get; set; } = true;
+
+    /// <summary>
+    /// Send the pelvis stabiliser's reaction into the thighs, as Isaac does, instead of the feet.
+    /// See <see cref="Physics4Fun.Ragdoll.Modules.PelvisStabilizationModule.ReactIntoThighs"/>.
+    /// </summary>
+    [Export] public bool PelvisReactIntoThighs { get; set; }
+
+    /// <summary>
     /// Low-pass alpha for the joint velocities written into observation slice [55:100]. 1.0 is off.
     ///
     /// <para><b>The filter existed and was wired to nothing.</b> `IsaacObservation.JointVelocityFilter`
@@ -115,6 +183,12 @@ public partial class IsaacPolicyDriver : Node
     [Export] public bool JointVelocityEnabled { get; set; } = true;
 
     /// <summary>
+    /// Measure joint velocity by differencing the joint ANGLE the policy is shown, instead of from
+    /// body angular velocities. See <see cref="IsaacObservation.JointVelocityFromDifference"/>.
+    /// </summary>
+    [Export] public bool JointVelocityFromDifference { get; set; } = true;
+
+    /// <summary>
     /// Mask the joint-velocity observation on joints narrower than this, in radians. 0 is off.
     /// **Must match `obs_joint_vel_min_range` for the checkpoint being run.**
     /// </summary>
@@ -147,6 +221,91 @@ public partial class IsaacPolicyDriver : Node
     /// magnitude alone cannot say WHICH slice did it.
     /// </summary>
     [Export] public float DiagnosticInterval { get; set; } = 0.5f;
+
+    /// <summary>
+    /// Absolute path for a per-policy-step CSV of every DOF's angle and rate. Empty disables it.
+    ///
+    /// <para>Observation slices [10:55] and [55:100] are the same 45 DOFs in the same order, so
+    /// writing both lets an angle be checked against its own reported rate offline. That is the one
+    /// test that separates "Godot's body really is chattering" from "Godot's velocity channel is
+    /// measuring the wrong quantity", and the two have completely different fixes.</para>
+    /// </summary>
+    [Export] public string DofTracePath { get; set; } = "";
+
+    /// <summary>
+    /// Uniform noise added to every action for the first <see cref="SpawnNoiseSeconds"/>, breaking
+    /// the dummy's perfect left/right symmetry at spawn. 0 disables it.
+    ///
+    /// <para><b>Isaac resets with `reset_joint_noise = 0.1` and Godot spawns at the exact rest
+    /// pose.</b> That asymmetry is not cosmetic for a gait: a memoryless policy on a perfectly
+    /// symmetric body issues near-symmetric commands, both legs answer together, the contact flags
+    /// never separate, and the policy never sees the single-support signal that drives its swing
+    /// phase. Measured in Godot, `model_23600` holds both contact flags at 1 for 15 s straight while
+    /// the same checkpoint runs 78.5% single support in Isaac.</para>
+    ///
+    /// <para>Applied to the action rather than to joint positions because Godot's bodies are
+    /// physics-driven and cannot simply be posed; the effect on the first few ticks is the same.</para>
+    /// </summary>
+    /// <summary>
+    /// Multiplier applied to every controlled bone's <see cref="ActiveBone.MaxTorque"/> at setup.
+    /// 1.0 leaves the authored ceilings alone.
+    ///
+    /// <para><b>For testing whether Godot's actuator SATURATES.</b> Measured 2026-09-05 open-loop,
+    /// Godot delivers 1.65x its commanded hip angle at a quarter command and only 1.21x at full,
+    /// while Isaac delivers a flat ~2.6x at every amplitude. A falling ratio is what a torque
+    /// ceiling looks like: the bigger the commanded deflection, the more the request exceeds the
+    /// clamp and the further the delivered angle falls behind. If raising this flattens the
+    /// 1.65 -> 1.21 falloff, the ceiling is the mechanism and the fix belongs in Isaac's
+    /// `_effort_limited`, not in rescaling actions.</para>
+    /// </summary>
+    [Export] public float EffortScale { get; set; } = 1.0f;
+
+    /// <summary>
+    /// Multiplier on every controlled bone's <see cref="ActiveBone.MaxShorteningVelocity"/>. A large
+    /// value effectively disables the Hill force-velocity derating.
+    ///
+    /// <para>The Hill law scales torque down as a joint shortens faster, which is a sublinear
+    /// response by construction and matches the measured shape: Godot delivers 1.65x its commanded
+    /// hip angle at a quarter command and 1.21x at full, while Isaac is flat at ~2.6x. Raising vmax
+    /// removes the derating; if the falloff flattens, the Hill law is the mechanism.</para>
+    ///
+    /// <para><b>There is no `DisableHillLimit` export</b>, despite what some comments in this file
+    /// still say - it is a stale reference, and `--set DisableHillLimit=true` silently does nothing.</para>
+    /// </summary>
+    [Export] public float HillVmaxScale { get; set; } = 1.0f;
+
+    [Export] public float SpawnActionNoise { get; set; }
+
+    /// <summary>Seconds over which <see cref="SpawnActionNoise"/> is applied, from the first step.</summary>
+    [Export] public float SpawnNoiseSeconds { get; set; } = 0.5f;
+
+    /// <summary>
+    /// CSV of pre-scaling actions to apply INSTEAD of running the policy, one row per policy step
+    /// with columns `act0..act35`. Empty runs the policy normally.
+    ///
+    /// <para><b>The only test that compares the two plants without the closed loop in the way.</b>
+    /// Godot and Isaac running the same policy diverge for two reasons at once - the bodies respond
+    /// differently, and the policy then sees different observations and commands something else.
+    /// Driving both engines from one recorded action sequence removes the second, so any remaining
+    /// difference in the joint trajectories is the mechanism and nothing else.</para>
+    ///
+    /// <para>Rows are consumed one per policy step. When the file runs out the driver holds the
+    /// last row rather than reverting to inference, which would silently mix the two regimes.</para>
+    /// </summary>
+    [Export] public string ReplayActionsPath { get; set; } = "";
+
+    /// <summary>
+    /// When the replay rows run out, hand control to the POLICY instead of holding the last row.
+    ///
+    /// <para><b>Separates "cannot walk in Godot" from "cannot start walking in Godot".</b> The
+    /// policy is memoryless, so its gait phase lives entirely in the observation; measured in
+    /// Godot it parks at a constant posture with both contact flags stuck at 1, never sees the
+    /// single-support signal, and therefore never enters its swing phase - a fixed point of the
+    /// closed loop. Scripting a couple of steps and then handing over tests whether the gait
+    /// SUSTAINS once the loop has been pushed into it. If it does, a kick-start is a real fix; if
+    /// it does not, the policy genuinely cannot carry a gait on this body.</para>
+    /// </summary>
+    [Export] public bool ReplayHandoff { get; set; }
 
     /// <summary>
     /// Seconds spent holding EVERY bone at its rest pose before inference starts.
@@ -300,6 +459,8 @@ public partial class IsaacPolicyDriver : Node
             JointVelocityClip = IsaacRigContract.LoadJointVelocityClip(PolicyContractPath),
             JointVelocityFilter = JointVelocityFilter,
             JointVelocityEnabled = JointVelocityEnabled,
+            JointVelocityFromDifference = JointVelocityFromDifference,
+            PolicyRate = 1.0f / (float)GetPhysicsProcessDeltaTime() / PhysicsTicksPerPolicyStep,
             JointVelocityMinRange = JointVelocityMinRange,
         };
         if (!JointVelocityEnabled)
@@ -333,6 +494,39 @@ public partial class IsaacPolicyDriver : Node
         _diagnostics = new IsaacDriverDiagnostics(
             Ragdoll!, _rig!, _actions!, _controlledBones, JointSpacePd);
 
+        // After _actions exists: the loader sizes each row from the action space.
+        LoadReplay();
+
+        if (!Mathf.IsEqualApprox(EffortScale, 1.0f))
+        {
+            int scaled = 0;
+            foreach (ActiveBone? bone in _controlledBones)
+            {
+                if (bone != null && GodotObject.IsInstanceValid(bone))
+                {
+                    bone.MaxTorque *= EffortScale;
+                    scaled++;
+                }
+            }
+
+            GD.Print($"[IsaacPolicyDriver] EffortScale {EffortScale:F2} applied to {scaled} bones");
+        }
+
+        if (!Mathf.IsEqualApprox(HillVmaxScale, 1.0f))
+        {
+            int scaled = 0;
+            foreach (ActiveBone? bone in _controlledBones)
+            {
+                if (bone != null && GodotObject.IsInstanceValid(bone))
+                {
+                    bone.MaxShorteningVelocity *= HillVmaxScale;
+                    scaled++;
+                }
+            }
+
+            GD.Print($"[IsaacPolicyDriver] HillVmaxScale {HillVmaxScale:F1} applied to {scaled} bones");
+        }
+
         // The body must be in RL state or its own procedural controller keeps driving the bones and
         // fights every command this issues.
         //
@@ -357,6 +551,22 @@ public partial class IsaacPolicyDriver : Node
                 Ragdoll.SuppressProceduralPose = true;
                 Ragdoll.Balance.StateBalanceStrengthMap[(int)RagdollState.Balanced] =
                     Mathf.Clamp(BalanceAssist, 0.0f, 1.0f);
+                Ragdoll.Balance.PelvisReactIntoThighs = PelvisReactIntoThighs;
+
+                if (!BalanceJointModules)
+                {
+                    // Everything that writes a per-joint FeedForwardTargetOffset, off. Pelvis
+                    // stabilisation stays, because that is the one module Isaac reproduces.
+                    Ragdoll.Balance.EnableDynamicStepping = false;
+                    Ragdoll.Balance.EnableArmReflexes = false;
+                    Ragdoll.Balance.EnableVestibularGaze = false;
+                    Ragdoll.Balance.AnklePitchGain = 0.0f;
+                    Ragdoll.Balance.AnklePitchDamping = 0.0f;
+                    Ragdoll.Balance.AnkleRollGain = 0.0f;
+                    Ragdoll.Balance.AnkleRollDamping = 0.0f;
+                    GD.Print("[IsaacPolicyDriver] joint-level balance modules OFF - pelvis "
+                             + "stabilisation only, matching what Isaac trains against");
+                }
                 GD.Print($"[IsaacPolicyDriver] balance assist {BalanceAssist:F2} - policy owns the "
                          + "pose, Godot's balance layer owns root stabilisation");
             }
@@ -394,6 +604,23 @@ public partial class IsaacPolicyDriver : Node
             GD.Print($"[IsaacPolicyDriver] Hill velocity filter {HillVelocityFilter:F2} on "
                      + $"{filtered} bone(s) - the force-velocity law sees the limb, not the solver");
         }
+
+        if (LoadCompensation < 1.0f)
+        {
+            int scaled = 0;
+            foreach (ActiveBone bone in Ragdoll!.GetBones())
+            {
+                if (!IsInstanceValid(bone))
+                {
+                    continue;
+                }
+                bone.LoadCompensationScale = LoadCompensation;
+                scaled++;
+            }
+            GD.Print($"[IsaacPolicyDriver] DIAGNOSTIC gravity feed-forward scaled to "
+                     + $"{LoadCompensation:F2} on {scaled} bone(s) - this is an experiment, not a "
+                     + "shipping configuration; the fix belongs on the Isaac side");
+        }
         if (JointSpacePd)
         {
             SilenceGodotActuators();
@@ -401,9 +628,24 @@ public partial class IsaacPolicyDriver : Node
         _warmupRemaining = WarmupSeconds;
 
         _ready = true;
+        // The physics rate, decimation and resource root are printed EXPLICITLY, not just the
+        // derived policy rate. "60 Hz" alone is identical under 120/2 and 480/8, so it cannot
+        // confirm that a change to `physics_ticks_per_second` actually reached the engine - which is
+        // exactly the ambiguity that made a 480 Hz run read as byte-identical to 120 Hz.
+        //
+        // `root` is the one that matters most. An EMPTY root means Godot is running from a packed
+        // project rather than this directory, so every project setting comes from the pack and edits
+        // to project.godot do nothing at all. That is not hypothetical: an export written into the
+        // Godot INSTALL folder on 2026-08-26 left a `.pck` beside - and name-matching -
+        // `Godot_v4.7.1-stable_mono_win64_console.exe`, which is the binary `godot_check.py`
+        // defaults to. Godot auto-mounts a pack whose basename matches the executable, so that
+        // binary booted as a self-contained game and silently ignored `--path` for settings.
+        // Scenes and models still came from disk, which is what made it so hard to see.
         GD.Print($"[IsaacPolicyDriver] {System.IO.Path.GetFileName(PolicyPath)} -> "
                  + $"{_observation.Size} obs / {_actions.Size} actions at "
-                 + $"{Engine.PhysicsTicksPerSecond / PhysicsTicksPerPolicyStep} Hz");
+                 + $"{Engine.PhysicsTicksPerSecond / PhysicsTicksPerPolicyStep} Hz "
+                 + $"(physics {Engine.PhysicsTicksPerSecond} Hz / decimation {PhysicsTicksPerPolicyStep}, "
+                 + $"root {ProjectSettings.GlobalizePath("res://")})");
     }
 
     private bool LoadPolicy()
@@ -738,6 +980,36 @@ public partial class IsaacPolicyDriver : Node
 
         float[] obs = _observation.Build(context);
         float[] actions = ZeroActionBaseline ? new float[_actions!.Size] : Infer(obs);
+        if (SpawnActionNoise > 0.0f && _elapsed < SpawnNoiseSeconds)
+        {
+            for (int i = 0; i < actions.Length; i++)
+            {
+                actions[i] += (float)GD.RandRange(-SpawnActionNoise, SpawnActionNoise);
+            }
+        }
+
+        if (_replay != null)
+        {
+            if (_replayRow < _replay.Length)
+            {
+                actions = _replay[_replayRow];
+            }
+            else if (ReplayHandoff)
+            {
+                if (_replayRow == _replay.Length)
+                {
+                    GD.Print($"[IsaacPolicyDriver] replay exhausted at t={_elapsed:F2}s - "
+                             + "POLICY now has control");
+                }
+            }
+            else
+            {
+                actions = _replay[_replay.Length - 1];
+            }
+
+            _replayRow++;
+        }
+
         if (actions.Length == 0)
         {
             return;
@@ -797,6 +1069,11 @@ public partial class IsaacPolicyDriver : Node
             _diagnostics?.LogFirstStep(obs, actions, _trackingError, _appliedTorque);
         }
 
+        if (!string.IsNullOrEmpty(DofTracePath))
+        {
+            _diagnostics?.TraceDofs(obs, _elapsed, DofTracePath);
+        }
+
         if (DiagnosticInterval > 0.0f)
         {
             _sinceDiagnostic += delta * PhysicsTicksPerPolicyStep;
@@ -838,7 +1115,64 @@ public partial class IsaacPolicyDriver : Node
     /// </summary>
     public override void _ExitTree()
     {
+        _diagnostics?.CloseTrace();
         _session?.Dispose();
         _session = null;
+    }
+
+    /// <summary>Recorded actions for <see cref="ReplayActionsPath"/>, or null when inferring.</summary>
+    private float[][]? _replay;
+    private int _replayRow;
+
+    /// <summary>Reads the replay CSV, taking the `act0..actN` columns by NAME, not by position.</summary>
+    private void LoadReplay()
+    {
+        if (string.IsNullOrEmpty(ReplayActionsPath) || _actions == null)
+        {
+            return;
+        }
+
+        if (!System.IO.File.Exists(ReplayActionsPath))
+        {
+            GD.PrintErr($"[IsaacPolicyDriver] replay file not found: {ReplayActionsPath}");
+            return;
+        }
+
+        string[] lines = System.IO.File.ReadAllLines(ReplayActionsPath);
+        if (lines.Length < 2)
+        {
+            GD.PrintErr("[IsaacPolicyDriver] replay file has no rows.");
+            return;
+        }
+
+        string[] header = lines[0].Split(',');
+        var columns = new int[_actions.Size];
+        for (int a = 0; a < _actions.Size; a++)
+        {
+            columns[a] = System.Array.IndexOf(header, $"act{a}");
+            if (columns[a] < 0)
+            {
+                GD.PrintErr($"[IsaacPolicyDriver] replay file has no column 'act{a}'.");
+                return;
+            }
+        }
+
+        var rows = new System.Collections.Generic.List<float[]>(lines.Length - 1);
+        for (int i = 1; i < lines.Length; i++)
+        {
+            string[] cells = lines[i].Split(',');
+            var row = new float[_actions.Size];
+            for (int a = 0; a < _actions.Size; a++)
+            {
+                float.TryParse(cells[columns[a]], System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out row[a]);
+            }
+
+            rows.Add(row);
+        }
+
+        _replay = rows.ToArray();
+        GD.Print($"[IsaacPolicyDriver] REPLAY {_replay.Length} recorded action rows - the policy is "
+                 + "NOT running; this measures the plant, not the controller.");
     }
 }

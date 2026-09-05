@@ -40,6 +40,21 @@ public class PelvisStabilizationModule : IBalanceStrategy
     /// </summary>
     public float RecoveryMaxTorque { get; set; } = 120.0f;
 
+    /// <summary>
+    /// Send the stabiliser's reaction into the grounded THIGHS instead of the grounded feet.
+    ///
+    /// <para><b>For sim-to-sim only; the game keeps the feet.</b> Isaac reproduces this module but
+    /// reacts into the thighs, because a Newton foot cannot hold a raw body torque - 0.0009 kg.m^2
+    /// against the pelvis's 0.0285, so the 300 N.m cap spins it hundreds of degrees per tick. The
+    /// two engines therefore run different reaction paths, and it shows: measured 2026-09-04 with
+    /// zero action, turning the assist on moves Godot's total joint deviation 0.640 -> 1.326 while
+    /// Isaac's moves 0.512 -> 0.390. Same gains (600/20/300/0.25), opposite effect - Godot's assist
+    /// disturbs the body and Isaac's settles it, and a policy trained against the calm one meets
+    /// the noisy one in Godot.
+    /// </para>
+    /// </summary>
+    public bool ReactIntoThighs { get; set; }
+
     /// <summary>Limbs that can carry the stabilizer's reaction into the ground, in preference order.</summary>
     private readonly List<IBoneState> _reactionLimbs = new();
 
@@ -110,13 +125,15 @@ public class PelvisStabilizationModule : IBalanceStrategy
 
         if (!rising)
         {
-            if (context.IsGroundedL && context.FootL != null && context.FootL.IsValid)
+            IBoneState? left = ReactIntoThighs ? context.ThighL : context.FootL;
+            IBoneState? right = ReactIntoThighs ? context.ThighR : context.FootR;
+            if (context.IsGroundedL && left != null && left.IsValid)
             {
-                _reactionLimbs.Add(context.FootL);
+                _reactionLimbs.Add(left);
             }
-            if (context.IsGroundedR && context.FootR != null && context.FootR.IsValid)
+            if (context.IsGroundedR && right != null && right.IsValid)
             {
-                _reactionLimbs.Add(context.FootR);
+                _reactionLimbs.Add(right);
             }
             return;
         }

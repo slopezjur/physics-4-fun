@@ -251,6 +251,26 @@ class StandEnvCfg(DirectRLEnvCfg):
     # 0 disables it. 15.0 rad/s matches `ActiveBone.MaxShorteningVelocity`.
     hill_max_shortening_velocity = 15.0
 
+    # EMA smoothing on the joint velocity that feeds the Hill law, matching Godot's
+    # `ActiveBone.HillVelocityFilterAlpha`. 1.0 uses the raw per-substep velocity.
+    #
+    # **0.15, because that is what the Godot check scenes set, and the difference is not cosmetic.**
+    # Measured under the trained walk policy with the raw velocity (alpha 1.0), Isaac's worst Hill
+    # derating runs at a MEDIAN of 0.583 - the actuator is held at 58% of its ceiling for most of a
+    # gait - while Godot under the same policy reports 0.97-1.00. A policy trained against a
+    # permanently derated actuator commands targets calibrated for it, then meets Godot's nearly
+    # underated one and over-drives by roughly 1.7x. That is the shape of the authority ladder:
+    # survivable only at 0.03, where every command is scaled down enough to hide the excess.
+    #
+    # Godot's update is a plain per-tick EMA, `filtered += (raw - filtered) * alpha`, applied once
+    # per PHYSICS tick. Applied here per physics substep at the same 120 Hz, so the time constants
+    # agree. Note it is tick-based in both engines, so it silently retunes if the physics rate
+    # changes - see the 480 Hz experiment.
+    #
+    # A trained condition: it changes how much torque the actuator delivers, so `run_conditions.py`
+    # restores it from the checkpoint rather than taking the task default.
+    hill_velocity_filter = 0.15
+
     # Spawn randomisation, radians on each joint and metres on the root height. Set to 0 for an
     # open-loop plant comparison against Godot: with noise on, Isaac's mean trajectory is an average
     # over starting poses Godot never has, and the two cannot be compared step by step.
@@ -275,6 +295,71 @@ class StandEnvCfg(DirectRLEnvCfg):
     # Gains are Godot's verbatim: 600 / 20, capped at 300 N.m, with a 0.25 EMA on the angular
     # velocity because joint reaction chatter would otherwise dominate the damping term.
     balance_assist = float(os.environ.get("P4F_BALANCE_ASSIST", "0.0"))
+
+    # Scale on Godot's gravity feed-forward, reproduced in `p4f_newton/gravity_ff.py`.
+    #
+    # **1.0, not 0.0.** Measured in Godot, the feed-forward carries `ffShare = 0.45..0.68` of the
+    # body's holding torque, and Godot stripped of it does not merely sag - it collapses flat
+    # (head 0.136 m). Isaac's `ImplicitActuatorCfg` has no feed-forward at all, so until this
+    # existed the two engines' actuators differed by half their authority. While Isaac trained at
+    # the full authored gains its stiffer PD stood in for the missing term; matching the gains down
+    # onto Godot's Stable-PD plant removed that substitute and the body began to crouch (52.7%
+    # standing, head 1.459 against 1.540).
+    #
+    # **0.0 - OFF by default, on measured harm.** The term is implemented and its open-chain half is
+    # validated (UpperArm within +/-12% of Godot), but it is NOT faithful where it carries load:
+    # against Godot's per-bone reference it supplies only 0.21-0.68x on the legs while applying
+    # ~7.7 N.m at the spine where Godot applies ~0. Trained with it on, resumed from the same
+    # checkpoint as the run without it:
+    #
+    #                          standing   head    ever fell   mean reward   episode length
+    #     SPD table only          52.7%   1.459       5.9%       67 -> 73             670
+    #     SPD table + this         0.0%   0.643      24.2%    -0.81 -> 16.3            144
+    #
+    # An unfaithful feed-forward is not a smaller version of the right one - it is an extra torque
+    # field biased in the wrong places, and it amplifies pose asymmetry into torso torque the policy
+    # has to fight. Godot's procedural controller was designed around this term; a policy trained
+    # without it was not.
+    #
+    # Turn it back on when the per-bone diff in `scripts/probe_ff.py` is near 1.0 on the LEG bones,
+    # not before. The code stays because the term is real physics that Godot genuinely applies, and
+    # 45-68% of Godot's holding torque still comes from it.
+    #
+    # A trained condition, not a tuning knob: it changes the plant, so it is restored from the
+    # checkpoint by `run_conditions.py` rather than taken from the task default.
+    gravity_feedforward = float(os.environ.get("P4F_GRAVITY_FF", "0.0"))
+
+    # Reproduce Godot's JOINT SAG under load. 0 disables; 1.0 is Godot's own compliance.
+    #
+    # **Measured 2026-09-04, zero action, gravity on, both bodies settled:**
+    #
+    #     joint_Forearm_L:0   Godot +0.368 rad   Isaac +0.000
+    #     joint_UpperArm_L:0  Godot +0.159       Isaac +0.002
+    #     joint_Thigh_L:0     Godot +0.121       Isaac +0.005
+    #     joint_Chest:0       Godot -0.125       Isaac -0.001
+    #
+    # Godot drives joints with an explicit Stable-PD torque and they sag under their own weight;
+    # XPBD projects a joint onto its target and holds it. Scaling Isaac's `stiffness` cannot fix
+    # this - `write_joint_stiffness_to_sim` is mechanically inert here (r = -0.014), which is what
+    # made the whole SPD gain-matching exercise a no-op.
+    #
+    # The one lever that bites is the TARGET. A joint carrying load `L` under effective gain `kEff`
+    # settles at `target + L/kEff`, so displacing Isaac's commanded target by that same deflection
+    # reproduces the sag exactly. `gravity_ff.torques(clamp=False)` already computes `-L` per bone.
+    joint_compliance = float(os.environ.get("P4F_COMPLIANCE", "0.0"))
+
+    # Apply Godot's joint DAMPING through the target, since the solver ignores `joint_damping`.
+    #
+    # **Isaac overshoots its commanded joint angles by 3x and Godot tracks them.** Measured
+    # 2026-09-05 with the same scripted actions driven open-loop into both engines: a 0.315 rad hip
+    # target produced 0.382 rad in Godot (1.2x) and 0.927 rad in Isaac (2.9x); knee -0.39 produced
+    # -0.471 and -1.160. Isaac's feet lift because of that overshoot and Godot's never leave the
+    # ground. XPBD's drive is badly under-damped here and `write_joint_damping_to_sim` is
+    # mechanically inert (rank correlation -0.061), so the only route is the target.
+    #
+    # A PD law is `tau = kp(target - q) - kd*qd = kp(target - kd*qd/kp - q)`, so subtracting
+    # `kd*qd/kp` from the target IS damping kd. 1.0 applies Godot's own measured kd.
+    target_damping = float(os.environ.get("P4F_TARGET_DAMPING", "0.0"))
     balance_gain = 600.0
     balance_damping = 20.0
     balance_max_torque = 300.0
@@ -337,6 +422,28 @@ class StandEnvCfg(DirectRLEnvCfg):
     # correction is how far the target may be pulled, which is what `enforce_effort_limit` clamps.
     effort_scale_range = (
         (lambda e: (e, e) if e else (0.65, 1.0))(float(os.environ.get("P4F_EFFORT_SCALE", "0")))
+    )
+
+    # Per-episode scale on the COMMANDED target, drawn once per reset.
+    #
+    # **Randomisation has to live in the action pipeline on this backend.** Measured 2026-09-04,
+    # `write_joint_stiffness_to_sim`, `write_joint_damping_to_sim`, `write_joint_effort_limit_to_sim`
+    # and `write_joint_armature_to_sim` all accept a per-environment write and read it back
+    # correctly while changing nothing mechanically (rank correlation of joint deviation with the
+    # written scale: -0.014, -0.061, +0.162, -0.257). Body mass has no write method on the
+    # articulation and friction has no `root_physx_view` on Newton. `effort_scale` works only
+    # because `_effort_limited` applies it in Python. So does this.
+    #
+    # **What it is for.** Godot transfer was measured to survive a 1.5% weight perturbation and no
+    # more: `walk_spd/model_18050` holds 100% upright at authority 0.10 while the same checkpoint
+    # after a handful of gradient steps holds 24.7%, on a bit-deterministic engine. A policy that
+    # has only ever met one exact command gain can balance on a ledge that narrow. One that has met
+    # a spread of them cannot.
+    #
+    # Nominal (1.0, 1.0) when `playback` is set, exactly as `effort_scale_range` is: a measurement
+    # has to score the policy against the actuator the contract describes.
+    action_scale_range = (
+        (lambda a: (a, a) if a else (0.8, 1.25))(float(os.environ.get("P4F_ACTION_SCALE_RAND", "0")))
     )
 
     # --- perturbation -----------------------------------------------------------------

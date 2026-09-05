@@ -73,6 +73,13 @@ public partial class BalanceController : Node, IBalanceTelemetryProvider
     private readonly AnkleBalanceModule _ankleBalance = new();
     private readonly HipStrategyModule _hipStrategy = new();
     private readonly PelvisStabilizationModule _pelvisStabilization = new();
+
+    /// <summary>See PelvisStabilizationModule.ReactIntoThighs. Sim-to-sim only; default is feet.</summary>
+    public bool PelvisReactIntoThighs
+    {
+        get => _pelvisStabilization.ReactIntoThighs;
+        set => _pelvisStabilization.ReactIntoThighs = value;
+    }
     private readonly ArmReflexModule _armReflex = new();
     private readonly VestibularGazeModule _gazeReflex = new();
     private readonly HitReactionReflexModule _hitReaction = new();

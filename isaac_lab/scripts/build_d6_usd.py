@@ -57,12 +57,30 @@ import os
 import sys
 from pathlib import Path
 
-from isaaclab.app import AppLauncher
+# **Only boot Kit if `pxr` is not already importable.** This script writes a USD and needs nothing
+# else from Isaac Sim, but `AppLauncher` requires `EXP_PATH` and so fails outright in the Newton
+# environment (env_isaaclab3), which has `pxr` standalone. Booting Kit for a file write also costs
+# ~40 s. Falling back keeps one script usable from both environments.
+simulation_app = None
+PhysxSchema = None
+try:
+    from pxr import Gf, Usd, UsdGeom, UsdPhysics  # noqa: E402
 
-app_launcher = AppLauncher({"headless": True})
-simulation_app = app_launcher.app
+    try:
+        from pxr import PhysxSchema  # noqa: E402
+    except ImportError:
+        # PhysX-specific extension schema, absent outside Isaac Sim. The Newton backend does not
+        # consume it and `UsdPhysics.ArticulationRootAPI` below is the standard marker, so the USD
+        # is still complete for this pipeline. Warned rather than silently dropped.
+        print("[build_d6_usd] PhysxSchema unavailable; skipping PhysxArticulationAPI "
+              "(not used by the Newton backend).")
+except ImportError:  # pragma: no cover - only on an installation without standalone USD
+    from isaaclab.app import AppLauncher
 
-from pxr import Gf, PhysxSchema, Usd, UsdGeom, UsdPhysics  # noqa: E402
+    app_launcher = AppLauncher({"headless": True})
+    simulation_app = app_launcher.app
+
+    from pxr import Gf, PhysxSchema, Usd, UsdGeom, UsdPhysics  # noqa: E402
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "tools"))
@@ -123,7 +141,16 @@ def add_shape(stage: Usd.Stage, parent_path: str, shape: Shape | None) -> None:
         prim = UsdGeom.Cube.Define(stage, path)
         prim.CreateSizeAttr(1.0)
         sx, sy, sz = shape.size
-        UsdGeom.Xformable(prim).AddScaleOp().Set(Gf.Vec3f(sz / 2.0, sx / 2.0, sy / 2.0))
+        # **A `UsdGeom.Cube` with `size = 1.0` spans -0.5..+0.5, so a scale of k gives a side of k,
+        # not 2k.** Halving here made every BOX collider exactly half its Godot size - measured
+        # 2026-09-05: foot (0.22, 0.12, 0.08) authored, (0.11, 0.06, 0.04) in the USD, and the same
+        # factor on the pelvis, chest and hands. Capsules and spheres were unaffected because they
+        # take radius and height directly, which is why it survived every rig check: the limbs were
+        # right and only the four boxes were wrong.
+        #
+        # The foot is the one that matters. Isaac trained on a support polygon half as long
+        # fore-aft as Godot's, which is the single most important parameter a biped balances on.
+        UsdGeom.Xformable(prim).AddScaleOp().Set(Gf.Vec3f(sz, sx, sy))
     elif shape.kind == "sphere":
         prim = UsdGeom.Sphere.Define(stage, path)
         prim.CreateRadiusAttr(shape.radius)
@@ -254,7 +281,8 @@ def build(bodies: dict[str, Body], joints: list[Joint]) -> tuple[Usd.Stage, dict
 
     root_prim = stage.GetPrimAtPath(f"{ROOT_PATH}/{rig['root_link']}")
     UsdPhysics.ArticulationRootAPI.Apply(root_prim)
-    PhysxSchema.PhysxArticulationAPI.Apply(root_prim)
+    if PhysxSchema is not None:
+        PhysxSchema.PhysxArticulationAPI.Apply(root_prim)
 
     for body in order:
         if body.name in joint_by_child:
@@ -264,6 +292,12 @@ def build(bodies: dict[str, Body], joints: list[Joint]) -> tuple[Usd.Stage, dict
     return stage, rig
 
 
+# **`physx_dof_order` is NOT written by this script and a rebuild silently drops it.**
+# The key records the DOF ordering PhysX assigned at USD load and is read by Godot's
+# `IsaacRigContract`; it was produced by the 2.3.2 tooling, not here. Rebuilding on 2026-09-05
+# removed it from `dummy_d6_rig.json` and it had to be merged back from a backup by hand.
+# If you rebuild, check for it afterwards - everything else round-trips byte-identically
+# (all 45 joints, masses, limits), so this is the only field at risk.
 def main() -> None:
     bodies, joints = parse_scene(SCENE_PATH)
     stage, rig = build(bodies, joints)
@@ -292,6 +326,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    simulation_app.close()
+    if simulation_app is not None:
+        simulation_app.close()
     # Isaac Sim's teardown deadlocks on Windows after USD work; everything is written by here.
     os._exit(0)

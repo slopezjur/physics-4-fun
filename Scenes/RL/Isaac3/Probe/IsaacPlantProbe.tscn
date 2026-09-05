@@ -1,0 +1,17 @@
+[gd_scene load_steps=3 format=3 uid="uid://ci1isaacplantprobe"]
+
+[ext_resource type="Script" path="res://Source/RL/Isaac/IsaacPlantProbe.cs" id="1_probe"]
+[ext_resource type="PackedScene" uid="uid://dp62k4a8uwns2" path="res://Scenes/ActiveRagdoll.tscn" id="2_ragdoll"]
+
+[node name="IsaacPlantProbe" type="Node3D"]
+script = ExtResource("1_probe")
+BoneName = "Forearm_L"
+Axis = 0
+TargetRad = 0.05
+SettleSeconds = 2.0
+DurationSeconds = 3.3
+DisableGravity = true
+DisableLoadCompensation = false
+FreezePelvis = false
+
+[node name="ActiveRagdoll" parent="." instance=ExtResource("2_ragdoll")]

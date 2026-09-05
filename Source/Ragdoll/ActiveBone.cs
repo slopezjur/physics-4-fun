@@ -929,6 +929,14 @@ public partial class ActiveBone : RigidBody3D, Interfaces.IBoneState
         return Mathf.Max(0.0f, 1.0f - (shortening / maxShorteningVelocity));
     }
 
+    /// <summary>
+    /// World position of this bone's joint anchor - the point the gravity feed-forward takes its
+    /// lever arms about. Exposed read-only so the Isaac side can reproduce the SAME pivot instead of
+    /// approximating it as the bone/parent midpoint, which would misplace every lever arm and so
+    /// misestimate a feed-forward that carries 45-68% of the body's holding torque.
+    /// </summary>
+    public Vector3 JointPivotWorld => GetJointPivot();
+
     private Vector3 GetJointPivot()
     {
         if (_joint != null && IsInstanceValid(_joint))

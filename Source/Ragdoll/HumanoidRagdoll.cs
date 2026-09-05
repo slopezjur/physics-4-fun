@@ -584,6 +584,12 @@ public partial class HumanoidRagdoll : Node3D
         // which cannot control a push-up, so scale their impedance for the phases that need it.
         // The RL state only counts once a policy is actually driving it, for the same reason as the
         // idle-stiffness softening just above.
+        // **Do NOT widen this to bare `ReinforcementLearningPolicyActive`.** An Isaac driver with
+        // balance assist parks the body in `Balanced`, so the 10x arm gain does not apply in the
+        // configuration policies are deployed in - which looks like an oversight and was tried on
+        // 2026-09-04. It reduced static deviation (total 1.326 -> 1.119) and BROKE TRANSFER: the
+        // walk checkpoint at its trained authority 0.15 fell from 100% upright to 15.4%. Static
+        // pose similarity does not predict transfer; measure the ladder, not the settled pose.
         bool armsLoadBearing = CurrentState == RagdollState.PushUpDrill
                                || CurrentState == RagdollState.Recovering
                                || (CurrentState == RagdollState.ReinforcementLearning && ReinforcementLearningPolicyActive);

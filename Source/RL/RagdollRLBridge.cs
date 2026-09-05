@@ -519,11 +519,19 @@ public partial class RagdollRLBridge : Node
     private int _configReportsRemaining = 5;
 
     /// <summary>
-    /// Simulation rate (Hz) the ragdoll's PD/SPD gains were tuned at - see project.godot, which
-    /// sets 120. Restoring it here is what keeps a learned policy transferable to the procedural
-    /// track: at a different rate the actuators have measurably different dynamics.
+    /// Simulation rate (Hz) the ragdoll's PD/SPD gains were tuned at. Restoring it here is what
+    /// keeps a learned policy transferable to the procedural track: at a different rate the
+    /// actuators have measurably different dynamics.
+    ///
+    /// <para>READ from project.godot rather than hardcoded. It was a const 120 whose own comment
+    /// said "see project.godot, which sets 120" - two sources of truth that agreed only by
+    /// convention. Editing project.godot alone then changed nothing at all, because this override
+    /// runs on the first physics tick and silently put the rate back. That cost a measurement:
+    /// a 480 Hz run produced output byte-identical to 120 Hz, which reads as "no effect" rather
+    /// than "no change applied".</para>
     /// </summary>
-    private const float TunedPhysicsHz = 120.0f;
+    private static float TunedPhysicsHz =>
+        (float)(int)ProjectSettings.GetSetting("physics/common/physics_ticks_per_second", 120);
 
     public override void _Ready()
     {

@@ -289,6 +289,24 @@ class WalkEnv(StandEnv):
         terms["track"] = self.cfg.rew_track * dt * posture * obedience
         terms["feet_air_time"] = self.cfg.rew_feet_air_time * posture * self._air_time_reward()
 
+        # Read from `_contacts()` directly rather than reusing `_air_time_reward`'s locals: that
+        # method MUTATES `_feet_grounded` and `_feet_air_time`, so depending on its internals here
+        # would make this term's value depend on call order.
+        _feet_down = self._contacts()[:, self._feet_slots] > 0.5
+        # Exactly one foot down. See `rew_single_support` - this is the term that is meant to
+        # turn the hop into a walk, and it reads the same contact slice the flight term does.
+        single = (_feet_down.sum(dim=1) == 1).float()
+        # **Multiplied by `drive`, not merely gated on a command being present.**
+        # Gating on the COMMAND lets a policy collect this by standing on one leg while a motion is
+        # commanded, and that is exactly what happened: measured 2026-09-05 on the corrected body,
+        # 93.8% single support, 0% flight and vx = 0.00 m/s. A one-legged stand is the cheapest way
+        # to hold "exactly one foot down" forever. `drive` is achieved-over-commanded speed in
+        # [0, 1], so the term now pays only for single support that is part of actual progress.
+        terms["single_support"] = self.cfg.rew_single_support * dt * posture * single * drive
+        terms["double_flight"] = (
+            self.cfg.rew_double_flight * dt * (~_feet_down.any(dim=1)).float()
+        )
+
         terms["lin_vel_z"] = self.cfg.rew_lin_vel_z * dt * lin_vel_b[:, 2] ** 2
         terms["ang_vel_xy"] = self.cfg.rew_ang_vel_xy * dt * torch.sum(ang_vel_b[:, :2] ** 2, dim=1)
         terms["termination"] = self.cfg.rew_termination * self._fell.float()
@@ -317,7 +335,12 @@ class WalkEnv(StandEnv):
         # makes rocking indistinguishable from walking.
         self._along_sum = self._along_sum + torch.where(moving, along, torch.zeros_like(along))
         self._along_ema = torch.lerp(self._along_ema, along, self.cfg.drive_smoothing)
-        tracking = (self._along_ema / cmd_speed.clamp(min=1e-6)).clamp(0.0, 1.0)
+        sigma = self.cfg.drive_overspeed_sigma
+        if sigma > 0.0:
+            # Two-sided: peaks at the commanded speed, so overspeed costs instead of being free.
+            tracking = torch.exp(-(((self._along_ema - cmd_speed) / sigma) ** 2))
+        else:
+            tracking = (self._along_ema / cmd_speed.clamp(min=1e-6)).clamp(0.0, 1.0)
 
         speed = torch.sum(lin_vel_b[:, :2] ** 2, dim=1)
         stillness = torch.exp(-speed / self.cfg.still_velocity_scale)

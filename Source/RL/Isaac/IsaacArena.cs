@@ -97,11 +97,50 @@ public partial class IsaacArena : Node3D
     /// <summary>Passed to the driver. See IsaacPolicyDriver.HillVelocityFilter.</summary>
     [Export] public float HillVelocityFilter { get; set; } = 1.0f;
 
+    /// <summary>
+    /// Passed to the driver. See IsaacPolicyDriver.LoadCompensation - a DIAGNOSTIC knob for
+    /// measuring how much of Godot's holding torque is gravity feed-forward, not a shipping
+    /// setting. It must be forwarded from here because the check scenes put every actuator
+    /// property on the arena node, not on the driver: setting an unknown name in the .tscn is
+    /// silently ignored by Godot, which reads as "the experiment had no effect".
+    /// </summary>
+    [Export(PropertyHint.Range, "0,1,0.05")] public float LoadCompensation { get; set; } = 1.0f;
+
+    /// <summary>Passed to the driver. See IsaacPolicyDriver.BalanceJointModules.</summary>
+    [Export] public bool BalanceJointModules { get; set; } = true;
+
+    /// <summary>Passed to the driver. See IsaacPolicyDriver.DofTracePath.</summary>
+    [Export] public string DofTracePath { get; set; } = "";
+
+    /// <summary>Passed to the driver. See IsaacPolicyDriver.SpawnActionNoise.</summary>
+    /// <summary>Passed to the driver. See IsaacPolicyDriver.EffortScale.</summary>
+    [Export] public float EffortScale { get; set; } = 1.0f;
+
+    /// <summary>Passed to the driver. See IsaacPolicyDriver.HillVmaxScale.</summary>
+    [Export] public float HillVmaxScale { get; set; } = 1.0f;
+
+    [Export] public float SpawnActionNoise { get; set; }
+
+    /// <summary>Passed to the driver. See IsaacPolicyDriver.SpawnNoiseSeconds.</summary>
+    [Export] public float SpawnNoiseSeconds { get; set; } = 0.5f;
+
+    /// <summary>Passed to the driver. See IsaacPolicyDriver.ReplayActionsPath.</summary>
+    [Export] public string ReplayActionsPath { get; set; } = "";
+
+    /// <summary>Passed to the driver. See IsaacPolicyDriver.ReplayHandoff.</summary>
+    [Export] public bool ReplayHandoff { get; set; }
+
     /// <summary>Passed to the driver. See IsaacPolicyDriver.JointVelocityFilter.</summary>
     [Export] public float JointVelocityFilter { get; set; } = 1.0f;
 
     /// <summary>Passed to the driver. See IsaacPolicyDriver.JointVelocityEnabled.</summary>
     [Export] public bool JointVelocityEnabled { get; set; } = true;
+
+    /// <summary>Passed to the driver. See IsaacPolicyDriver.JointVelocityFromDifference.</summary>
+    [Export] public bool JointVelocityFromDifference { get; set; } = true;
+
+    /// <summary>Passed to the driver. See IsaacPolicyDriver.PelvisReactIntoThighs.</summary>
+    [Export] public bool PelvisReactIntoThighs { get; set; }
 
     /// <summary>Passed to the driver. See IsaacPolicyDriver.JointVelocityMinRange.</summary>
     [Export] public float JointVelocityMinRange { get; set; }
@@ -242,9 +281,20 @@ public partial class IsaacArena : Node3D
             AssistAuthority = AssistAuthority,
             JointSpacePd = JointSpacePd,
             HillVelocityFilter = HillVelocityFilter,
+            LoadCompensation = LoadCompensation,
+            BalanceJointModules = BalanceJointModules,
             JointVelocityFilter = JointVelocityFilter,
             JointVelocityEnabled = JointVelocityEnabled,
+            JointVelocityFromDifference = JointVelocityFromDifference,
+            PelvisReactIntoThighs = PelvisReactIntoThighs,
             JointVelocityMinRange = JointVelocityMinRange,
+            DofTracePath = DofTracePath,
+            EffortScale = EffortScale,
+            HillVmaxScale = HillVmaxScale,
+            SpawnActionNoise = SpawnActionNoise,
+            SpawnNoiseSeconds = SpawnNoiseSeconds,
+            ReplayActionsPath = ReplayActionsPath,
+            ReplayHandoff = ReplayHandoff,
             DiagnosticInterval = DiagnosticInterval >= 0.0f ? DiagnosticInterval : 0.5f,
         };
 

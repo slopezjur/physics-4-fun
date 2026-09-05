@@ -226,6 +226,43 @@ class NewtonRigState:
         ids = torch.as_tensor(body_ids, device=torque.device, dtype=torch.long)
         wrench[:, ids, WRENCH_ANGULAR : WRENCH_ANGULAR + 3] += torque.unsqueeze(1)
 
+    def add_body_torques(self, body_ids: torch.Tensor, torque: torch.Tensor) -> None:
+        """A DIFFERENT torque per body: `body_ids` is `(n,)`, `torque` is `(num_envs, n, 3)`.
+
+        `add_body_torque` broadcasts one torque across every body it is given, which cannot express
+        a per-joint feed-forward. This also uses `index_add_` rather than `wrench[:, ids] += ...`
+        because **the index list contains duplicates**: the pelvis is the parent of Thigh_L, Thigh_R
+        and Spine, so it receives three reaction torques in one call. With advanced indexing an
+        in-place `+=` over repeated indices does not accumulate - one write silently wins - and the
+        pelvis would receive one leg's reaction instead of the sum.
+        """
+        state = NewtonManager._state_0
+        if state.body_f is None:
+            raise RuntimeError("State.body_f is None; external wrenches are unavailable")
+        wrench = wp.to_torch(state.body_f).view(self._num_envs, -1, 6)
+        ids = torch.as_tensor(body_ids, device=torque.device, dtype=torch.long)
+        angular = wrench[:, :, WRENCH_ANGULAR : WRENCH_ANGULAR + 3]
+        angular.index_add_(1, ids, torque)
+
+    def body_pos_w_all(self) -> torch.Tensor:
+        """`(num_envs, num_bodies, 3)` centre-of-mass positions. Live under XPBD."""
+        return self._robot.data.body_com_pos_w.torch
+
+    def body_link_pos_w_all(self) -> torch.Tensor:
+        """`(num_envs, num_bodies, 3)` LINK-frame positions. Live under XPBD.
+
+        Godot's gravity feed-forward takes its lever arms from `RigidBody3D.GlobalPosition`, which is
+        the node's transform origin - the link frame - not the centre of mass. Where a collision
+        shape sits off its origin the two differ, and only the HORIZONTAL part of that difference
+        matters: gravity is vertical, so `r x g` is blind to a vertical offset and fully sensitive to
+        a sideways one. Reproducing Godot means reproducing its choice of point, not improving on it.
+        """
+        return self._robot.data.body_link_pos_w.torch
+
+    def body_quat_w_all(self) -> torch.Tensor:
+        """`(num_envs, num_bodies, 4)` body orientations, wxyz. Live under XPBD."""
+        return self._robot.data.body_quat_w.torch
+
     def add_body_wrench(
         self, body_idx: torch.Tensor, force: torch.Tensor, torque: torch.Tensor
     ) -> None:
