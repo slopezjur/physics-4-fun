@@ -54,6 +54,25 @@ TRAINED_CONDITIONS = (
     "action_scale_range",
     "enforce_effort_limit",
     "hill_max_shortening_velocity",
+    # **The integrator IS the plant, and these were missing.** Measured 2026-09-05: Isaac ran at
+    # `sim.dt` 1/120 while Godot runs at 240 Hz, and the foot penetrates the floor 14.55 mm median
+    # at 120 Hz against 3.30 mm at 240. A checkpoint trained at 1/240 and scored without these
+    # replays on a floor four times softer than the one it learned on - which produced a "HOP"
+    # verdict on a policy that had never been run at its own timestep. `decimation` travels with
+    # `dt` because the two together set the POLICY rate, which the frozen contract fixes at 60 Hz.
+    "sim.dt",
+    "decimation",
+    # Changes what the policy is allowed to READ, so a checkpoint trained with the flags stuck and
+    # scored with them live is being judged on a different task.
+    "obs_contact_stuck_prob",
+    "action_latency_steps",
+    # Per-joint plant randomisation: same restore trap as the whole-body ranges. A policy
+    # trained against a SPREAD of per-joint responses and scored against one fixed response is
+    # being judged on a plant it never saw.
+    "per_joint_action_scale_range",
+    "per_joint_latency_steps",
+    "reset_pitch_noise",
+    "reset_ang_vel_noise",
     # How much torque the Hill law leaves the actuator. Raw velocity holds Isaac at a
     # median 58% of ceiling through a gait; Godot, filtering at 0.15, reports 0.97-1.00.
     "hill_velocity_filter",

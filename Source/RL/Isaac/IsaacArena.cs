@@ -119,6 +119,46 @@ public partial class IsaacArena : Node3D
     /// <summary>Passed to the driver. See IsaacPolicyDriver.HillVmaxScale.</summary>
     [Export] public float HillVmaxScale { get; set; } = 1.0f;
 
+    /// <summary>Passed to the driver. See IsaacPolicyDriver.DampingScale.</summary>
+    [Export] public float DampingScale { get; set; } = 1.0f;
+
+    /// <summary>Passed to the driver. See IsaacPolicyDriver.StanceDampingScale.</summary>
+    [Export] public float StanceDampingScale { get; set; } = 1.0f;
+
+    /// <summary>Passed to the driver. See IsaacPolicyDriver.SwingDampingScale.</summary>
+    [Export] public float SwingDampingScale { get; set; } = 1.0f;
+
+
+
+    /// <summary>Passed to the driver. See IsaacPolicyDriver.StanceGateMode.</summary>
+    [Export(PropertyHint.Range, "0,1,1")] public int StanceGateMode { get; set; }
+
+    /// <summary>Passed to the driver. See IsaacPolicyDriver.StanceGateMargin.</summary>
+    [Export] public float StanceGateMargin { get; set; } = 0.004f;
+
+
+
+
+    /// <summary>Passed to the driver. See IsaacPolicyDriver.UseAngularSpring.</summary>
+    [Export] public bool UseAngularSpring { get; set; }
+
+    /// <summary>Passed to the driver. See IsaacPolicyDriver.AngularSpringStiffnessScale.</summary>
+    [Export] public float AngularSpringStiffnessScale { get; set; } = 1.0f;
+
+    /// <summary>Passed to the driver. See IsaacPolicyDriver.AngularSpringDampingScale.</summary>
+    [Export] public float AngularSpringDampingScale { get; set; } = 1.0f;
+
+
+
+
+
+
+
+
+
+    /// <summary>Passed to the driver. See IsaacPolicyDriver.LockArmsAtRest.</summary>
+    [Export] public bool LockArmsAtRest { get; set; }
+
     [Export] public float SpawnActionNoise { get; set; }
 
     /// <summary>Passed to the driver. See IsaacPolicyDriver.SpawnNoiseSeconds.</summary>
@@ -291,6 +331,15 @@ public partial class IsaacArena : Node3D
             DofTracePath = DofTracePath,
             EffortScale = EffortScale,
             HillVmaxScale = HillVmaxScale,
+            DampingScale = DampingScale,
+            StanceDampingScale = StanceDampingScale,
+            SwingDampingScale = SwingDampingScale,
+            StanceGateMode = StanceGateMode,
+            StanceGateMargin = StanceGateMargin,
+            UseAngularSpring = UseAngularSpring,
+            AngularSpringStiffnessScale = AngularSpringStiffnessScale,
+            AngularSpringDampingScale = AngularSpringDampingScale,
+            LockArmsAtRest = LockArmsAtRest,
             SpawnActionNoise = SpawnActionNoise,
             SpawnNoiseSeconds = SpawnNoiseSeconds,
             ReplayActionsPath = ReplayActionsPath,

@@ -48,8 +48,17 @@ def main() -> int:
     p.add_argument("--seconds", type=float, default=4.0)
     args = p.parse_args()
 
-    g = list(csv.DictReader(open(args.godot, encoding="utf-8")))
-    i = list(csv.DictReader(open(args.isaac, encoding="utf-8")))
+    # **Aligned load, not a raw one.** Godot's trace lags Isaac's by one policy step; reading both
+    # raw made this script report `joint_Shin_R:0` diverging at 0.02 s and conclude "distal-led, look
+    # at contact", which was the offset and nothing else. See `trace_align`.
+    from trace_align import load_pair, verify_alignment
+
+    g, i = load_pair(args.godot, args.isaac)
+    residual = verify_alignment(g, i)
+    if residual > 1e-3:
+        print(f"[divergence] WARNING actions differ by {residual:.6f} after alignment - the traces "
+              "may not come from the same action sequence, or the trace lag has changed. Every "
+              "number below is suspect.")
     order = json.load(open(CONTRACT, encoding="utf-8"))["newton_dof_order"]
     gp = [k for k in g[0] if k.startswith("pos_")]
     ip = [k for k in i[0] if k.startswith("pos_")]

@@ -369,15 +369,25 @@ public sealed class IsaacObservation : IRlObservationBuilder
     /// Height below which a contact bone counts as "down", metres, when <see cref="UseHeightContacts"/>
     /// is set.
     ///
-    /// <para><b>Deliberately NOT the same number as the Newton task's <c>CONTACT_HEIGHT</c> (0.034),
-    /// and an earlier version of this comment wrongly claimed it was.</b> The two rigs rest their
-    /// feet at different heights, so the same threshold does not mean the same thing. Measured
-    /// 2026-09-04: a planted foot sits at 0.040 m in Godot and 0.017 m in Isaac, so what has to
-    /// match is the CLEARANCE before a foot reads airborne - 0.020 m here against Isaac's 0.017,
-    /// rather than the absolute height. Copying 0.034 across would make a planted Godot foot report
-    /// no contact while the dummy stands on it.</para>
+    /// <para><b>Now the SAME number as the Newton task's <c>CONTACT_HEIGHT</c>, and it has to be.</b>
+    /// This used to be 0.06 against Isaac's 0.034, justified by the two rigs resting their feet at
+    /// different heights - measured 2026-09-04 as 0.040 m in Godot against 0.017 m in Isaac, so the
+    /// CLEARANCE before a foot read airborne was matched rather than the absolute height.</para>
+    ///
+    /// <para><b>That justification died with the collider half-size fix.</b> Every box collider,
+    /// the feet included, was half its authored size; correcting it doubled the foot to 0.08 m and
+    /// moved Isaac's planted foot COM from 0.017 to 0.0391 m. Measured 2026-09-05, a planted foot
+    /// now sits at 0.0391 m in Isaac and 0.0395 m in Godot - the same height - while the thresholds
+    /// still differed, leaving Godot demanding 0.0205 m of lift to read airborne against Isaac's
+    /// 0.0109 m. **Godot needed 1.9x the foot clearance to register a swing phase**, which is a
+    /// direct cause of the 100%-double-support statue: at authority 0.10 the foot lifts to 0.0499 m,
+    /// under this threshold and over Isaac's, so the flags never flip and the observation never
+    /// changes.</para>
+    ///
+    /// <para>Keep this equal to <c>CONTACT_HEIGHT</c> in <c>stand_env.py</c>. If the foot geometry
+    /// changes again, re-measure BOTH resting heights before assuming either number.</para>
     /// </summary>
-    public const float ContactHeight = 0.06f;
+    public const float ContactHeight = 0.05f;
 
     /// <summary>
     /// Derive the four contact flags from bone HEIGHT rather than real contact.

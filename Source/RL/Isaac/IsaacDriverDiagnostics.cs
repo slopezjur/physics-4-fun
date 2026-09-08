@@ -552,6 +552,30 @@ internal sealed class IsaacDriverDiagnostics
                 // 2026-09-05, Godot swings its knee as far as Isaac does and still registers zero
                 // foot strikes, and no existing trace can say which of those two it is.
                 header.Append(",footZ_L,footZ_R,pelvisZ");
+
+                // **Foot WORLD X, and the pelvis with it.** Height alone cannot say why a body that
+                // is stepping does not travel. Forward motion comes from the STANCE foot holding
+                // still while the pelvis passes over it; if the planted foot slides instead, the
+                // step produces no progress and the height trace looks identical either way.
+                // Measured 2026-09-06, the best Godot checkpoint takes 12 alternating strikes and
+                // covers -0.14 m, and no existing trace can distinguish a slip from a missing
+                // push-off.
+                header.Append(",footX_L,footX_R,pelvisX,footZfwd_L,footZfwd_R,pelvisZfwd");
+
+                // **Whole-body linear and ORBITAL ANGULAR MOMENTUM, about the system centre of
+                // mass, in the Isaac frame.** Every quantity compared so far has been a position or
+                // an angle, and those agree: joints track to 0.05 rad, the pelvis height matches
+                // within 2 cm, and the rest pose matches to 0.4 deg and 0.1 mm. The torso still
+                // parts company. Momentum is the quantity that distinguishes "the bodies are in the
+                // same place" from "the same net force and torque are acting on them" - dL/dt is
+                // the external torque on the system, so comparing it isolates a reaction-dynamics
+                // difference from a kinematic one.
+                //
+                // The ORBITAL term only, sum m_i (r_i - r_com) x (v_i - v_com). The spin term needs
+                // each body's inertia tensor in a common convention, which is a second unverified
+                // mapping; masses are already verified identical across the two rigs (80.6 kg over
+                // 16 bodies), so the orbital term is exactly comparable with nothing new to trust.
+                header.Append(",comX,comY,comZ,comVx,comVy,comVz,Lx,Ly,Lz");
                 _trace.WriteLine(header.ToString());
             }
 
@@ -572,7 +596,92 @@ internal sealed class IsaacDriverDiagnostics
             row.Append(',').Append(Fmt(_ragdoll.Pelvis != null && GodotObject.IsInstanceValid(_ragdoll.Pelvis)
                 ? _ragdoll.Pelvis.GlobalPosition.Y : 0.0f));
 
+            row.Append(',').Append(Fmt(footL != null && GodotObject.IsInstanceValid(footL)
+                ? footL.GlobalPosition.X : 0.0f));
+            row.Append(',').Append(Fmt(footR != null && GodotObject.IsInstanceValid(footR)
+                ? footR.GlobalPosition.X : 0.0f));
+            row.Append(',').Append(Fmt(_ragdoll.Pelvis != null && GodotObject.IsInstanceValid(_ragdoll.Pelvis)
+                ? _ragdoll.Pelvis.GlobalPosition.X : 0.0f));
+
+            // Godot's forward is -Z; both horizontal axes are recorded because which one the policy
+            // drives depends on the rig frame map, and guessing it wrong measures sideways drift.
+            row.Append(',').Append(Fmt(footL != null && GodotObject.IsInstanceValid(footL)
+                ? footL.GlobalPosition.Z : 0.0f));
+            row.Append(',').Append(Fmt(footR != null && GodotObject.IsInstanceValid(footR)
+                ? footR.GlobalPosition.Z : 0.0f));
+            row.Append(',').Append(Fmt(_ragdoll.Pelvis != null && GodotObject.IsInstanceValid(_ragdoll.Pelvis)
+                ? _ragdoll.Pelvis.GlobalPosition.Z : 0.0f));
+
+            AppendMomentum(row);
+
             _trace.WriteLine(row.ToString());
+        }
+
+        /// <summary>
+        /// Appends the system centre of mass, its velocity, and the whole-body ORBITAL angular
+        /// momentum about it, all mapped into the Isaac frame.
+        /// </summary>
+        /// <remarks>
+        /// <para>Body ORIGIN is used as each body's centre of mass. The rig's bodies are single
+        /// primitive shapes, so the two coincide; the Isaac-side dump asserts that by comparing
+        /// <c>body_com_pos_w</c> against <c>body_link_pos_w</c> rather than assuming it.</para>
+        /// <para><see cref="IsaacObservation.ToIsaacFrame"/> is a proper rotation (determinant +1),
+        /// so it commutes with the cross product and the momentum may be computed in Godot's frame
+        /// and mapped afterwards.</para>
+        /// </remarks>
+        private void AppendMomentum(System.Text.StringBuilder row)
+        {
+            float totalMass = 0.0f;
+            Vector3 weightedPos = Vector3.Zero;
+            Vector3 linearMomentum = Vector3.Zero;
+
+            foreach (ActiveBone bone in _ragdoll.GetBones())
+            {
+                if (bone == null || !GodotObject.IsInstanceValid(bone))
+                {
+                    continue;
+                }
+
+                float mass = bone.Mass;
+                totalMass += mass;
+                weightedPos += mass * bone.GlobalPosition;
+                linearMomentum += mass * bone.LinearVelocity;
+            }
+
+            if (totalMass <= 0.0f)
+            {
+                for (int i = 0; i < 9; i++)
+                {
+                    row.Append(",0.0000");
+                }
+                return;
+            }
+
+            Vector3 com = weightedPos / totalMass;
+            Vector3 comVelocity = linearMomentum / totalMass;
+
+            Vector3 angularMomentum = Vector3.Zero;
+            foreach (ActiveBone bone in _ragdoll.GetBones())
+            {
+                if (bone == null || !GodotObject.IsInstanceValid(bone))
+                {
+                    continue;
+                }
+
+                angularMomentum += bone.Mass
+                    * (bone.GlobalPosition - com).Cross(bone.LinearVelocity - comVelocity);
+            }
+
+            Vector3 comIsaac = IsaacObservation.ToIsaacFrame(com);
+            Vector3 comVelIsaac = IsaacObservation.ToIsaacFrame(comVelocity);
+            Vector3 angularIsaac = IsaacObservation.ToIsaacFrame(angularMomentum);
+
+            row.Append(',').Append(Fmt(comIsaac.X)).Append(',').Append(Fmt(comIsaac.Y))
+               .Append(',').Append(Fmt(comIsaac.Z));
+            row.Append(',').Append(Fmt(comVelIsaac.X)).Append(',').Append(Fmt(comVelIsaac.Y))
+               .Append(',').Append(Fmt(comVelIsaac.Z));
+            row.Append(',').Append(Fmt(angularIsaac.X)).Append(',').Append(Fmt(angularIsaac.Y))
+               .Append(',').Append(Fmt(angularIsaac.Z));
         }
 
         private static string Fmt(float v) =>

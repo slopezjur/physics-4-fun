@@ -35,6 +35,10 @@ public sealed class PidController3D
     private Vector3 _integralError = Vector3.Zero;
     private Vector3 _filteredAngularVelocity = Vector3.Zero;
 
+
+
+
+
     public PidController3D(
         float proportionalGain = 500.0f,
         float derivativeGain = 50.0f,

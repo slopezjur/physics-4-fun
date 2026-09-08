@@ -21,7 +21,13 @@ from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sim import SimulationCfg
 from isaaclab.utils.configclass import configclass
-from isaaclab_newton.physics import NewtonCfg, XPBDSolverCfg
+from isaaclab_newton.physics import (
+    FeatherstoneSolverCfg,
+    KaminoSolverCfg,
+    MJWarpSolverCfg,
+    NewtonCfg,
+    XPBDSolverCfg,
+)
 
 from p4f_newton.assets import ACTUATED_JOINTS, DUMMY_CFG
 
@@ -54,6 +60,39 @@ FALL_TILT_DEG = 70.0
 XPBD_ITERATIONS = int(os.environ.get("P4F_XPBD_ITERATIONS", "2"))
 
 
+def _solver_cfg():
+    """Newton solver backend, selected by `P4F_SOLVER`. Defaults to XPBD, which is what every
+    checkpoint to date was trained on.
+
+    **The backend is part of the plant, and it was inherited rather than chosen.** Everything trained
+    here has used XPBD because it was the default; Isaac Lab 3 exposes four. Measured 2026-09-06, the
+    residual sim-to-sim gap is continuous base-attitude divergence with joints, masses, anchors, rest
+    pose, actuator phase and the pelvis controller all matched - which is a generalized-base-dynamics
+    difference, i.e. exactly the thing the solver formulation determines. So the backend is worth
+    choosing on measured proximity to Godot rather than on the default.
+
+    Selecting a different one changes the plant, so every existing checkpoint is invalid under it -
+    treat a switch as a full retrain, and `run_conditions` records the choice with the checkpoint.
+    """
+    name = os.environ.get("P4F_SOLVER", "xpbd").strip().lower()
+    # **Printed because it is NOT restored from a checkpoint.** `restore()` replays cfg fields from
+    # `params/env.yaml`, and the solver is chosen here at import time from the environment, so a
+    # checkpoint trained under one backend will be silently SCORED under another unless P4F_SOLVER is
+    # set on every command that touches it. That is the same silent-plant-invalidation this project
+    # has been bitten by with sim.dt and with the XPBD iteration count; until the selection moves
+    # into the cfg proper, this line is the guard.
+    print(f"[p4f] Newton solver backend: {name}  (set P4F_SOLVER to change; NOT restored from a checkpoint)")
+    if name == "featherstone":
+        return FeatherstoneSolverCfg()
+    if name in ("mjwarp", "mujoco_warp", "mujoco"):
+        return MJWarpSolverCfg()
+    if name == "kamino":
+        return KaminoSolverCfg()
+    if name != "xpbd":
+        raise ValueError(f"P4F_SOLVER={name!r} is not one of xpbd/featherstone/mjwarp/kamino")
+    return XPBDSolverCfg(iterations=XPBD_ITERATIONS)
+
+
 @configclass
 class StandEnvCfg(DirectRLEnvCfg):
     decimation = 2
@@ -70,7 +109,7 @@ class StandEnvCfg(DirectRLEnvCfg):
         dt=1.0 / 120.0,
         render_interval=2,
         physics=NewtonCfg(
-            solver_cfg=XPBDSolverCfg(iterations=XPBD_ITERATIONS),
+            solver_cfg=_solver_cfg(),
             num_substeps=1,
         ),
     )
@@ -204,6 +243,52 @@ class StandEnvCfg(DirectRLEnvCfg):
     obs_joint_vel_narrow_noise = 0.0
 
     obs_joint_vel_clip = 15.0
+    # Probability that an episode presents the four contact flags as ALWAYS-DOUBLE-SUPPORT.
+    #
+    # **This is the Godot loop, reproduced in training.** Measured 2026-09-06, Godot's feet correlate
+    # +0.993 left-to-right while Isaac's correlate +0.568: the body squats instead of stepping. The
+    # loop closes through the OBSERVATION - Godot's contact flags never differentiate, so the policy
+    # drives both legs symmetrically, so no foot lifts, so the flags never differentiate. Isaac
+    # escapes it only because its own flags alternate 84-96% of the time, which means the policy is
+    # free to SEQUENCE its gait from the flags and never has to learn an internal phase.
+    #
+    # Forcing the flags to constant double support for a fraction of episodes removes that crutch:
+    # the policy must drive the legs out of phase from something else - its own previous actions,
+    # joint angles, or body velocity - which is exactly what it has to do in Godot.
+    # Per-episode action LATENCY, in policy steps, drawn uniformly from this inclusive range.
+    # (0, 0) disables it.
+    #
+    # **The one domain-randomisation axis that is reachable on this backend and was never used.**
+    # Everything the usual sim-to-real list recommends - mass, friction, joint stiffness, joint
+    # damping, armature, restitution - is INERT under Newton/XPBD: each write is accepted, reads back
+    # correctly, and changes nothing mechanically (measured 2026-09-04, rank correlations -0.014,
+    # -0.061, +0.162, -0.257). Randomisation has to live in the Python action pipeline, which is why
+    # `action_scale_range` and `effort_scale_range` exist. Latency lives there too.
+    #
+    # It matters here specifically because Godot has NO disturbance rejection under a transferred
+    # policy: measured 2026-09-06, a 20 N.s pelvis impulse takes uprightness from 100% to 13.2%. A
+    # loop with no phase margin is exactly what an unmodelled delay produces, and Godot's chain -
+    # observation built at the end of a physics tick, ONNX inference, target applied on the next -
+    # carries at least one policy step of delay that Isaac's in-process loop does not.
+    action_latency_steps = (0, 0)
+
+    # **PER-JOINT** command-gain and latency draws, on top of the whole-body ones above.
+    #
+    # Measured 2026-09-06, the two engines disagree per JOINT, not globally: at 1 Hz the Godot/Isaac
+    # gain ratio is 2.97x at the hip, 1.27x at the knee and 0.84x at the ankle, and the phase error
+    # is 11-19 deg at the hip against 2-8 at the knee. A single scalar draw cannot represent that
+    # shape, so a policy trained on `action_scale_range` alone is still free to depend on the leg
+    # chain having ONE response - which is exactly the assumption that breaks in Godot.
+    #
+    # Correcting Godot toward Isaac has been tried three times, each verified operative at the plant
+    # level, and each made transfer WORSE. So the intent here is the opposite: make no single
+    # per-joint response learnable, rather than pick the "right" one.
+    #
+    # Nominal (1.0, 1.0) / (0, 0) under `playback`, exactly as the whole-body ranges are.
+    per_joint_action_scale_range = (1.0, 1.0)
+    per_joint_latency_steps = (0, 0)
+
+    obs_contact_stuck_prob = 0.0
     obs_joint_vel_noise = 0.3
 
     # Set by every entry point that MEASURES rather than trains - evaluate, export, play,
@@ -276,6 +361,25 @@ class StandEnvCfg(DirectRLEnvCfg):
     # over starting poses Godot never has, and the two cannot be compared step by step.
     reset_joint_noise = 0.1
     reset_height_noise = 0.02
+
+    # Base ATTITUDE randomisation at reset, radians of tilt about a random horizontal axis.
+    #
+    # **Aimed at the one dependency parameter matching cannot remove.** Measured 2026-09-06: with
+    # joint angles matched to 0.05 rad, masses, anchors, rest pose to 0.4 degrees, actuator phase to
+    # a few degrees and an identical pelvis controller, Godot's torso still diverges 12-23 degrees
+    # from Isaac's inside twenty seconds, and the divergence accumulates continuously rather than at
+    # contact - a generalized base-dynamics difference. Choosing a different Newton solver moves it
+    # (Featherstone diverges 46% more slowly) but Featherstone costs 174 s per training iteration
+    # against XPBD's 0.5, so it is not a usable backend.
+    #
+    # If the plants cannot be made to agree, the policy must stop depending on them agreeing. This
+    # starts each episode from a slightly different base attitude so the gait cannot be keyed to one
+    # exact floating-base trajectory. Deliberately small: the goal is not to walk while tilted, it is
+    # to remove a dependency.
+    reset_pitch_noise = 0.0
+
+    # Base ANGULAR VELOCITY randomisation at reset, rad/s about a random axis. Same purpose.
+    reset_ang_vel_noise = 0.0
 
     # --- balance assist ----------------------------------------------------------------
     # Pelvis attitude stabilisation, ported from Godot's `PelvisStabilizationModule`. Strength 0-1;

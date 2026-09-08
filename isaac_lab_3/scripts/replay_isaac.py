@@ -55,6 +55,12 @@ def main() -> int:
     # so every episode scales the commanded target by a random draw - which Godot has no equivalent
     # of, and which silently inflated Isaac's excursions by up to 25% in the first A/B run here.
     cfg.action_scale_range = (1.0, 1.0)
+    # **`playback` pins EVERY per-episode draw, not just the two this script set by hand.**
+    # Without it `effort_scale_range` stays live, so replaying a trace's own actions did not
+    # reproduce the trace: measured 2026-09-08, maxFootZ 0.607 against the source run's 0.103,
+    # i.e. the body flailed and fell. That silently invalidated a solver-backend comparison.
+    # Reproducing the source trace is now the gate this tool has to pass before it is trusted.
+    cfg.playback = True
     cfg.effort_scale_range = (1.0, 1.0)
     if args.checkpoint:
         restore(cfg, args.checkpoint, label="replay")
@@ -80,6 +86,22 @@ def main() -> int:
     header += [f"pos_{d}" for d in dofs] + [f"vel_{d}" for d in dofs]
     header += ["c_HandL", "c_HandR", "c_FootL", "c_FootR"]
     header += [f"act{i}" for i in range(n_act)] + ["cmd_x", "cmd_y", "cmd_yaw"]
+    # World foot/pelvis height, matching `dump_obs.py` and `IsaacPolicyDriver.DofTracePath`. The
+    # observation carries only contact FLAGS, which cannot show how a foot approaches the ground.
+    header += ["footZ_L", "footZ_R", "pelvisZ"]
+    # Horizontal foot/pelvis position and whole-body momentum, matching `dump_obs.py` so the
+    # solver-backend comparison can use the same analysis scripts unchanged. The fore-aft foot
+    # offset is what showed Godot standing in a 0.21 m split stance against Isaac's 0.03 m.
+    header += ["footX_L", "footX_R", "pelvisX", "footZfwd_L", "footZfwd_R", "pelvisZfwd"]
+    header += ["comX", "comY", "comZ", "comVx", "comVy", "comVz", "Lx", "Ly", "Lz"]
+
+    masses = base.robot.data.default_mass
+    if hasattr(masses, "torch"):
+        masses = masses.torch
+    masses = masses.to(args.device).float()
+    if masses.dim() == 2:
+        masses = masses[0]
+    total_mass = float(masses.sum())
 
     out_rows = []
     for step in range(len(actions)):
@@ -89,7 +111,28 @@ def main() -> int:
         while not isinstance(obs, torch.Tensor) and hasattr(obs, "keys"):
             keys = list(obs.keys())
             obs = obs["policy"] if "policy" in keys else obs[keys[0]]
-        out_rows.append([step / 60.0] + list(obs[0].detach().cpu().numpy().astype(float)))
+        com = base.robot.data.body_com_pos_w.torch
+        _z = com[:, base._contact_ids, 2] - base.scene.env_origins[:, 2].unsqueeze(-1)
+        # `_contact_ids` order is Hand_L, Hand_R, Foot_L, Foot_R - see `StandEnv._contacts`.
+        _zxy = com[:, base._contact_ids, 1] - base.scene.env_origins[:, 1].unsqueeze(-1)
+        _zfw = com[:, base._contact_ids, 0] - base.scene.env_origins[:, 0].unsqueeze(-1)
+        _extra = [float(_z[0, 2]), float(_z[0, 3]),
+                  float(base.rig.root_pos_w[0, 2] - base.scene.env_origins[0, 2])]
+        # Godot's +X is Isaac's -Y under the rig frame map; negated so "forward" agrees in both.
+        _extra += [-float(_zxy[0, 2]), -float(_zxy[0, 3]),
+                   -float(base.rig.root_pos_w[0, 1] - base.scene.env_origins[0, 1]),
+                   float(_zfw[0, 2]), float(_zfw[0, 3]),
+                   float(base.rig.root_pos_w[0, 0] - base.scene.env_origins[0, 0])]
+        b_pos = base.robot.data.body_com_pos_w.torch[0]
+        b_vel = base.robot.data.body_com_lin_vel_w.torch[0]
+        mw = masses.unsqueeze(-1)
+        com_w = (mw * b_pos).sum(0) / total_mass
+        com_v = (mw * b_vel).sum(0) / total_mass
+        ang_mom = (mw * torch.cross(b_pos - com_w, b_vel - com_v, dim=-1)).sum(0)
+        com_local = com_w - base.scene.env_origins[0]
+        _extra += ([float(v) for v in com_local] + [float(v) for v in com_v]
+                   + [float(v) for v in ang_mom])
+        out_rows.append([step / 60.0] + list(obs[0].detach().cpu().numpy().astype(float)) + _extra)
 
     out = pathlib.Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)

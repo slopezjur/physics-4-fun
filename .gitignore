@@ -95,3 +95,12 @@ rl/runs/
 isaac_lab_3/exported/
 **/__pycache__/
 *.pyc
+
+# Root-level RSL-RL training output. `isaac_lab/logs/` and `isaac_lab_3/logs/` are already ignored
+# above, but runs land in `logs/rsl_rl/` at the repo root, which those patterns do not reach: 8.3 GB
+# across 64 runs, of which 189 files (env.yaml / agent.yaml / curriculum.json) are not covered by the
+# `*.pt` rule and WOULD be committed. This is regenerated output - `restore()` reads it from disk
+# locally, and the findings live in isaac_lab_3/SIM-TO-SIM.md - so none of it belongs in history.
+# The note above records that checkpoints once put 13 GB into this repo; this is the same mistake by
+# a different path.
+logs/

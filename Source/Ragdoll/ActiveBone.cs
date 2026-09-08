@@ -25,6 +25,9 @@ public partial class ActiveBone : RigidBody3D, Interfaces.IBoneState
     [ExportGroup("Biomechanical Actuator Gains")]
     [Export] public float ProportionalGain { get; set; } = 450.0f;
     [Export] public float DerivativeGain { get; set; } = 40.0f;
+
+
+
     [Export] public float IntegralGain { get; set; } = 0.0f; // Pure PD control prevents contact windup & jitter
     /// <summary>
     /// Torque ceiling (N.m) for a bone that does not override it.
@@ -838,6 +841,23 @@ public partial class ActiveBone : RigidBody3D, Interfaces.IBoneState
     /// is instead a support strut carrying a share of total body weight up from the contact.
     /// That share is applied at the contact point as a Jacobian-transpose virtual force,
     /// tau = r_contact x F_support, which is what lets light arms actually push an 80 kg torso up.
+    /// </summary>
+    /// <summary>
+    /// Applies ONLY the gravity feed-forward, as an equal-and-opposite pair, ignoring
+    /// <see cref="MuscleStrength"/> and the PD entirely.
+    ///
+    /// <para><b>For drives that bypass this actuator.</b> The angular-spring path resolves joint
+    /// targets inside the physics solver and silences the explicit PD by zeroing `MuscleStrength` -
+    /// which also silences the load compensation, because that term is multiplied by the same
+    /// factor. Gravity compensation is not part of the PD; it is a feed-forward that cancels a
+    /// constant gravitational torque, and a drive that does not use the PD still needs it.
+    /// Measured 2026-09-06: without it the spring path holds a persistent forward lean of
+    /// 0.2-0.4 rad where Isaac stays within +/-0.09, which is the signature of exactly such an
+    /// uncancelled constant torque.</para>
+    ///
+    /// <para>The clamp is <see cref="MaxTorque"/> scaled by
+    /// <see cref="LoadCompensationTorqueFraction"/>, matching the bound the combined path applies,
+    /// so this cannot deliver more feed-forward than the actuator could.</para>
     /// </summary>
     private Vector3 ComputeLoadCompensationTorque(float supportedMassShare)
     {

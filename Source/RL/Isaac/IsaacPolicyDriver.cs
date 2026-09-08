@@ -274,6 +274,143 @@ public partial class IsaacPolicyDriver : Node
     /// </summary>
     [Export] public float HillVmaxScale { get; set; } = 1.0f;
 
+    /// <summary>
+    /// Multiplier on every controlled bone's <see cref="ActiveBone.DerivativeGain"/> at setup.
+    /// 1.0 leaves the authored damping alone.
+    ///
+    /// <para><b>For the growing vertical oscillation that ends every Godot run.</b> Measured
+    /// 2026-09-05 at authority 0.15 on a policy that walks in Isaac: pelvis height oscillates at
+    /// about 3 Hz with GROWING amplitude (+/-0.015 m at t=0.5 s, +/-0.04 m at t=1.8 s) until both
+    /// feet leave the ground together at t~1.7 s and the body collapses at t~2.3 s. That is an
+    /// under-damped mode being pumped, not a balance failure - the same compliant-leg pogo recorded
+    /// earlier on this project.</para>
+    ///
+    /// <para>The legs act as springs carrying body weight, and Godot's Stable-PD divides `Kd` by the
+    /// same denominator it divides `Kp` by, so raising damping alone is not reachable from the
+    /// authored gains. If scaling this flattens the height oscillation, the vertical mode is the
+    /// mechanism and the fix belongs in the leg damping rather than in the policy.</para>
+    /// </summary>
+    [Export] public float DampingScale { get; set; } = 1.0f;
+
+    /// <summary>
+    /// Damping multiplier applied to the leg chain (Thigh/Shin/Foot) whose foot is CURRENTLY in
+    /// contact, on top of <see cref="DampingScale"/>. 1.0 leaves the stance leg alone.
+    ///
+    /// <para><b>The reason a single body-wide damping scalar cannot work.</b> Measured 2026-09-05,
+    /// the same `Kd` is pulled in opposite directions by the two phases of a gait. At
+    /// `DampingScale = 1` the support legs are under-damped, so pelvis height oscillates at ~3 Hz
+    /// with growing amplitude until both feet leave the ground and the body collapses. At
+    /// `DampingScale = 3-4` the bounce is gone - height std falls 0.0845 -> 0.0047 - but the SWING
+    /// leg is now too slow to lift a foot, so `footZ` sits at its resting 0.040 for seconds on end
+    /// and the dummy shuffles instead of stepping. Stability and stepping want opposite damping on
+    /// the same joints.</para>
+    ///
+    /// <para>Splitting by contact resolves it: the stance leg carries the body and wants damping,
+    /// the swing leg has to move fast and does not. The contact test is the same foot-height rule
+    /// the observation uses (<see cref="IsaacObservation.ContactHeight"/>), so the split agrees with
+    /// what the policy is told.</para>
+    /// </summary>
+    [Export] public float StanceDampingScale { get; set; } = 1.0f;
+
+    /// <summary>
+    /// Damping multiplier for the leg chain whose foot is AIRBORNE, on top of
+    /// <see cref="DampingScale"/>. See <see cref="StanceDampingScale"/>; values below 1.0 free the
+    /// swing leg to move faster than the authored gains allow.
+    /// </summary>
+    [Export] public float SwingDampingScale { get; set; } = 1.0f;
+
+
+
+    /// <summary>
+    /// How the stance/swing split decides which leg is which.
+    /// 0 = foot in CONTACT is stance (the height threshold the observation uses).
+    /// 1 = the LOWER foot is stance, with <see cref="StanceGateMargin"/> of hysteresis.
+    ///
+    /// <para><b>Mode 0 cannot bootstrap.</b> Measured 2026-09-05: no foot ever leaves the ground in
+    /// Godot, so both legs read as stance forever and the swing branch never runs. Mode 1 is
+    /// asymmetric even in double support - exactly one leg is always the lower one - so the split
+    /// engages from the first tick and a swing does not have to exist before it can be detected.</para>
+    /// </summary>
+    [Export(PropertyHint.Range, "0,1,1")] public int StanceGateMode { get; set; }
+
+    /// <summary>
+    /// Hysteresis (m) on the mode-1 height comparison. The stance foot keeps the role until the
+    /// other foot is lower by this much, so two feet resting level do not flip the assignment every
+    /// tick.
+    /// </summary>
+    [Export] public float StanceGateMargin { get; set; } = 0.004f;
+
+
+
+
+
+
+    /// <summary>
+    /// Drive the joints with Jolt's ANGULAR SPRING - a position constraint resolved inside the
+    /// solver - instead of `ActiveBone`'s explicit torque. The explicit path is silenced by setting
+    /// `MuscleStrength` to zero on every controlled bone.
+    ///
+    /// <para><b>This is the structural analogue of what Isaac does, and the explicit path may not
+    /// be able to reach it.</b> Measured 2026-09-06 with the network removed from both loops and the
+    /// SAME recorded target trajectory: Isaac's stride is 0.253 m and Godot's is 0.012-0.032 m, and
+    /// every Godot configuration either stands still or falls. Making the explicit controller
+    /// stronger does not help - compensating the Stable-PD gain reduction so the joint receives the
+    /// authored gains (which Isaac is stable at) makes Godot fall in all 27 cells swept.</para>
+    ///
+    /// <para>That points at WHEN the correction enters the solve rather than how large it is. XPBD
+    /// projects the target as a positional constraint inside the solve and is unconditionally
+    /// stable; `ActiveBone` computes a torque and applies it as an external force after the solve,
+    /// which is the formulation that destabilises as gain rises. Jolt's angular spring is solved as
+    /// a constraint, so it should hold high impedance without the explicit path's instability.</para>
+    ///
+    /// <para><b>Deliberately no biomechanics on this path yet.</b> Hill force-velocity, the effort
+    /// clamp and gravity feed-forward all live in the torque path. Porting them at the same time
+    /// would leave three unknowns moving at once; establish first whether a pure positional
+    /// constraint reproduces the gait, then add them back one at a time.</para>
+    /// </summary>
+    [Export] public bool UseAngularSpring { get; set; }
+
+    /// <summary>Multiplier on the angular springs' stiffness, over the rig contract value.</summary>
+    [Export] public float AngularSpringStiffnessScale { get; set; } = 1.0f;
+
+    /// <summary>
+    /// Multiplier on the angular springs' damping, over the rig contract value.
+    ///
+    /// <para>The rig's `Kd/Kp` ratio is 0.02-0.03 (e.g. 36/1800), while the scene's own authored
+    /// angular-spring defaults are 350/35, a ratio of 0.1 - so feeding the rig's damping straight in
+    /// leaves the constraint markedly under-damped relative to what the joint was tuned for.</para>
+    /// </summary>
+    [Export] public float AngularSpringDampingScale { get; set; } = 1.0f;
+
+
+
+
+
+
+
+    /// <summary>
+    /// Hold the ARM chain (UpperArm / Forearm / Hand, both sides) at its rest pose instead of
+    /// applying the policy's offset.
+    ///
+    /// <para><b>The arms are the largest out-of-distribution input the policy receives in Godot,
+    /// and they carry none of the gait.</b> Measured 2026-09-06 over 143 channels, the fraction of
+    /// samples outside the 1st-99th percentile range Isaac trained on:</para>
+    ///
+    /// <code>
+    /// pos_UpperArm_R.z   99.6%   godot mean +0.111   isaac [-0.205, -0.017]   opposite sign
+    /// pos_Forearm_R.x    98.3%   godot mean +0.340   isaac [-0.102,  0.110]
+    /// pos_Forearm_L.x    98.3%   godot mean +0.515   isaac [-0.010,  0.216]
+    /// </code>
+    ///
+    /// <para>Godot's arms are soft (kp 100-120) and sag under gravity where XPBD's positional drive
+    /// holds them, so the elbow sits three to five times more flexed than anything the policy ever
+    /// saw. Holding them at rest puts those channels back near zero, inside Isaac's range, and stops
+    /// the arms perturbing the torso. `LoadCompensation` was tried first and is not reliable: it
+    /// moved `Forearm_L.x` from 0.372 into range at authority 0.15 and further OUT of range (0.495)
+    /// at 0.125.</para>
+    /// </summary>
+    [Export] public bool LockArmsAtRest { get; set; }
+
     [Export] public float SpawnActionNoise { get; set; }
 
     /// <summary>Seconds over which <see cref="SpawnActionNoise"/> is applied, from the first step.</summary>
@@ -416,6 +553,29 @@ public partial class IsaacPolicyDriver : Node
     private IsaacObservation? _observation;
     private IsaacActionSpace? _actions;
     private ActiveBone?[] _controlledBones = System.Array.Empty<ActiveBone?>();
+
+    /// <summary>Leg chains by side, resolved once: index 0 = left, 1 = right.</summary>
+    private readonly ActiveBone?[][] _legChains = { new ActiveBone?[3], new ActiveBone?[3] };
+
+    /// <summary>Foot bones used for the stance test, index-matched to <see cref="_legChains"/>.</summary>
+    private readonly ActiveBone?[] _feet = new ActiveBone?[2];
+
+    /// <summary>
+    /// Authored derivative gain per leg bone, captured AFTER <see cref="DampingScale"/> is applied
+    /// so the phase split multiplies the base once per tick instead of compounding.
+    /// </summary>
+    private readonly float[][] _legBaseKd = { new float[3], new float[3] };
+
+    /// <summary>Which side currently holds the stance role under <see cref="StanceGateMode"/> 1.</summary>
+    private int _stanceSide;
+
+    /// <summary>
+    /// Smoothed per-side damping scale, so the stance/swing switch is not a step. **Seeded to the
+    /// STANCE value in `ResolveLegChains`, not to 1.0**: starting at 1.0 and ramping up leaves the
+    /// body under-damped for the first tens of milliseconds, which is long enough for the vertical
+    /// pogo to start - measured 2026-09-06, that alone turned a 100%-upright run into a fall.
+    /// </summary>
+    private readonly float[] _blendedScale = { 1.0f, 1.0f };
     private Quaternion[] _offsets = System.Array.Empty<Quaternion>();
     private bool _dumpedPose;
     private float _elapsed;
@@ -511,6 +671,28 @@ public partial class IsaacPolicyDriver : Node
 
             GD.Print($"[IsaacPolicyDriver] EffortScale {EffortScale:F2} applied to {scaled} bones");
         }
+
+        if (!Mathf.IsEqualApprox(DampingScale, 1.0f))
+        {
+            int scaled = 0;
+            foreach (ActiveBone? bone in _controlledBones)
+            {
+                if (bone != null && GodotObject.IsInstanceValid(bone))
+                {
+                    bone.DerivativeGain *= DampingScale;
+                    scaled++;
+                }
+            }
+
+            GD.Print($"[IsaacPolicyDriver] DampingScale {DampingScale:F2} applied to {scaled} bones");
+        }
+
+        if (UseAngularSpring)
+        {
+            ConfigureAngularSprings();
+        }
+
+        ResolveLegChains();
 
         if (!Mathf.IsEqualApprox(HillVmaxScale, 1.0f))
         {
@@ -738,6 +920,14 @@ public partial class IsaacPolicyDriver : Node
     /// contained, feeding a normaliser that turns the discrepancy into a saturated action. The
     /// actuated bones need no such treatment - the policy overwrites them every step.</para>
     /// </summary>
+    /// <summary>
+    /// True when this bone belongs to the leg that is currently SWINGING, using the same stance
+    /// resolution the damping split uses.
+    /// </summary>
+    /// <summary>Arm chain membership for <see cref="LockArmsAtRest"/>.</summary>
+    private static bool IsArmBone(string name) =>
+        name.StartsWith("UpperArm") || name.StartsWith("Forearm") || name.StartsWith("Hand");
+
     private void NeutraliseUncommandedBones()
     {
         var actuated = new HashSet<string>(_rig!.ActuatedBoneNames());
@@ -955,6 +1145,16 @@ public partial class IsaacPolicyDriver : Node
         // The PD itself runs at the FULL physics rate, on every tick including the ones between
         // policy steps. That is what Isaac's drives do - the target is held while the actuator keeps
         // integrating - and running it only on policy ticks would halve the control rate.
+        if (UseAngularSpring)
+        {
+            ApplyAngularSpringTargets();
+
+        }
+
+        // Before the PD reads the gains: the split is a property of the CURRENT contact state, and
+        // applying it after the torque is computed would use last tick's phase.
+        ApplyPhaseDamping();
+
         if (JointSpacePd)
         {
             ApplyJointSpaceTorque((float)delta);
@@ -962,6 +1162,192 @@ public partial class IsaacPolicyDriver : Node
 
         // At the FULL physics rate, like the PD above: the target persists between policy steps and
         // the motor keeps closing on it, which is what Isaac's drives do between decimated steps.
+    }
+
+    /// <summary>
+    /// Switch every controlled joint over to Jolt's angular spring and silence the explicit torque
+    /// path. See <see cref="UseAngularSpring"/>.
+    /// </summary>
+    private void ConfigureAngularSprings()
+    {
+        int configured = 0;
+        for (int i = 0; i < _controlledBones.Length; i++)
+        {
+            ActiveBone? bone = _controlledBones[i];
+            if (bone == null || !IsInstanceValid(bone) || bone.Joint == null)
+            {
+                continue;
+            }
+
+            Generic6DofJoint3D joint = bone.Joint;
+            int baseIndex = i * IsaacRigContract.AxesPerBone;
+            for (int axis = 0; axis < IsaacRigContract.AxesPerBone; axis++)
+            {
+                IsaacRigContract.JointSpec spec = _rig!.ActuatedJoints[baseIndex + axis];
+                SetSpring(joint, spec.GodotAxis,
+                    spec.Stiffness * AngularSpringStiffnessScale,
+                    spec.Damping * AngularSpringDampingScale);
+            }
+
+            // The explicit actuator must go quiet or the two drives fight: `ActiveBone.UpdateBone`
+            // returns early at this threshold, so no torque is applied at all.
+            bone.MuscleStrength = 0.0f;
+            configured++;
+        }
+
+        GD.Print($"[IsaacPolicyDriver] angular-spring drive on {configured} joints; explicit torque "
+                 + "path silenced (MuscleStrength 0)");
+    }
+
+    private static void SetSpring(Generic6DofJoint3D joint, char axis, float stiffness, float damping)
+    {
+        switch (axis)
+        {
+            case 'x':
+                joint.SetFlagX(Generic6DofJoint3D.Flag.EnableAngularSpring, true);
+                joint.SetParamX(Generic6DofJoint3D.Param.AngularSpringStiffness, stiffness);
+                joint.SetParamX(Generic6DofJoint3D.Param.AngularSpringDamping, damping);
+                break;
+            case 'y':
+                joint.SetFlagY(Generic6DofJoint3D.Flag.EnableAngularSpring, true);
+                joint.SetParamY(Generic6DofJoint3D.Param.AngularSpringStiffness, stiffness);
+                joint.SetParamY(Generic6DofJoint3D.Param.AngularSpringDamping, damping);
+                break;
+            default:
+                joint.SetFlagZ(Generic6DofJoint3D.Flag.EnableAngularSpring, true);
+                joint.SetParamZ(Generic6DofJoint3D.Param.AngularSpringStiffness, stiffness);
+                joint.SetParamZ(Generic6DofJoint3D.Param.AngularSpringDamping, damping);
+                break;
+        }
+    }
+
+    /// <summary>Write the commanded angles to the springs' equilibrium points.</summary>
+    private void ApplyAngularSpringTargets()
+    {
+        for (int i = 0; i < _controlledBones.Length; i++)
+        {
+            ActiveBone? bone = _controlledBones[i];
+            if (bone == null || !IsInstanceValid(bone) || bone.Joint == null)
+            {
+                continue;
+            }
+
+            Generic6DofJoint3D joint = bone.Joint;
+            Vector3 target = _actions!.TargetEuler[i];
+            int baseIndex = i * IsaacRigContract.AxesPerBone;
+            for (int axis = 0; axis < IsaacRigContract.AxesPerBone; axis++)
+            {
+                IsaacRigContract.JointSpec spec = _rig!.ActuatedJoints[baseIndex + axis];
+
+                // **Negated: Jolt's angular constraint frame is MIRRORED relative to the angles this
+                // rig reports**, the same inversion already recorded for the joint limits (the scene
+                // stores `[-upper, -lower]` so Jolt enforces the anatomical range). Measured
+                // 2026-09-06 before this negation: a commanded hip of +0.315 rad settled at -0.319,
+                // i.e. the body was driven backwards, which is why the first angular-spring run
+                // fell at every authority.
+                float value = -Component(target, spec.GodotAxis);
+                switch (spec.GodotAxis)
+                {
+                    case 'x':
+                        joint.SetParamX(Generic6DofJoint3D.Param.AngularSpringEquilibriumPoint, value);
+                        break;
+                    case 'y':
+                        joint.SetParamY(Generic6DofJoint3D.Param.AngularSpringEquilibriumPoint, value);
+                        break;
+                    default:
+                        joint.SetParamZ(Generic6DofJoint3D.Param.AngularSpringEquilibriumPoint, value);
+                        break;
+                }
+            }
+        }
+    }
+
+    /// <summary>Resolve the two leg chains and capture their authored damping.</summary>
+    private void ResolveLegChains()
+    {
+        string[][] names =
+        {
+            new[] { "Thigh_L", "Shin_L", "Foot_L" },
+            new[] { "Thigh_R", "Shin_R", "Foot_R" },
+        };
+
+        for (int side = 0; side < 2; side++)
+        {
+            for (int j = 0; j < names[side].Length; j++)
+            {
+                ActiveBone? found = null;
+                foreach (ActiveBone? bone in _controlledBones)
+                {
+                    if (bone != null && GodotObject.IsInstanceValid(bone) && bone.BoneName == names[side][j])
+                    {
+                        found = bone;
+                        break;
+                    }
+                }
+
+                _legChains[side][j] = found;
+                _legBaseKd[side][j] = found?.DerivativeGain ?? 0.0f;
+                _blendedScale[side] = StanceDampingScale;
+                if (names[side][j].StartsWith("Foot"))
+                {
+                    _feet[side] = found;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Split leg damping by gait phase. See <see cref="StanceDampingScale"/> for why one scalar
+    /// cannot serve both phases.
+    /// </summary>
+    private void ApplyPhaseDamping()
+    {
+        if (Mathf.IsEqualApprox(StanceDampingScale, 1.0f) && Mathf.IsEqualApprox(SwingDampingScale, 1.0f))
+        {
+            return;
+        }
+
+        // Mode 1 resolves the stance side ONCE from the two foot heights, so exactly one leg is
+        // stance even when both feet are on the floor.
+        if (StanceGateMode == 1)
+        {
+            ActiveBone? l = _feet[0];
+            ActiveBone? r = _feet[1];
+            if (l != null && r != null && GodotObject.IsInstanceValid(l) && GodotObject.IsInstanceValid(r))
+            {
+                float zl = l.GlobalPosition.Y;
+                float zr = r.GlobalPosition.Y;
+                if (zl < zr - StanceGateMargin)
+                {
+                    _stanceSide = 0;
+                }
+                else if (zr < zl - StanceGateMargin)
+                {
+                    _stanceSide = 1;
+                }
+            }
+        }
+
+        for (int side = 0; side < 2; side++)
+        {
+            ActiveBone? foot = _feet[side];
+            bool grounded = StanceGateMode == 1
+                ? side == _stanceSide
+                : foot != null && GodotObject.IsInstanceValid(foot)
+                    && foot.GlobalPosition.Y < IsaacObservation.ContactHeight;
+            float scale = grounded ? StanceDampingScale : SwingDampingScale;
+
+            _blendedScale[side] = scale;
+
+            for (int j = 0; j < _legChains[side].Length; j++)
+            {
+                ActiveBone? bone = _legChains[side][j];
+                if (bone != null && GodotObject.IsInstanceValid(bone))
+                {
+                    bone.DerivativeGain = _legBaseKd[side][j] * _blendedScale[side];
+                }
+            }
+        }
     }
 
     private void Step(float delta)
@@ -1015,6 +1401,12 @@ public partial class IsaacPolicyDriver : Node
             return;
         }
 
+        // **Phase lead is applied to the ACTION, before decoding**, so every drive path inherits it -
+        // the explicit torque path, the angular spring and the joint-space PD all derive their
+        // targets from this one decode. Applying it further downstream reached only one of them:
+        // measured 2026-09-06, a lead wired into the spring path alone left the explicit path
+        // byte-identical across lead 0/1/2/3, which reads as "no effect" rather than "not applied".
+
         _actions!.Decode(actions, _offsets);
 
         // The clamped action - not the raw one - is what the next observation must carry, because
@@ -1043,6 +1435,11 @@ public partial class IsaacPolicyDriver : Node
                         ? _offsets[i]
                         : Quaternion.Identity.Slerp(_offsets[i], Mathf.Clamp(AssistAuthority, 0.0f, 1.0f))
                             .Normalized();
+                }
+                                else if (LockArmsAtRest && IsArmBone(bone.BoneName))
+                {
+                    // Rest pose, not the policy's offset: see `LockArmsAtRest`.
+                    bone.TargetLocalRotation = bone.GetRestLocalRotation();
                 }
                 else
                 {

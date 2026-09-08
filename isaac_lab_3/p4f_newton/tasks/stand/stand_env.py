@@ -157,6 +157,12 @@ class StandEnv(DirectRLEnv):
         self._effort_scale = torch.ones(self.num_envs, 1, device=self.device)
         # Per-episode command-gain draw; see `action_scale_range`.
         self._action_scale = torch.ones(self.num_envs, 1, device=self.device)
+        # PER-JOINT command-gain draw; see `per_joint_action_scale_range`. Multiplies the
+        # whole-body draw above, so the two compose and either can be left at nominal.
+        self._joint_action_scale = torch.ones(
+            self.num_envs, len(self._actuated_ids), device=self.device)
+        # PER-JOINT action latency; see `per_joint_latency_steps`. Allocated with the history.
+        self._joint_delay = None
         self._stiffness = self.robot.data.joint_stiffness.torch[0]
         self._damping = self.robot.data.joint_damping.torch[0]
 
@@ -164,6 +170,11 @@ class StandEnv(DirectRLEnv):
         self._action = torch.zeros_like(self._previous_action)
         self._raw_action = torch.zeros_like(self._previous_action)
         self._joint_target = self._default_joint_pos.clone()
+        # Per-env "contact flags are stuck at double support" mask; see `obs_contact_stuck_prob`.
+        self._contact_stuck = None
+        # Ring buffer of past actions for `action_latency_steps`; allocated on first use.
+        self._action_history = None
+        self._action_delay = None
 
         # Velocity command (vx, vy, yaw_rate), constant zero for Stand and reserved for Walk. Three
         # wasted floats now, and they buy the only thing that makes Walk cheap: Walk bootstraps from
@@ -258,6 +269,44 @@ class StandEnv(DirectRLEnv):
 
     # ------------------------------------------------------------------ stepping
 
+    def _base_vel_noise(self, root_vel: torch.Tensor, env_ids) -> torch.Tensor:
+        """Add angular-velocity noise to the reset root velocity. See `reset_ang_vel_noise`."""
+        w = float(getattr(self.cfg, "reset_ang_vel_noise", 0.0))
+        if w <= 0.0 or self.cfg.playback:
+            return root_vel
+        root_vel = root_vel.clone()
+        root_vel[:, 3:6] += torch.empty(
+            (len(env_ids), 3), device=self.device).uniform_(-w, w)
+        return root_vel
+
+    def _delayed(self, actions: torch.Tensor) -> torch.Tensor:
+        """Apply this episode's action latency. See `action_latency_steps`.
+
+        A per-environment delay, so one batch trains across the whole range at once. The history is
+        a ring buffer of the last `max` actions; index 0 is the newest, so a delay of d reads row d.
+        `_raw_action` deliberately keeps the UNDELAYED command - it feeds the previous-action
+        observation channel, and the policy should see what it asked for, not what the body got.
+        """
+        lat = tuple(getattr(self.cfg, "action_latency_steps", (0, 0)))
+        pj = tuple(getattr(self.cfg, "per_joint_latency_steps", (0, 0)))
+        if self.cfg.playback or max(max(lat), max(pj)) <= 0:
+            return actions
+        if max(pj) <= 0 and self._action_delay is None:
+            return actions
+        depth = max(int(lat[1]), int(pj[1])) + 1
+        if self._action_history is None or self._action_history.shape[0] != depth:
+            self._action_history = torch.zeros(
+                (depth, self.num_envs, actions.shape[-1]), device=self.device)
+        self._action_history = torch.roll(self._action_history, shifts=1, dims=0)
+        self._action_history[0] = actions
+        if max(pj) > 0 and self._joint_delay is not None:
+            # out[e, j] = history[d[e, j], e, j] - a per-JOINT read of the same ring buffer, so one
+            # batch trains across a whole spread of per-joint lags rather than one global lag.
+            idx = self._joint_delay.clamp(0, depth - 1).unsqueeze(0)
+            return torch.gather(self._action_history, 0, idx).squeeze(0)
+        idx = self._action_delay.clamp(0, depth - 1)
+        return self._action_history[idx, torch.arange(self.num_envs, device=self.device)]
+
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         # `copy_` into persistent buffers rather than rebinding to the incoming tensor.
         #
@@ -269,6 +318,7 @@ class StandEnv(DirectRLEnv):
         # and only once a body falls.
         self._previous_action.copy_(self._action)
         self._raw_action.copy_(actions)
+        actions = self._delayed(actions)
         limited = actions.clamp(-1.0, 1.0)
         if self.cfg.action_rate_limit > 0.0:
             # **In ACTION space and once per POLICY step**, which is the only place Godot can mirror
@@ -290,7 +340,8 @@ class StandEnv(DirectRLEnv):
         span = torch.where(
             self._action >= 0.0, self._act_upper - self._act_default, self._act_default - self._act_lower
         )
-        target = self._act_default + self.cfg.action_scale * self._action_scale * self._action * span
+        target = (self._act_default + self.cfg.action_scale * self._action_scale
+                  * self._joint_action_scale * self._action * span)
         if self.cfg.target_damping > 0.0:
             # `tau = kp(target - q) - kd*qd` is `kp(target - kd*qd/kp - q)`; see `target_damping`.
             kp = self._stiffness[self._actuated_ids].clamp(min=1e-6)
@@ -523,7 +574,7 @@ class StandEnv(DirectRLEnv):
                 (rig.root_pos_w[:, 2] - self.scene.env_origins[:, 2]).unsqueeze(-1),
                 self._joint_pos - self._default_joint_pos,
                 self._observed_joint_vel(),
-                self._contacts(),
+                self._observed_contacts(),
                 self._action,
                 self._command,
             ],
@@ -598,6 +649,15 @@ class StandEnv(DirectRLEnv):
         if self._joint_vel_mask is not None:
             vel = vel * self._joint_vel_mask
         return vel
+
+    def _observed_contacts(self) -> torch.Tensor:
+        """Contact flags AS THE POLICY SEES THEM. See `obs_contact_stuck_prob`."""
+        c = self._contacts()
+        if self._contact_stuck is None:
+            return c
+        # Stuck envs report all four flags down, forever. `torch.where` keeps this differentiable-free
+        # and per-environment rather than branching on a python bool.
+        return torch.where(self._contact_stuck, torch.ones_like(c), c)
 
     def _contacts(self) -> torch.Tensor:
         """Hand_L, Hand_R, Foot_L, Foot_R ground flags — see CONTACT_HEIGHT for why this is height."""
@@ -859,6 +919,26 @@ class StandEnv(DirectRLEnv):
             h = self.cfg.reset_height_noise
             root_pose[:, 2] += torch.empty(len(env_ids), device=self.device).uniform_(-h, h)
 
+        # Base attitude noise: a small tilt about a random horizontal axis. See `reset_pitch_noise`.
+        tilt = float(getattr(self.cfg, "reset_pitch_noise", 0.0))
+        if tilt > 0.0 and not self.cfg.playback:
+            n = len(env_ids)
+            ang = torch.empty(n, device=self.device).uniform_(-tilt, tilt)
+            azi = torch.empty(n, device=self.device).uniform_(-math.pi, math.pi)
+            axis = torch.stack([torch.cos(azi), torch.sin(azi), torch.zeros_like(azi)], dim=-1)
+            half = ang * 0.5
+            dq = torch.cat([axis * torch.sin(half).unsqueeze(-1), torch.cos(half).unsqueeze(-1)], dim=-1)
+            q = root_pose[:, 3:7]
+            # xyzw Hamilton product, dq applied on the left, matching the order this rig stores.
+            x1, y1, z1, w1 = dq.unbind(-1)
+            x2, y2, z2, w2 = q.unbind(-1)
+            root_pose[:, 3:7] = torch.stack([
+                w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+                w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+                w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+                w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+            ], dim=-1)
+
         # Straight to Newton's state, NOT through `write_root_pose_to_sim_index` — that call does
         # not round-trip here and respawns the body 0.82 m in the air on every reset after the
         # first. See NewtonRigState.reset_to.
@@ -871,7 +951,7 @@ class StandEnv(DirectRLEnv):
             root_quat_xyzw=root_pose[:, 3:7],
             joint_pos=joint_pos,
             joint_vel=joint_vel,
-            root_vel=self._starting_push(env_ids),
+            root_vel=self._base_vel_noise(self._starting_push(env_ids), env_ids),
         )
 
         # Nominal budget when measuring: an evaluation or an export has to report the policy
@@ -886,10 +966,43 @@ class StandEnv(DirectRLEnv):
             len(env_ids), 1, device=self.device
         ).uniform_(a_low, a_high)
 
+        j_low, j_high = ((1.0, 1.0) if self.cfg.playback
+                         else tuple(getattr(self.cfg, "per_joint_action_scale_range", (1.0, 1.0))))
+        self._joint_action_scale[env_ids] = torch.empty(
+            len(env_ids), self._joint_action_scale.shape[-1], device=self.device
+        ).uniform_(j_low, j_high)
+
         self._balance_ang_vel[env_ids] = 0.0
         self._action[env_ids] = 0.0
         self._previous_action[env_ids] = 0.0
         self._joint_target[env_ids] = self._default_joint_pos[env_ids]
+        lat = tuple(getattr(self.cfg, "action_latency_steps", (0, 0)))
+        if max(lat) > 0 and not self.cfg.playback:
+            if self._action_delay is None:
+                self._action_delay = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+            self._action_delay[env_ids] = torch.randint(
+                int(lat[0]), int(lat[1]) + 1, (len(env_ids),), device=self.device)
+            if self._action_history is not None:
+                self._action_history[:, env_ids] = 0.0
+
+        pj = tuple(getattr(self.cfg, "per_joint_latency_steps", (0, 0)))
+        if max(pj) > 0 and not self.cfg.playback:
+            if self._joint_delay is None:
+                self._joint_delay = torch.zeros(
+                    (self.num_envs, self._joint_action_scale.shape[-1]),
+                    dtype=torch.long, device=self.device)
+            self._joint_delay[env_ids] = torch.randint(
+                int(pj[0]), int(pj[1]) + 1,
+                (len(env_ids), self._joint_delay.shape[-1]), device=self.device)
+            if self._action_history is not None:
+                self._action_history[:, env_ids] = 0.0
+
+        prob = float(getattr(self.cfg, "obs_contact_stuck_prob", 0.0))
+        if prob > 0.0 and not self.cfg.playback:
+            if self._contact_stuck is None:
+                self._contact_stuck = torch.zeros((self.num_envs, 4), dtype=torch.bool, device=self.device)
+            draw = torch.rand(len(env_ids), device=self.device) < prob
+            self._contact_stuck[env_ids] = draw.unsqueeze(-1).expand(-1, 4)
         self._resample_commands(env_ids)
 
         extras = {}
