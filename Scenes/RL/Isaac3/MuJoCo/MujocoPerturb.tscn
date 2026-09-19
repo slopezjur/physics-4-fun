@@ -1,0 +1,39 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://Source/RL/MuJoCo/MujocoDummy.cs" id="1_mujoco"]
+[ext_resource type="Script" path="res://Source/Camera/CameraController.cs" id="2_cam"]
+
+[sub_resource type="PlaneMesh" id="Ground"]
+size = Vector2(16, 16)
+
+[sub_resource type="StandardMaterial3D" id="GroundMat"]
+albedo_color = Color(0.28, 0.30, 0.33, 1)
+
+[node name="MujocoPerturb" type="Node3D"]
+script = ExtResource("1_mujoco")
+ModelPath = "res://mujoco_rig/dummy_ball.xml"
+LateralDamping = 0.05
+MaxLateralCorrection = 0.12
+FollowCamera = false
+CameraOffset = Vector3(3.0, 1.2, 3.5)
+Walk = false
+Passive = false
+PolicyPath = "res://mujoco_rig/balance_policy.onnx"
+WalkCommand = Vector3(0, 0, 0)
+BallGunEnabled = true
+BallInterval = 3.0
+BallFirstShot = 2.0
+AutoQuitSeconds = 0.0
+
+[node name="Ground" type="MeshInstance3D" parent="."]
+mesh = SubResource("Ground")
+material_override = SubResource("GroundMat")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.966, 0.259, 0, -0.259, 0.966, 2.5, 2.2, 4.0)
+current = true
+script = ExtResource("2_cam")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.7, 0.71, 0, -0.71, 0.7, 0, 4, 2)
+shadow_enabled = true

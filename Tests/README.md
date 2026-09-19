@@ -4,8 +4,15 @@
 dotnet test Physics4Fun.sln
 ```
 
-91 tests, ~30 ms. No Godot install, no scene tree, no display required — they run anywhere the .NET
+123 tests, ~40 ms. No Godot install, no scene tree, no display required — they run anywhere the .NET
 SDK does, including CI.
+
+`MjPolicyTests` exercises the MuJoCo deployment loop through managed simulation/inference fakes:
+contract validation, reordered observation channels, zero perturb commands, action clipping and
+latency, position scaling, full reset, rejected non-finite inference and deterministic disposal.
+The native bridge and actual ONNX policies are additionally checked by headless Godot scene runs.
+Python environment and scoring regressions live in `mujoco_rig/rl/test_architecture.py`; see
+`mujoco_rig/README.md` for that command and the CPU/GPU parity checks.
 
 ## Why this can exist at all
 

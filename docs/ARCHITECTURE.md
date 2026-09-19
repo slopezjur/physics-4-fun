@@ -173,6 +173,93 @@ reports a component breakdown summing to 106 beside a total of 113.
 
 ---
 
+## 1d. MuJoCo track
+
+A third control track, and the one where learned control has worked: the body's physics runs in
+MuJoCo, driven from Godot through P/Invoke, and a policy trained on MuJoCo is scored and shipped on
+the same engine. How to use it is in `mujoco_rig/README.md`; where it stands, in
+`mujoco_rig/STATUS.md`.
+
+```
+mujoco_rig/
+├── build_mjcf.py            # Godot's rig dump -> dummy*.xml, in named stages
+├── validate.py              # The generated body is the body we meant
+├── rl/
+│   ├── env_config.py        # Constants that define the tasks
+│   ├── body_env*.py         # CPU / GPU base environment: plant, observation, reset, step, guards
+│   ├── perturb_env*.py      # + projectile, capture-step reward
+│   ├── walk_env*.py         # + commands, heading hold
+│   ├── train.py             # PPO loop: Task table, Curriculum, WorldSchedule, EpisodeStats
+│   ├── eval.py, eval_walk.py  # CPU scorers; --json
+│   └── export_onnx.py       # ONNX + the generated contract
+└── scripts/
+    ├── scoring.py           # One Scorer per task - the only reader of scorer output
+    ├── promote.py           # Paired, measured promotion into the scenes
+    ├── overnight.py         # Chained scored sessions; one SessionPolicy per task
+    └── preflight.py         # Task-level checks; one check list per task
+
+Source/RL/MuJoCo/
+├── MjBridge.cs              # P/Invoke model/data handle; the one Godot <-> MuJoCo frame map
+├── MujocoDummy.cs           # Scene node: load, drive (nothing / policy / scripted), step, render
+├── MjPolicyDriver.cs        # Policy clock, delayed actions, complete episode reset
+├── MjPolicyContract.cs      # Validated channels, action mapping, timing and command source
+├── MjPolicyObservation.cs   # Observation channels written at the declared offsets
+├── MjOnnxPolicy.cs          # ONNX session ownership and tensor shape checks
+├── IMjPolicyState.cs        # Read-only observation view and separate actuator capability
+├── MjModelDefinition.cs     # Generated MJCF configuration, independent of rendering
+├── MjHeadingHold.cs         # The contract's command-filling rule for walk
+└── MjBallGun, MjGaitMetrics, MjProxyBuilder, MjScriptedController, MjLayout, MjInterop
+```
+
+### Design conventions
+
+* **The contract is the interface.** Everything Godot needs to feed a policy - observation layout,
+  joint order, action mapping, and how the command channel is filled - is generated from the
+  training environment by `export_onnx.py`. `MjPolicyDriver` hard-codes none of it.
+* **Train on GPU, score and ship on CPU.** `mujoco_warp` is float32 and only trains; MuJoCo's C
+  engine is float64 and is what Godot runs, so every decision is made on it.
+* **Task behaviour lives in tables, not branches.** `train.TASKS`, `scoring.TASKS`,
+  `overnight.POLICIES` and `preflight.CHECKS` hold one entry per task; a new task adds entries and
+  edits no tool.
+* **Tools read data, not prose.** Scorers write JSON and the contract is JSON; no decision parses
+  printed text.
+* **Parity is tested, not assumed.** Each task's CPU and GPU implementations are checked for the
+  same numbers and the same interface.
+
+### Boundaries enforced by the unstaged-code audit
+
+* The policy loop depends on `IMjPolicyPlant` and `IMjPolicyInference`; the observation builder
+  receives only `IMjPolicyState`. Tests supply managed fakes, with no scene tree or native library.
+  Contract parsing, observation construction, inference ownership and actuation timing have separate
+  reasons to change. Unsupported channels and inconsistent shapes fail at load.
+* The contract declares observation offsets, command source, decimation and action latency. Perturb
+  receives zero command slots, while walk receives the scene command and optional heading hold.
+  Reset clears the previous action, delayed actions, inference clock and held heading together.
+* `MjBridge` checks the native version before reading generated offsets, frees partially constructed
+  handles and rejects use after disposal. Whole-body velocity shifts spatial velocities to each
+  body's COM. Policy observations deliberately retain their trained subtree-reference semantics.
+* CPU and GPU walk environments depend on immutable `WalkCommandConfig` instances. Constructing a
+  different training stage cannot change an existing environment's command distribution. Stage 2
+  samples reverse and lateral commands through the general sampler rather than the forward-only
+  straight-line branch. Episode reset clears landing history and heading corrections.
+* Scoring configures `auto_reset` and `max_shots_per_episode`; it no longer replaces live environment
+  methods to suppress resets or count shots. Explicit reset remains available during evaluation.
+* Promotion requires successful finite scores for both candidates when an incumbent exists. Export
+  validates the network and contract in a temporary directory before replacement, restoring the old
+  pair on a replacement error. This is exception recovery, not a cross-process atomic transaction.
+  Overnight sessions score their initial seed, carry difficulty only from accepted sessions, and
+  distinguish the latest accepted seed from the best checkpoint offered for promotion.
+
+The audit also corrected an airtime reward that both backends always evaluated as zero: landing
+cleared the counter before reading it. Tests now pin the expected landing payment, not only backend
+agreement. This changes future training rewards; existing policy weights and authored physics are
+unchanged. Do not compare old and new training returns as evidence of policy improvement.
+
+Validation commands and coverage are in `Tests/README.md` and `mujoco_rig/README.md`. The existing
+architectural debt in section 1c belongs to the other control tracks and is outside this change.
+
+---
+
 ## 2. Mathematical & Biomechanical Formulation (The 7 Pillars)
 
 ### Pillar 1: Actuators & Tan-Liu-Turk Stable PD Formulation

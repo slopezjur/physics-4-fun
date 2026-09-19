@@ -1,0 +1,138 @@
+{
+  "task": "perturb",
+  "source_checkpoint": "D:\\Proyectos\\Godot\\physics-4-fun\\logs\\mujoco\\2026-09-11_10-08-42_p0911i_s1\\model_503.pt",
+  "num_obs": 105,
+  "num_actions": 30,
+  "policy_hz": 59.995,
+  "sim_timestep": 0.004167,
+  "decimation": 4,
+  "action_latency_steps": 2,
+  "observation_layout": [
+    {
+      "name": "projected_gravity",
+      "offset": 0,
+      "width": 3
+    },
+    {
+      "name": "pelvis_linear_velocity",
+      "offset": 3,
+      "width": 3
+    },
+    {
+      "name": "pelvis_angular_velocity",
+      "offset": 6,
+      "width": 3
+    },
+    {
+      "name": "pelvis_height",
+      "offset": 9,
+      "width": 1
+    },
+    {
+      "name": "joint_position",
+      "offset": 10,
+      "width": 30
+    },
+    {
+      "name": "joint_velocity_scaled_0.1",
+      "offset": 40,
+      "width": 30
+    },
+    {
+      "name": "foot_contact_L_R",
+      "offset": 70,
+      "width": 2
+    },
+    {
+      "name": "previous_action",
+      "offset": 72,
+      "width": 30
+    },
+    {
+      "name": "command_vx_vy_yaw",
+      "offset": 102,
+      "width": 3
+    }
+  ],
+  "joint_order": [
+    "Spine_rx",
+    "Spine_ry",
+    "Spine_rz",
+    "Chest_rx",
+    "Chest_ry",
+    "Chest_rz",
+    "UpperArm_L_rx",
+    "UpperArm_L_ry",
+    "UpperArm_L_rz",
+    "Forearm_L_rx",
+    "UpperArm_R_rx",
+    "UpperArm_R_ry",
+    "UpperArm_R_rz",
+    "Forearm_R_rx",
+    "Thigh_L_rx",
+    "Thigh_L_ry",
+    "Thigh_L_rz",
+    "Shin_L_rx",
+    "Foot_L_rx",
+    "Foot_L_ry",
+    "Foot_L_rz",
+    "Toe_L_rx",
+    "Thigh_R_rx",
+    "Thigh_R_ry",
+    "Thigh_R_rz",
+    "Shin_R_rx",
+    "Foot_R_rx",
+    "Foot_R_ry",
+    "Foot_R_rz",
+    "Toe_R_rx"
+  ],
+  "command": {
+    "source": "zero",
+    "yaw_mode": "raw"
+  },
+  "action_to_control": {
+    "mode": "torque",
+    "formula": "tau_nm = action * force_limit_nm * authority",
+    "authority": 0.6,
+    "force_limit_nm": [
+      200.0,
+      200.0,
+      200.0,
+      200.0,
+      200.0,
+      200.0,
+      90.0,
+      90.0,
+      90.0,
+      60.0,
+      90.0,
+      90.0,
+      90.0,
+      60.0,
+      200.0,
+      200.0,
+      200.0,
+      250.0,
+      150.0,
+      150.0,
+      150.0,
+      30.0,
+      200.0,
+      200.0,
+      200.0,
+      250.0,
+      150.0,
+      150.0,
+      150.0,
+      30.0
+    ]
+  },
+  "notes": [
+    "Frames are MuJoCo's: Z up. Godot -> MuJoCo is (-z, -x, y).",
+    "Pelvis velocities are expressed in the PELVIS frame (R.T @ world).",
+    "Foot contact is foot-origin height < 0.05 m, left then right.",
+    "The pelvis balance assist must be OFF; this policy replaces it.",
+    "Joint order below is mjModel actuator order; read joint angles with MjBridge.JointPosition, which indexes qpos through jnt_qposadr.",
+    "Reset to the model's `rest` keyframe, not to qpos0: at qpos0 the arms hang inside the legs."
+  ]
+}

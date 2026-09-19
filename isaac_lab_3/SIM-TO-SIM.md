@@ -4292,3 +4292,1169 @@ bit-comparison over 2400 steps:  max |d pelvisZ| 0.000000,  max |d Thigh_L.x| 0.
 
 The findings these knobs produced are preserved in this ledger, which is where they belong; the
 product does not need to carry a configuration surface for hypotheses that were disproved.
+
+## 2026-09-08 19:00 — OPTION B: MuJoCo holds single-leg support on the same rig. Godot cannot.
+
+Phase 0 established that Godot's ragdoll cannot stand on one leg in ~100 configurations, which blocks
+every architecture needing physical locomotion in Jolt. Option B - move the character physics to
+MuJoCo - rests on a premise that had never been tested: **can MuJoCo do it with OUR rig?**
+
+### The model is generated from Godot, not hand-copied
+
+`mujoco_rig/build_mjcf.py` reads the `[PLANT]` dump the Godot driver already emits (mass, parent,
+world position and joint-anchor offset per body), the collider shapes from `ActiveRagdoll.tscn`, and
+the per-DOF limits from `dummy_rig.json`. Godot remains the single source of truth for the rig; there
+is no second hand-maintained copy to drift.
+
+Two conversion bugs were caught by checking rather than assuming:
+
+* **Joint axes were not passed through the frame map.** Positions were mapped by `to_mj` but axes were
+  written raw, so `x` became `(1,0,0)` instead of `(0,-1,0)`. Zero targets still produce the correct
+  rest pose, so `validate.py` passed and only commanded motion would have revealed it.
+* **The actuator model was wrong.** Godot drives `tau = kp(target - q) - kd*qd`; the first version put
+  `kd` on the JOINT and left the position actuator as a `kp`-only spring at up to 1800, which
+  oscillates the limb apart. MuJoCo expresses Godot's form directly as `kp` **and** `kv` on the
+  actuator.
+
+Validated against Godot before any capability claim:
+
+```
+                spawn pelvis   settled pelvis   feet      mass
+MuJoCo             0.8298          0.8193       0.0394   80.600 kg
+Godot              0.8298          ~0.817       0.0394   80.60  kg
+```
+
+### The gate
+
+Same primitive, same gate as Phase 0 (clearance >= 0.02 m, pelvis >= 0.78, held >= 3 s), and the same
+pelvis attitude controller both engines use (gain 600, damping 20, max torque 300 — without it the
+Godot body collapses outright, so a probe lacking one is not comparable).
+
+```
+engine            best clearance   held        outcome
+GODOT (~100 cfg)     0.0305 m      0.32 s      FAIL
+ISAAC (XPBD)         0.021-0.026 m sustained   pass
+MUJOCO               0.0575 m      8.35 s      PASS
+```
+
+Confirmed in detail over a 20 s run, because a large `HELD` number is exactly the trap that made a
+Godot topple score 97.9% upright:
+
+```
+over the held phase (17.5 s):
+  lifted foot clearance    min 0.0482   mean 0.0539
+  OTHER foot displacement  max 0.0150   (planted)
+  pelvis height            min 0.7875   mean 0.8036
+```
+
+**The dummy stands on one leg for 17.5 s in MuJoCo, on the rig converted from Godot's own dump.**
+Option B's physics premise holds.
+
+### One honest caveat, and the real remaining risk
+
+The stance foot **drifts laterally ~0.7 m over 18 s** (~0.04 m/s) while balanced. That is a slow slide,
+not a fall, and it does not affect the single-support result — but it is unexplained and should be
+understood before it is built on (friction, or a net lateral bias in the attitude controller).
+
+More importantly: **this validates the physics only.** B's actual risk was never whether MuJoCo can
+simulate a humanoid; it is the Godot<->MuJoCo integration - a GDExtension, transform sync, fixed
+timestep, and cost for ~50 NPCs. None of that is tested yet. What this result does is remove the one
+way B could have failed cheaply.
+
+## 2026-09-08 19:30 — THE DUMMY WALKS IN MUJOCO. Scripted, no RL.
+
+Phase 0 in MuJoCo gave one step's worth of capability (17.5 s of single-leg support). A gait is that
+alternating, so the next question needed no RL at all: a plain oscillator, lateral weight shift and
+leg swing in antiphase, with the same pelvis attitude controller both engines use.
+
+**First result was retracted.** At 20 s a cell read 47 strikes, 100% upright, 2.195 m with travel in
+every quarter. At 40 s the same cell is 70.9% upright, pelvis min 0.127, flight 33.9%: it survives the
+window and collapses after it. **Third time this exact confound has appeared on this project**, and
+the reason the 40 s gate exists. The sweep was re-run at 40 s with flight and single-support gates
+added, so hopping cannot pass as walking.
+
+### The result, 40 s, gates enforced
+
+`freq 0.6, shift 0.25, lift -0.4, knee 0.4`:
+
+```
+                        MUJOCO (scripted)      GODOT (best ever)
+upright                   100.0%  min 0.797     100%
+strikes                     96                   12
+single support              51.4%                 1.3%
+flight (both aloft)          0.0%                  -
+travel                    4.835 m (0.121 m/s)   0.154 m
+per quarter    0.962  1.492  1.366  1.759       0.117  0.044  0.001  0.001
+max clearance             0.1384 m              0.0629 m
+```
+
+**A sustained alternating walk: 4.835 m in 40 s, 100% upright, zero flight phase, travel in every
+quarter.** Godot's best is 0.154 m of marching in place with 1.3% single support. That is ~31x the
+travel with genuine single-leg support, on the SAME rig, converted from Godot's own dump, with no
+policy of any kind.
+
+### Honest limit: it is open loop and eventually falls
+
+At 90 s: 73.1% upright, per-quarter travel 3.040 / 2.871 / 1.685 / 0.098 - it walks for roughly the
+first 60 s and then falls. Expected for a fixed oscillator whose only feedback is the pelvis attitude
+controller; nothing corrects gait phase against accumulated drift. That is precisely the job of a
+learned or state-machine controller, and it is a much easier problem than the one Jolt posed, which
+was that no controller could exist because the body could not stand on one leg.
+
+### Where this leaves option B
+
+The physics premise is now settled twice over: MuJoCo holds single-leg support, and it walks. What
+remains untested is the part that always carried B's real risk - the Godot<->MuJoCo integration
+(GDExtension, transform sync, fixed timestep, cost for ~50 NPCs). Nothing about the bridge is
+validated yet.
+
+## 2026-09-08 19:50 — Option B de-risked on all three axes
+
+B's risk was never the physics. Three things had to hold, and all three now do.
+
+**1. Physics.** MuJoCo holds single-leg support on this rig (17.5 s, 5 cm clearance) and walks it
+(4.835 m in 40 s, 100% upright, 51.4% single support, 0% flight). Godot cannot do either.
+
+**2. Performance - the number that could have killed B.**
+
+```
+28.2 us per physics step, 51 dofs
+real-time factor 148x on ONE core
+at 240 Hz: 0.028 ms/character/frame -> 592 characters inside a 16.7 ms frame, single-threaded
+```
+
+A game needing ~50 NPCs spends roughly **1.4 ms/frame on one core**, and characters are independent
+so they parallelise. This is not a constraint.
+
+**3. Interop - and no GDExtension is needed.** The project is Godot Mono on net8.0 and `mujoco.dll`
+ships a C API, so P/Invoke reaches it from the existing C# assembly; no C++ toolchain, no godot-cpp.
+Proven end to end in `mujoco_rig/csharp_spike`:
+
+```
+model loaded from C#, mj_name2id("Pelvis") = 1
+20000 steps -> 29.1 us/step, 143x real time
+```
+
+**29.1 us from C# against 28.2 us from Python - P/Invoke adds no meaningful overhead.**
+
+One trap worth recording: reading `mjModel` fields at offsets 0/4/8 returned `nq=52, nv=0, nu=51`
+against the true `52/51/36` - plausible, and wrong. The head is **8-byte strided** (`nq` at 0, `nv` at
+8, `nu` at 16, `nbody` at 32). A production bridge must use generated bindings - the `mujoco` package
+ships an `introspect` module that emits struct layouts - rather than hand-computed offsets.
+
+### What remains for B
+
+Implementation, not risk: generated `mjModel`/`mjData` bindings, a Godot node that steps MuJoCo and
+syncs body transforms onto the existing skeleton, and a decision about which layer keeps the
+biomechanics (MuJoCo has native muscle actuators, so the Hill law and effort limits need not be lost).
+
+## 2026-09-08 20:15 — THE DUMMY WALKS IN GODOT, driven by MuJoCo
+
+The bridge is built and running end to end inside the engine.
+
+```
+[MujocoDummy] MuJoCo 3.8.1: 16 bodies, 36 actuators, 16 visual proxies
+[MujocoDummy] t=50.0s  strikes=42  upright=100.0%  single=20.8%  flight=0.0%  travel=6.062m
+[MujocoDummy] Godot/Jolt best ever: 12 strikes, 1.3% single support, 0.154 m
+```
+
+**6.062 m in 50 s at 100% uprightness with zero flight phase, rendered in Godot.** Against the Jolt
+ragdoll's best-ever 0.154 m of marching in place - 39x the travel and 16x the single support. The rate
+is 0.121 m/s, identical to the standalone Python harness, so the bridge reproduces the simulation
+rather than approximating it.
+
+### What was built
+
+```
+Source/RL/MuJoCo/MjInterop.cs    P/Invoke surface; no GDExtension, no C++ toolchain
+Source/RL/MuJoCo/MjLayout.cs     GENERATED struct offsets (mujoco_rig/gen_offsets.py)
+Source/RL/MuJoCo/MjBridge.cs     model + state, body poses converted into Godot's frame
+Source/RL/MuJoCo/MujocoDummy.cs  Godot node: steps MuJoCo, drives the gait, syncs transforms
+Scenes/RL/Isaac3/MuJoCo/MujocoWalk.tscn
+```
+
+The rig is generated from Godot's own `[PLANT]` dump and the visual proxies are built by reading that
+same generated model, so the skeleton and the shapes are each defined exactly once.
+
+### Three silent-failure bugs, all caught by measuring rather than assuming
+
+1. **Joint axes were not passed through the frame map** - written raw, so `x` became `(1,0,0)` instead
+   of `(0,-1,0)`. Zero targets still gave the correct rest pose, so the validation gate passed.
+2. **The actuator model was a kp-only spring.** Godot drives `tau = kp(target-q) - kd*qd`; `kd` had
+   been put on the JOINT, leaving a spring at up to 1800 that shakes the limb apart. MuJoCo expresses
+   Godot's form directly as `kp` **and** `kv` on the actuator.
+3. **`mjOBJ_ACTUATOR` was guessed as 8.** It is 19; 8 is `mjOBJ_LIGHT`. Every actuator lookup returned
+   -1, `SetControl` ignored it, and the first in-engine run reported a perfectly upright body with
+   **0 strikes and 0.002 m of travel** - a gait that appeared to run and did nothing. A failed lookup
+   now logs an error instead of failing silently.
+
+Struct offsets are generated for the same reason: reading `mjModel` at hand-computed 0/4/8 returned
+`nq=52, nv=0, nu=51` against the true `52/51/36`. `MjBridge` re-checks them at load and refuses to run
+if they disagree.
+
+### Status of option B
+
+Physics, performance and integration are all now demonstrated:
+
+```
+physics       17.5 s single-leg support; walks 4.8 m in 40 s standalone
+performance   28.2 us/step, 148x real time on ONE core; ~50 NPCs ~= 1.4 ms/frame
+integration   P/Invoke from the existing C# assembly, 29.1 us/step in-engine
+end to end    6.062 m walked in Godot at 100% upright
+```
+
+The gait is still an open-loop oscillator and falls at roughly 60 s, because nothing corrects phase
+drift. That is a controller's job, and unlike the Jolt situation a controller can now exist.
+
+## 2026-09-08 21:30 — STAND, PERTURB and WALK proven in MuJoCo, and running in Godot
+
+### In MuJoCo (Python reference, `mujoco_rig/prove2.py`)
+
+```
+STAND     120 s   100.0% upright, pelvis 0.819, drift 0.005 m                        PASS
+PERTURB   recovers 75 N.s (0.93 m/s of COM velocity); falls at 150 N.s               PASS
+WALK      180 s    99.2% upright, 413 strikes, 50.9% single support, 2.4% flight,
+                   21.389 m travelled                                                PASS
+```
+
+### In Godot, driven over the bridge
+
+```
+STAND     120 s   100.0% upright, 0.002 m drift                                      PASS
+PERTURB   120 s   100.0% upright; the 500 N / 150 ms shove moves it 0.045 m
+                  against 0.002 m standing, and it recovers                          PASS
+WALK       60 s    99.7% upright, 55 strikes, 23.1% single support, 0.0% flight,
+                   5.994 m                                                           PASS
+```
+
+Godot/Jolt, for comparison: 12 strikes, 1.3% single support, 0.154 m, and no configuration of ~100
+can stand on one leg at all.
+
+### The controller: damping, not servoing
+
+The open-loop oscillator falls at ~60 s, and the diagnosis was specific - a GROWING LATERAL
+OSCILLATION, with COM-minus-stance-midpoint staying inside +/-0.08 m for most of the run and then
+blowing out to -0.37/+0.45 before the body goes down.
+
+Two things had to be measured rather than assumed:
+
+* **Only the SYMMETRIC hip pair moves the centre of mass.** The antisymmetric pair that produces the
+  step moves it 0.001-0.006 m; both hips together move it 0.89 m at 0.25 rad. So the step is
+  antisymmetric and the balance term symmetric, superposed on the same two joints.
+* **Damping works, position-servoing does not.** Gain swept 0 / 0.05 / 0.10 / 0.30 rad per metre of
+  position error: every non-zero proportional gain destabilises the gait (0.05 fails at 60 s, 0.30 at
+  40 s) because it fights the lateral excursion the gait needs. Bleeding off lateral MOMENTUM instead
+  carries the walk from ~60 s to 180 s.
+
+### Two silent failures caught, and one open discrepancy
+
+**`godot_run.py --set` appends unknown keys to the END of the scene file**, which lands them inside
+the last node block rather than the root. `LateralDamping` was therefore being set on a
+DirectionalLight3D and ignored, and an A/B that returned bit-identical results looked like "the term
+is inert" when it actually meant "the flag never arrived". Declaring the property in the scene makes
+the in-place replace work. **Any sweep of a property the scene does not already declare is suspect.**
+
+**A one-step "push" is not a push.** 900 N for a single 4 ms step is 3.75 N.s, about 0.05 m/s on an
+80 kg body, and PERTURB initially reported numbers identical to STAND. Held for 150 ms it is a real
+shove.
+
+**Open:** the C# walk degrades between 60 s and 120 s (49.9% upright at 120 s) where the Python
+reference sustains 180 s at 99.2%. Both run the same gait, the same gains and the same balance torque,
+and the timestep is now read from the model rather than hardcoded, which did not account for it. Not
+yet explained; STAND and PERTURB are unaffected.
+
+## 2026-09-08 22:00 — PERTURB, properly characterised (and an earlier claim corrected)
+
+"It stayed upright" is not a perturbation metric. The Godot node now records **peak displacement,
+peak tilt and recovery time** around the shove, measured relative to the pose captured immediately
+before it.
+
+First, the force path was verified rather than assumed - if a 4000 N shove had left the body at 100%
+upright, the force would not have been reaching it at all:
+
+```
+PushForce   upright   travel     outcome
+     0 N    100.0%    0.002 m    baseline
+   500 N    100.0%    0.045 m    survives
+  1000 N     42.3%    1.183 m    knocked down
+  4000 N     41.5%    4.893 m    thrown
+```
+
+**A correction.** The first recovery test required the body to return within 2 cm of where it started,
+and reported `recovered=NEVER` for a 75 N.s shove that plainly survived upright - it simply ends up
+0.159 m displaced, which is what a shoved human does. Recovery is regaining POSTURE (tilt < 0.05 rad,
+pelvis > 0.78, COM velocity < 0.05 m/s), not returning to the original spot.
+
+With the corrected criterion the response is monotone, with a sharp cliff:
+
+```
+push          impulse    dV        peakOffset   peakTilt   recovered
+200 N x 0.15s   30 N.s   0.37 m/s    0.029 m      0.9 deg    0.65 s
+400 N           60 N.s   0.74 m/s    0.100 m      3.2 deg    0.98 s
+500 N           75 N.s   0.93 m/s    0.159 m      5.7 deg    1.31 s
+600 N           90 N.s   1.12 m/s    0.263 m     10.9 deg    1.79 s
+--- cliff ---
+700 N          105 N.s   1.30 m/s    1.154 m     81.3 deg    NEVER
+800 N          120 N.s   1.49 m/s    1.091 m     77.4 deg    NEVER
+```
+
+**PERTURB recovers up to 90 N.s (1.12 m/s of induced COM velocity) and fails at 105 N.s.** Displacement,
+tilt and settling time all grow smoothly up to that point, which is what a working balance response
+looks like; beyond it the body goes over at ~80 degrees of tilt.
+
+For scale, 90 N.s on an 80.6 kg body is a firm two-handed shove. The recovery is ankle/hip strategy
+only - the controller never takes a protective step, so this threshold is what balance alone buys and
+a stepping reflex would raise it.
+
+## 2026-09-08 22:40 — PERTURB, corrected: the real test is a BALL, not a force on the pelvis
+
+The project's PERTURB task is `BallGun`, not an abstract impulse. Godot fires the SMALL ball on every
+shot (`SmallBallProbability = 1.0`): **3.0 kg, radius 0.06 m, 6.0 m/s +/- 0.25, restitution 0.25,
+spawned 2.0 m out, aimed at one of twelve target bones**. Impulse is `m*(v - v_reflected)`, so
+1.25 * 3.0 * 6.0 = **22.5 N.s**, not the 18 N.s momentum alone suggests.
+
+**The earlier PERTURB result was measuring a different experiment.** A force applied at the pelvis is
+a force through the centre of mass; a ball hits a LIMB, and the torque `r x F` it adds is what
+`perturb_env_cfg` calls "most of what makes a shove hard to reject". The pelvis push survived 90 N.s;
+the ball topples the body at 16 N.s.
+
+A real ball was added to the model (free body, `solref="-8000 -30"`) and a `BallGun` written against
+Godot's parameters.
+
+### A physical bug the numbers exposed
+
+The first per-bone run reported **0 of 12 survived, with peak tilt 87.9 deg and pelvis 0.127 for every
+single bone** - identical to three significant figures across a 7.7 to 30.0 N.s range of delivered
+impulse. A 4x range of input cannot produce an identical output, and the tell was that identity.
+
+Cause: the ball was PARKED at `z = -5`, beneath an infinite floor plane, i.e. penetrating the ground
+by five metres. MuJoCo ejects it violently, and that - not the shot - was knocking the body over.
+Parked at `(40, 40, 2)` instead. The projectile is also excluded from the body's own centre of mass;
+including a 3 kg free body dragged the COM the balance term regulates, and while falling it moved the
+reported COM to z = 53.
+
+### With that fixed
+
+```
+target bone   delivered   peak tilt   verdict        target bone   delivered  peak tilt  verdict
+       Head     25.0 N.s      3.5 deg  SURVIVES       Forearm_L     11.7 N.s    0.8 deg  SURVIVES
+      Chest     24.7          2.2      SURVIVES      UpperArm_R     15.3        1.2      SURVIVES
+      Spine     26.4          1.4      SURVIVES       Forearm_R     11.7        0.8      SURVIVES
+     Pelvis     28.0          1.0      SURVIVES         Thigh_L     32.5        1.8      SURVIVES
+ UpperArm_L     20.0          1.0      SURVIVES          Shin_L     26.2        0.8      SURVIVES
+                                                        Thigh_R     31.7        1.9      SURVIVES
+                                                         Shin_R     25.3        0.8      SURVIVES
+```
+
+**12 of 12 target bones survive**, and the response is now physically coherent: tilt scales with the
+height of the impact (head 3.5 deg, chest 2.2, shins 0.8), which is what a moment arm does. Delivered
+impulse spans 11.7-32.5 N.s against Godot's 22.5 N.s head-on - glancing hits deliver less, square ones
+more.
+
+Sustained fire, one ball every 6 s:
+
+```
+STANDING under 6 balls   mean 15.3 N.s   peak tilt  8.7 deg   pelvis min 0.815   SURVIVED
+WALKING  under 6 balls   mean 16.3 N.s   peak tilt 85.9 deg   pelvis min 0.122   FELL
+```
+
+Standing absorbs repeated ball strikes. **Walking under fire does not**, which is expected and worth
+stating plainly: the gait is a fixed oscillator with no reactive stepping, so a hit that displaces it
+has nothing to catch it. Ankle and hip strategy alone is what is being measured; a protective step is
+the missing behaviour.
+
+## 2026-09-08 23:10 — The real BallGun runs in Godot
+
+`MjBallGun` fires Godot's own perturbation test inside MuJoCo, from the Godot side, with the ball's
+qpos/qvel addresses read from `jnt_qposadr` / `jnt_dofadr` rather than assuming the projectile is the
+last joint - true today, and silently wrong the first time the rig gains a body.
+
+```
+ball 1 -> Shin_L      24.3 N.s        ball 4 -> Shin_L      25.8 N.s
+ball 2 -> Forearm_L   11.8 N.s        ball 5 -> Shin_L      24.0 N.s
+ball 3 -> Chest       30.4 N.s        ball 6 -> Forearm_L   11.8 N.s
+
+45 s, 100.0% upright, peak tilt 3.5 deg, pelvis 0.819, drift 0.012 m   SURVIVED
+```
+
+Delivered impulses bracket Godot's 22.5 N.s head-on figure, and the body absorbs six of them without
+losing posture.
+
+Two things the projectile forced, both worth keeping: it is excluded from the body's centre of mass
+(3 kg of free body otherwise drags the quantity the balance term regulates) and from the reported
+total mass, which had been printing 83.6 kg against the rig's 80.6.
+
+### Status of the three behaviours, in Godot
+
+```
+STAND     120 s   100.0% upright, 0.002 m drift                                   PASS
+PERTURB    45 s   100.0% upright, 6 balls, 11.8-30.4 N.s, peak tilt 3.5 deg       PASS
+WALK       60 s    99.7% upright, 55 strikes, 0.0% flight, 5.994 m                PASS
+```
+
+Known limits, stated rather than buried: the walk degrades between 60 s and 120 s in C# where the
+Python reference sustains 180 s (unexplained), and walking UNDER ball fire falls - the gait is a fixed
+oscillator with no reactive stepping, so a displacing hit has nothing to catch it.
+
+## 2026-09-08 23:40 — Three loadable scenes, each with its own environment
+
+The scenes were unusable by hand: no ground at all (the dummy rendered in a void), a fixed camera the
+walk left within seconds, and an auto-quit.
+
+```
+Scenes/RL/Isaac3/MuJoCo/MujocoStand.tscn     10 m pad,   dummy.xml
+Scenes/RL/Isaac3/MuJoCo/MujocoPerturb.tscn   16 m pad,   dummy_ball.xml   BallGun on
+Scenes/RL/Isaac3/MuJoCo/MujocoWalk.tscn     120 m field, dummy.xml
+```
+
+Each carries a ground mesh, a camera that follows the pelvis, and `AutoQuitSeconds = 0` so it runs
+until stopped.
+
+### The projectile is not free, so there are two models
+
+`build_mjcf.py` now emits `dummy.xml` and `dummy_ball.xml`. A 3 kg free body in the model shortens the
+walk's stable horizon **even when parked and excluded from the centre of mass**: measured, the Python
+walk fell from 180 s to about 60 s, and the C# walk from 99.7% upright at 60 s to 65.7% at 45 s,
+purely from the ball existing. STAND and WALK load the clean rig; only PERTURB pays for the ball.
+
+That regression is worth remembering as a class: adding an unused body to a model is not free, and it
+showed up as a gait failure rather than as anything pointing at the projectile.
+
+### Verified, 60 s each, in Godot
+
+```
+STAND     100.0% upright, 0.002 m drift
+PERTURB   100.0% upright, 8 balls, peak tilt 3.5 deg, pelvis 0.819        SURVIVED
+WALK       99.7% upright, 55 strikes, 0.0% flight, 5.994 m
+```
+
+## 2026-09-09 00:10 — The rendered dummy looked wrong. The rig was right; the DRAWING was wrong.
+
+Loading the scenes by hand showed a jumble of scattered parts rather than a humanoid, which is exactly
+the kind of thing that should stop a result being trusted.
+
+**Checked before reassuring.** Godot's colliders all sit at identity relative to their body, so geom
+placement was not the issue, and every body position matches Godot to **0.0000 m** across all 16
+bones at the spawn pose. The physics rig is correct and the measured results stand.
+
+The fault was in the visual proxies only: every capsule was rotated 90 degrees. A MuJoCo capsule runs
+along its local Z, and under the basis change `R_godot = M^T R_mj M` a local vector maps as `M^T v`,
+so `M^T(0,0,1) = (0,1,0)` - Godot's Y, which is already the axis `CapsuleMesh` uses. The rotation was
+unnecessary and laid every limb on its side. Removed; the limb axes now check out against the bone
+directions:
+
+```
+Thigh_L  -> Shin_L      (+0.00,-1.00,+0.00)   vertical
+Shin_L   -> Foot_L      (+0.00,-0.99,-0.14)   vertical
+UpperArm_L -> Forearm_L (+0.00,-1.00,-0.00)   vertical
+Spine    -> Chest       (+0.00,+1.00,-0.00)   vertical
+```
+
+Worth stating plainly: a wrong visual is not a harmless cosmetic bug. It is indistinguishable from a
+wrong rig until someone checks, and it correctly destroyed confidence in results that were in fact
+sound.
+
+## 2026-09-09 01:00 — Passive joints were free, and the balance assist is doing the perturb recovery
+
+### The head sank into the chest: passive joints had no gains
+
+`dummy_rig.json` marks Head and Hand joints `actuated=False` but still gives them stiffness 120 /
+damping 12, and Godot holds them at rest through `NeutraliseUncommandedBones`. The generator emitted
+them as FREE hinges: a 5 kg head on a frictionless pivot, which gravity rotated down until it sank
+into the chest, since MuJoCo disables parent-child contact. Passive joints now carry their authored
+spring, and the head-chest gap holds at 0.2900 m indefinitely.
+
+**It was not cosmetic.** Flopping head and hands were disturbing the gait: with them held, the walk
+went from 5.994 m to **8.412 m at 100% upright over 60 s**, and PERTURB from 8 to 15.8 deg peak tilt
+with the heavier ball while still surviving.
+
+### The balance assist, measured
+
+The pelvis attitude controller writes an EXTERNAL torque onto the pelvis via `xfrc_applied`. Nothing
+in the body produces it. Both engines carry it (`balance_assist`, gain 600 / damping 20 / max 300),
+but it is worth knowing how much of each result it is responsible for:
+
+```
+condition                     upright   pelvisMin   assist mean   peak
+STANDING, with assist          100.0%     0.816       0.5 N.m     0.8 N.m
+STANDING, assist removed       100.0%     0.816          -           -
+BALL IMPACTS, with assist      100.0%     0.815       8.7 N.m    90.7 N.m
+BALL IMPACTS, assist removed    33.4%     0.108          -           -
+```
+
+**Standing is genuine** - the legs hold the body and the assist contributes essentially nothing.
+**The perturbation recovery is not**: it is carried by up to 90.7 N.m of external torque, and without
+it the body falls. The legs never step to catch themselves, because nothing asks them to.
+
+That is the honest reading of the PERTURB pass, and it is the clearest possible argument for training:
+a policy on this plant with the assist removed or penalised has to recover using ankles, hips and a
+protective step, which is the behaviour the assist is currently standing in for.
+
+## 2026-09-09 01:40 — RL on the MuJoCo plant: training and runtime are finally the same engine
+
+The first training run on this project where the plant the policy learns on IS the plant it ships on.
+Every previous attempt lost the policy crossing an engine boundary; there is no boundary here.
+
+**The task is defined by what it removes.** The pelvis balance assist is absent. It was measured
+carrying the perturbation recovery - up to 90.7 N.m of external torque written onto the pelvis, with
+the body falling to 33.4% upright without it - so a policy here has to keep its feet under its centre
+of mass instead.
+
+```
+mujoco_rig/rl/perturb_env.py   vectorised MuJoCo env, ball firing, NO assist
+mujoco_rig/rl/ppo.py           self-contained clipped PPO with GAE
+mujoco_rig/rl/train.py         training loop
+```
+
+Observation is 120 floats: projected gravity, pelvis linear and angular velocity, height, 36 joint
+positions and velocities, two foot contacts, and the previous action. Reward is upright + height +
+low COM speed + **COM over the feet** (which is what a protective step achieves) minus effort and
+jerk, with a fall penalty.
+
+### Two things that had to be fixed before it would run
+
+**The action authority was too high for the random phase.** An untrained Gaussian policy commands
+every joint to a random extreme at once, and at the authored gains (kp up to 1800) that drove MuJoCo
+to `Nan, Inf or huge value in QACC` before any learning happened. A quarter of the joint range is
+ample for balance and keeps the random phase numerically sane.
+
+**rsl_rl was abandoned for this task.** The project's own stack was tried first and cost several
+rounds on plumbing rather than physics: this build takes `actor`/`critic` blocks instead of `policy`,
+rejects resolved defaults passed back as constructor arguments, has a NaN guard that cannot read a
+TensorDict, and a normaliser calling `.var(unbiased=...)` on one. The replacement is ~150 lines of
+standard clipped PPO, which is worth the trade because a surprising result can now be attributed to
+the environment rather than to an unfamiliar framework.
+
+Sanity checks before training: observations finite, and a zero-action rollout puts 8 of 8 envs on the
+floor - a task nothing can fail teaches nothing.
+
+### The first two runs were teaching the policy to survive PPO
+
+Two runs failed before one worked, and both failed for the same reason in different disguises.
+
+**Run 1 destroyed a working controller.** After 475 iterations the policy stood 27.9% of a QUIET
+40 s. Doing nothing scores 100% there - an all-zero action holds every joint at its rest pose
+through position actuators at the authored kp of up to 1800, and that alone stands indefinitely.
+The trained policy was worse than the absence of a policy, in both conditions:
+
+| condition | upright, 40 s | fell | median fall |
+|---|---|---|---|
+| zero action, quiet | **100.0 %** | 0/8 | never |
+| zero action, under fire | **32.3 %** | 8/8 | 11.7 s |
+| run-1 policy it-475, quiet | 27.9 % | 7/8 | 3.7 s |
+| run-1 policy it-475, under fire | 17.7 % | 8/8 | 3.7 s |
+
+The 32.3% independently reproduces the 33.4% measured when the pelvis assist was removed, so the
+task is well posed: the ball topples the unaided body every time. The starting point was the bug.
+A randomly initialised actor throws away a controller that already works, so the last actor layer is
+now zeroed - the untrained policy IS the rest-pose hold, verified at 100% quiet - and improvement is
+measured against something real.
+
+**Run 2 fell before the ball arrived.** Starting from the baseline lifted the opening return from
+184 to 446, and the body still hit the floor 1.7 s into every episode. The first ball fires at
+2-4 s. Nothing was hitting it: the exploration noise was.
+
+So the tolerated noise was measured instead of guessed a third time (`rl/probe_noise.py`). What
+governs survival is the PRODUCT of policy std and action authority - the size of the random jump in
+the joint target, which a stiff position actuator answers immediately:
+
+| std x authority | 0.0375 | 0.0250 | 0.0125 | 0.0100 | 0.0075 | 0.0050 |
+|---|---|---|---|---|---|---|
+| time to fall | 1.57 s | 2.33 s | 6.96 s | 10.81 s | never | never |
+| envs fallen (of 6) | 6 | 6 | 6 | 5 | 0 | 0 |
+
+The threshold is sharp at about 0.008. Authority stays at 0.25 because a protective step needs the
+range, so std drops 0.5 -> 0.03. The textbook 0.5 was 47x past what this plant tolerates.
+
+**Result.** Run 3 reached episode length 491 of 1199 steps in 65 iterations; run 1 needed 490
+iterations to reach 122. Same reward, same environment, same network - the entire difference is
+starting at the working controller and exploring inside what the body can absorb.
+
+*Next lever if this plateaus:* std per joint rather than one scalar. The destabilising joints are
+the stiff ones (kp 1800), while the arms are harmless at any noise level, so a single scalar is
+throttling arm exploration to protect the legs.
+
+### Run 3 flatlined because the task was impossible, not because PPO was broken
+
+Run 3 held the baseline and stopped: return 2506 at iteration 65, 2667 at 375, and a 40 s score of
+32.9% upright against the unaided plant's 32.3%. It had learned not to break the rest-pose hold and
+nothing else. A flat return is what a WORKING algorithm does on an unwinnable task, so the task got
+audited before the algorithm did.
+
+**Two hypotheses died on measurement.**
+
+*Slowing the policy down does nothing.* The plant tolerates the trained policy using its full 0.25
+authority, so the intolerance looked like it might be to high-FREQUENCY target jumps. It is not - at
+std 0.10 the time to fall moves only 2.33 s (60 Hz) -> 2.76 (30 Hz) -> 3.03 (20 Hz). What the body
+rejects is perturbation magnitude spread across 36 joints at once, essentially regardless of rate.
+
+*The ball is not too heavy.* `build_mjcf.py` records that the projectile was raised from Godot's real
+3.0 kg to 10 kg so the hit would read on screen, and that display decision had become the training
+perturbation. **The first mass sweep is RETRACTED**: it wrote `model.body_mass` on a live `MjModel`,
+which leaves MuJoCo's precomputed `body_invweight0` / `dof_invweight0` constants stale, and those
+scale the contact solver. It reported a 0.5 kg ball as more destructive than a 10 kg one - the same
+inverted-nonsense signature as the ball parked under the floor. Recompiling the MJCF per mass gives
+a monotonic answer:
+
+| single impact, no policy | 0.5 kg | 1.0 | 2.0 | 3.0 | 6.0 | 10.0 |
+|---|---|---|---|---|---|---|
+| survived | 100 % | 100 % | 100 % | 100 % | 75 % | 75 % |
+| max tilt | 0.3d | 0.5d | 0.7d | 1.0d | 23.5d | 24.3d |
+
+Godot's real 3 kg barely registers at 1.0 degrees, which independently confirms `build_mjcf`'s own
+note of 3.5 degrees.
+
+**What was actually wrong was the firing rate.** One 10 kg impact is survivable 75% of the time with
+no policy at all, yet the same ball every 2-4 s topples 8/8 in 6.8 s: the next ball lands before the
+recovery finishes, so no controller can complete one. Training was scoring policies on a task where
+every policy loses.
+
+The rate moved to 4-7 s. Note what this does and does not change: the unaided 40 s score barely
+moves (32.3% -> 30.1%, still 0/12 surviving), because ~7 hits at 75% each compound to 13%. What
+changes is the CEILING. Each hit is now individually recoverable, so raising per-hit survival is
+worth something, and 0.99^7 is 93% where 0.75^7 is 13%. That headroom is the whole training signal.
+
+**Reference to beat, unaided, 40 s, balls every 4-7 s: 30.1% upright, 0/12 survive, median fall
+12.8 s.** Quiet-room control: 100% upright, 12/12, over the full 40 s.
+
+### Runs 3 and 4 both converged to the rest-pose hold, and a curriculum is why run 5 did not
+
+Fixing the firing rate did not, on its own, produce a recovery. Run 4 scored **29.9% upright against
+the unaided plant's 30.1%** after 550 iterations - the same non-result as run 3, at a difficulty
+that is now winnable. Both runs found the same local optimum: hold the rest pose, correct gently,
+never step.
+
+The reason is arithmetic, and both halves of it are measured:
+
+- A protective step is a large coordinated leg motion.
+- Exploration is std 0.03 at 0.25 authority, which is 0.75% of each joint's range. Random
+  perturbations that small will not assemble one in any amount of wall-clock time.
+- Larger uniform noise cannot be used, because `probe_noise.py` shows it topples the unaided body
+  by itself - at std 0.10 the body is down in 2.3 s, before any ball arrives.
+
+A behaviour too large for the exploration to find has to be **grown** rather than discovered, which
+is what a curriculum is for: keep every increment inside the small noise ball around the policy you
+already have.
+
+**Impulse is m*dv, so ball SPEED buys the same difficulty ramp as ball mass** - and with no model
+recompile, which matters here because writing `body_mass` on a live model is exactly the mistake
+that produced the retracted mass sweep. Speed starts at 3.0 m/s (30 N.s, just past where the
+unaided body begins to fail) and is promoted 15% each time the policy survives 75% of an episode,
+up to the 6.0 m/s the Godot scene fires. The stage is saved beside the weights, so a checkpoint can
+never be scored at a difficulty it never trained at.
+
+First effect, immediately: the first promotion landed at iteration 50, and episode length went to
+932 of 1199 steps - past the ~780 ceiling that runs 3 and 4 both stalled against.
+
+**Correction: the first curriculum was decorative.** Promoting on "75% of an episode survived" with
+no dwell time went 3.0 -> 6.0 m/s in 150 iterations (2.2 minutes), and episode length then fell
+straight back to 733 - exactly the plateau the curriculum existed to escape. Promotion was trivial
+at low speed because the rest-pose hold already survives a gentle ball, so the policy was handed
+every stage before it had learned anything at that stage.
+
+The gate now needs near-perfect survival (93% of the episode, over 100 episodes) AND a minimum
+dwell of 200 iterations at each difficulty. At 3.0 m/s the policy reached 1102 of 1199 steps within
+105 iterations, so the dwell - not the score - is what holds it there long enough to consolidate.
+
+*Next lever if this plateaus:* the reward's `still` term, `exp(-2 * |com_velocity|)` at weight 1.0,
+pays the body for NOT moving its centre of mass - which is precisely what a protective step has to
+do. It is a headwind on the target behaviour and was left alone here only so that this run's result
+is attributable to the curriculum alone.
+
+## 2026-09-09 - Training moves to the GPU, and the honest accounting of what that bought
+
+The MuJoCo track had ended up on **one CPU core of eight, with the 4080 Super at 0%** - which is the
+opposite of why this project went to Isaac in the first place. `perturb_env.py` steps every `MjData`
+sequentially in a Python loop, so core count never mattered.
+
+**`mujoco_warp` 3.8.1 was already installed** in `env_isaaclab3`, having arrived as a Newton
+dependency, and it matches `mujoco` 3.8.1 exactly. It is MuJoCo's CUDA backend - same MJCF, same
+model, `nworld` as a batch dimension. `put_model` accepted our rig unchanged: `implicitfast`,
+negative `solref`, box/capsule/sphere/plane all supported. **No new dependency, no MJCF edit.**
+
+(MJX was not used. `jax[cuda]` has no Windows wheels, and MuJoCo Warp is the successor GPU backend.)
+
+### Throughput, measured on the real rig
+
+| backend | envs | policy SPS | physics steps/s | realtime |
+|---|---|---|---|---|
+| cpu | 96 | 2,693 | 10,773 | 45x |
+| warp | 1,024 | 20,917 | 83,668 | 349x |
+| warp | 4,096 | 56,786 | 227,146 | 946x |
+| **warp** | **8,192** | **71,522** | **286,089** | **1,192x** |
+
+26.6x, at 1.9 GiB of 16 GB VRAM. The network follows the sim to the GPU because at the resulting
+batch a PPO pass is **346 ms on CPU against 7.9 ms on CUDA**.
+
+### The part that is NOT a 26x win
+
+**26x throughput is not 26x learning, and the first GPU runs proved it.** At 4,096 envs x 24 steps
+the policy reached episode length 897 in 1.6 min, where the 96-env CPU run reached 1,102 in 1.5 min
+- more samples, no faster. The reason is that PPO moves the policy only as far as its KL cap allows,
+so a 42x larger batch bought a cleaner gradient and the *same number of updates*. Cutting the
+rollout to 8 steps (65,536 samples per update, still 28x the CPU batch) roughly tripled the update
+rate and closed most of the gap: 1,084 at 3.0 min.
+
+So the GPU's value is not early-stage speed, where 96 envs already give enough signal on an easy
+task. It is total experience, which is what the CPU track ran out of - run v6 spent 55 minutes and
+stalled at ball speed 3.63 m/s of a 6.0 target. That is the comparison that decides this, and it is
+the one being run.
+
+### Two silent traps found on the way in
+
+**Constraint buffers: two are per-world and one is aggregate.** Both mistakes are quiet.
+`njmax` and `nconmax` are per world; `naconmax` is the total across all worlds. Sizing `njmax` as a
+total tried to allocate a 15 GiB dense Jacobian at 1,024 envs and failed loudly - the lucky case.
+Sizing `naconmax` per-world instead did not fail at all: at 256 worlds the engine wanted 1,020 while
+512 was set, so contacts across the batch were being dropped with nothing but a line on stderr from
+inside a CUDA kernel to say so. `assert_buffers_ok()` now checks the real peaks.
+
+**float32 vs float64, and the control run that makes it interpretable.** `mujoco_warp` is float32
+throughout, with no float64 option; MuJoCo's C engine is float64. `parity_gpu.py` replays one
+identical control sequence into both:
+
+| t (s) | CPU vs CPU, 1e-9 nudge | CPU vs GPU |
+|---|---|---|
+| 0.50 | 1.0e-09, 0.0000 deg | 2.0e-06, 0.0069 deg |
+| 1.49 | 1.0e-09, 0.0000 deg | 2.3e-05, 0.0000 deg |
+| 2.48 | 1.0e-09, 0.0000 deg | 1.3e-02, 0.1384 deg |
+
+The control is the point. Two CPU trajectories started a nanometre apart do **not** diverge at all
+over 2.5 s, so this system is not chaotic here and the GPU departure cannot be excused as chaos.
+It is the engine, it starts at float32 epsilon, and it amplifies through contact.
+
+**Why that is nevertheless safe, unlike Isaac.** Isaac trained on PhysX/XPBD and shipped on Jolt -
+different solver classes, with no cheap way to score on the deployment engine. Here the deployment
+engine is MuJoCo CPU, Godot drives it by P/Invoke, and scoring on it is a two-minute run that
+already exists. So the rule is structural rather than hopeful:
+
+> **Train on GPU. Score and ship on CPU MuJoCo. A checkpoint is never judged by the engine that
+> trained it.**
+
+`eval.py` is unchanged and CPU-only, which is the whole point. `test_env_parity.py` additionally
+asserts the two environment implementations define the same task - they agree on observations to
+**1.49e-08** and rewards to **6.0e-07**, so training and scoring are optimising the same thing.
+
+Also corrected while measuring: the rig is **80.60 kg**, not the 41 kg written in `probe_ball.py`.
+
+## 2026-09-09 (overnight) - closing the loop: a policy that runs IN Godot
+
+### The Walk scene was never asked a question it could answer
+
+`MujocoDummy.DriveGait` is a lateral weight shift plus a half-cycle leg lift. It has no push-off, no
+ankle control, and **no heading input at all**, so "walk in a straight line" and "turn left" are not
+requests it can accept - it travels by shifting weight and dragging. That is the whole reason it
+looks wrong, and no tuning of the oscillator fixes it.
+
+Checked the feet while there, since they were the reported suspect, and they are **correct**:
+`to_mj((0.12, 0.08, 0.22))` gives half-extents (0.11, 0.06, 0.04), so the foot's long axis is MuJoCo
++X - which is also forward, `to_mj` of Godot's -Z. The ankle sits 3 cm behind the foot centre, so
+14 cm of toe and 8 cm of heel. The proxy mesh mapping is right too. What is wrong is the controller,
+not the geometry.
+
+Joint ranges settle which axis is which, and are worth writing down: `Thigh_rx` spans **2.60 rad**
+(hip flexion, the walking axis), `Shin_rx` **2.70** (knee), while `Thigh_rz` spans 1.00 (abduction).
+
+### A commanded walk, trained
+
+`walk_env_warp.py` (GPU) and `walk_env.py` (CPU scorer), subclassing the perturb envs so the model,
+buffers, stepping and resets are not written a third time. The observation gains **three channels -
+forward speed, lateral speed, turn rate, in the pelvis frame** - which is what makes straight-line
+walking and turning the same policy instead of two scripts. A tenth of the worlds are commanded to
+stand, because a walk that cannot stop is not controllable from Godot.
+
+**First attempt produced a textbook statue**: 100% upright, 0/6 falls, and vx **+0.002** against a
+commanded 0.60, with zero steps and zero single support. The reward was at fault, not the algorithm.
+At the original `exp(-err/0.25)` simply standing still already collects 24% of the tracking reward,
+and with a flat survival bonus on top there was more value in never risking the -10 for falling than
+in walking. Sharpening to `/0.15` drops standing to 9%, the tracking weights now dominate posture
+(4.0 and 2.0 against 0.5 and 0.3), and the flat bonus is gone - it paid the body for existing.
+
+### Perturb: the reward was fighting the behaviour it asked for
+
+The `still` term, `exp(-2*|com_velocity|)` at weight 1.0, pays the body for NOT moving its centre of
+mass - which is exactly what a protective step must do. It is demoted to 0.2 (jitter damping only)
+and `support` (COM over the feet, which is what a step achieves) is promoted from 1.5 to **3.0**.
+
+Ball mass raised 10 kg -> **15 kg** as asked. The curriculum start drops 3.0 -> 2.0 m/s to keep the
+opening impulse at the same 30 N.s, which is where the unaided body first begins to fail. New
+reference, no policy, 40 s, balls every 4-7 s at 6 m/s (90 N.s): **29.1% upright, 0/12 surviving,
+median fall 11.8 s** - barely worse than the 10 kg ball's 30.1%, because the body already fails
+there.
+
+### The loop closes in Godot
+
+`Source/RL/MuJoCo/MjPolicyDriver.cs` runs a trained ONNX policy against the MuJoCo body through the
+existing P/Invoke bridge, replacing both the scripted gait and the pelvis balance assist.
+
+**Nothing about the contract is hard-coded.** Observation layout, joint order, action scale and
+joint limits are read from the `*.contract.json` that `export_onnx.py` generates from the training
+environment itself - the Isaac track's hand-written contract was wrong in four separate ways and
+every one was silent. Two new bridge readers were needed, `JointPosition` and `JointVelocity`, and
+they index `qpos`/`qvel` through `jnt_qposadr`/`jnt_dofadr` respectively - those differ by one slot
+because a free joint takes seven qpos entries but only six DOFs.
+
+`PolicyPath` and `WalkCommand` are **declared in all three scene files**, not passed as unknown keys:
+`godot_run.py --set` appends undeclared properties to the end of the file, where they land on
+whatever node is last, and that once made an entire A/B return bit-identical results.
+
+The proxy head now carries the same two eyes and mouth as the authored ragdoll. Cosmetic, but it
+gives the dummy a visible front - which is what "the feet point the wrong way" needs to be checked
+against.
+
+## 2026-09-09 17:00 — The plant had no limp state: position actuators replaced with torque
+
+The dummy was stiff with a brain and a rag without one, with nothing between. That was never a
+training problem. Measured over one 6 s backward fall, zero command throughout:
+
+| | mean joint bend | max bend | pelvis z |
+|---|---|---|---|
+| actuators on, commanding **zero** | **1.8°** | 17.9° | 0.139 m |
+| no actuators (`dummy_limp.xml`) | **38.9°** | 172.2° | 0.166 m |
+
+The body flexed by under two degrees on average while it toppled, because a `position` actuator is a
+spring to a target pose: its zero command means *hold the rest pose*, and `kp` 533 N·m/rad at the
+hip answers 10° of bend with **93 N·m** — half a human hip's entire capacity — spent on holding
+still. Peak actuator force during that passive fall was 118.7 N·m. **There is no setting of a
+position actuator that means "no muscle."** That single fact explains "no brain means collapse, brain
+means stiff", and no amount of training could have fixed it.
+
+### The two-layer model, generalised from the neck
+
+| layer | what it is | value |
+|---|---|---|
+| ligament | passive joint spring + damping, always present | `LIGAMENT` = 5% of that joint's peak torque per rad, damping 5% of that |
+| muscle | `motor` actuator; the policy's output IS newton-metres | `forcerange = ±HUMAN_TORQUE` |
+
+Zero muscle is now zero torque, so the unpowered body matches the ragdoll it should be: mean joint
+bend **24.3° against `dummy_limp`'s 23.3°**, pelvis settling at 0.165 vs 0.164 m. "Dead", "stunned"
+and "alive" stop being separate models and become a scale on the policy's output.
+
+5% was measured, not guessed: at 10% the plank starts returning, at 0% the joints are loose.
+Standing costs almost nothing to hold — **1.5 N·m at the hip, 3.9 at the knee** — so the muscle layer
+is for corrections, not for fighting gravity, which is what makes torque control viable here.
+
+### Three defects found while measuring, all independent
+
+**1. The rest pose was self-intersecting.** At `qpos0` the forearms sat **5.5 cm inside the thighs**,
+the hands 4.4 cm, the forearms 1.1 cm inside the pelvis — 11 contacts, costing **331.8 N·m at each
+shoulder** (human peak: 90) just to hold. Every episode of every run so far started there. 8° of
+abduction clears it by 3–5 cm. It cannot be done with the joint's `ref`, which relabels the joint
+value without moving anything, so it is a `rest` keyframe that both environments and
+`MjBridge.ResetData` now reset to, with `springref` on the same joints so the ligament rests in the
+cleared pose.
+
+**2. The height reward paid the policy to crouch.** `_reward` targeted pelvis z = 0.82 m from a body
+that no longer exists; this one rests at **0.917 m**. Standing correctly collected 0.685 of the
+height reward instead of 1.0, and the gradient pointed 10 cm downward. Now read from the model, in
+all four envs, along with the fall threshold and `eval`'s upright height.
+
+**3. The torque plant is numerically unstable without armature.** The first torque run spent its
+whole 15 minutes printing `nefc overflow - please increase njmax to 1011` and then went NaN. Two
+causes: a body that genuinely crumples generates far more constraints than one that falls as a plank
+(peak nefc 117 and 27 contacts, against buffers sized 128/32 for the old plant), and the joints had
+**zero armature**. Measured over 10 random-torque rollouts of 20 s:
+
+| armature | divergences | peak nefc |
+|---|---|---|
+| 0.0 | **10 of 10** | 622 |
+| 0.01 | 0 | 105 |
+| **0.02** | **0** | 117 |
+
+MuJoCo silently resets the state when `qacc` goes bad, so a trainer would have been learning from
+garbage without any error. `JOINT_ARMATURE = 0.02` on every hinge but the head, whose neck was tuned
+without it; `NJMAX` 128 → 256, contacts 32 → 64.
+
+### What this cost and what it did not
+
+`authority` becomes a fraction of peak torque rather than of joint range, and it has to be far
+higher — **0.6, not 0.25** — because the policy now supplies all of the muscle. The observation
+layout, the 105/30 widths, `POLICY_EXCLUDE`, the neck (still a position servo, deliberately: it is
+outside the action space and its job is muscle tone) and the body's geometry are all unchanged, and
+both parity tests still pass at 1.49e-08.
+
+The unpowered baseline the next run has to beat: **57.4 steps, 0.96 s**.
+
+## 2026-09-09 19:30 — Housekeeping pass, and two more defects it turned up
+
+A review of the uncommitted MuJoCo work: dead artefacts removed, docs re-synced, and the two largest
+single-responsibility violations split up. Two of the findings were real defects, not tidiness.
+
+### The body spawned 1.09 cm in the air
+
+`build_mjcf`'s final normalisation scales the rig about the origin to make standing height exact.
+A sole that is not already at y = 0 is therefore scaled AWAY from it, and this one sat 1.09 cm up -
+so the dummy dropped a centimetre at the start of every episode, adding an impact the policy had to
+absorb before it could do anything, in every run ever recorded. Fixed by translating the finished
+body so the soles rest on the floor, and `validate.py` now asserts it.
+
+Re-scored on the corrected model, the current checkpoint moved from 5.8% upright / 2.30 s to
+**5.0% / 1.99 s**, against an unaided 2.0% / 0.80 s. Slightly worse, and honestly so: the policy was
+trained on the body that hovered, and the free centimetre of drop was part of what it had learned.
+
+### `validate.py` had been asserting the opposite of the design
+
+Its gate was "the model, with every actuator at zero, still stands" - printed as `COLLAPSED - model
+is wrong, do not proceed`. That belonged to the position-actuated plant where standing was free.
+Against the torque plant a correct model MUST collapse unpowered, so the gate would have failed
+forever on a correct body. It now checks the four things that have each been silently wrong:
+the `rest` keyframe exists and does not self-intersect, stature and mass are on target, the soles
+start on the floor, and an unpowered body CRUMPLES (mean joint bend > 10°) rather than falling as a
+plank.
+
+### Structure
+
+`MujocoDummy.cs` was 880 lines doing five jobs. Split, with no behaviour change (build clean, both
+parity tests still at 1.49e-08):
+
+```
+MujocoDummy.cs          880 -> 498   the loop, input, ball schedule, policy dispatch
+MjProxyBuilder.cs           180      Godot meshes read from the model's own MJCF
+MjGaitMetrics.cs            213      strikes, uprightness, travel, perturbation response
+MjScriptedController.cs     115      the pre-RL oscillator and balance assist
+```
+
+On the Python side the CPU environment - the one Godot ships against - was importing its fall
+threshold, action latency and authority constants **from the CUDA backend it never uses**, and so
+was the scorer. Those constants now live in `rl/env_config.py` and both backends depend on it
+rather than on each other.
+
+### Removed
+
+The full anthropometric rebuild (`ANTHROPOMETRIC`, `anthropometry.py`) - measured, rejected, and
+kept only as a dead branch that would have rebuilt the body it took several rounds to reject. Ten
+pre-RL spike scripts and their scripted-controller dependency chain. Three gain-sweep model
+variants and the broken external-data ONNX export. Two policies trained on the position plant,
+whose contracts have no `action_to_control.mode` and would have been driven as joint targets
+against `motor` actuators - silently wrong, which is the worst kind. Run logs and `MUJOCO_LOG.TXT`,
+now gitignored alongside `logs/`.
+
+## 2026-09-09 21:30 — Four throughput levers measured, four eliminated
+
+The GPU shows 65% utilisation at 95 W of a 320 W card, and nothing else is saturated either, so the
+obvious question is why the trainer will not go faster. Four candidates, all measured, none of them
+real.
+
+### 1. Gradient steps per batch — free, and worthless
+
+Collecting a 262,144-sample batch takes ~12 s; the PPO update on it takes ~10 ms. So `epochs x
+minibatches` is genuinely free, and the prediction was that raising it buys learning per hour at no
+cost. Three arms, 15 min each, identical seed (`stand_1h/model_300`), on PERTURB because stand is
+now solved and its episode length sits at the ceiling:
+
+| arm | grad steps/iter | it/min | return | ep_len | mean KL | mean LR |
+|---|---|---|---|---|---|---|
+| **5 x 4 (baseline)** | 20 | 5.22 | **5,268** | **906** | +0.0247 | 2.02e-04 |
+| 8 x 4 | 32 | 5.26 | 4,901 (-7%) | 857 (-5%) | +0.0339 | 1.57e-04 |
+| 5 x 8 | 40 | 5.19 | 5,210 (-1%) | 892 (-2%) | +0.0306 | 1.23e-04 |
+
+The wall-cost prediction held exactly - 60% more gradient steps for 0% more time. The benefit did
+not. PPO is on-policy: every extra pass moves the policy further from the one that collected the
+batch, KL overshoots its 0.01 target, and the adaptive controller cuts the learning rate to
+compensate. The clipped surrogate and the KL-adaptive LR **already regulate the step size**; extra
+passes convert useful update into drift that then gets penalised. Keep 5 x 4.
+
+### 2. Halving the physics rate — buys nothing we need, costs stability
+
+240 Hz x decimation 4 -> 120 Hz x decimation 2 keeps the policy at 60 Hz and halves the integration
+work. It cannot be a training-only change: a 240 Hz policy scored at 120 Hz once reversed its own
+verdict, so timestep is a plant parameter and training and deployment must share it.
+
+| | 240 Hz (shipped) | 120 Hz |
+|---|---|---|
+| random torque, 6 x 20 s | **0 divergences** | **6 divergences** |
+| single-core realtime | 113x | 222x |
+
+`JOINT_ARMATURE = 0.02` was measured at 4.17 ms and does not survive doubling the step; recovering
+stability means more armature, which is artificial limb inertia - the opposite of what a body whose
+whole selling point is impact response needs. The joint stops would soften too (`solreflimit` is
+2x the timestep by construction). And the throughput is not needed: **113 fully-simulated characters
+per CPU core** already exceeds what the game puts on screen. If NPC count ever binds, the answer is
+level-of-detail, not a coarser timestep for the character being shot in front of the camera.
+
+### 3. Capping the constraint solver — it already exits early
+
+The model runs MuJoCo's defaults: Newton, `iterations=100`, `ls_iterations=50`, `tolerance=1e-8`.
+Those looked absurdly generous for a 45-DOF body. Measured over 14,396 steps of real motion:
+
+```
+Newton iterations actually used: mean 3.36, median 3, p99 6, max 9   (the cap is 100)
+```
+
+The solver converges in three iterations and stops. Capping it at 8/12 changed GPU throughput from
+22,635 to 22,671 policy steps/s - 0.2%, noise. `mujoco_warp` exits early exactly as the C engine
+does; the cap was never being paid.
+
+### 4. CG instead of Newton — 12% slower
+
+`solver="CG" iterations="20"`: 20,024 steps/s against Newton's 22,855. Newton's quadratic
+convergence on three iterations beats CG's cheaper-but-more iterations at this scale.
+
+### Where the time actually goes
+
+| envs | ms per policy step | policy steps/s | us per world |
+|---|---|---|---|
+| 2,048 | 120.1 | 17,052 | 58.6 |
+| 4,096 | 206.1 | 19,873 | 50.3 |
+| 8,192 | 370.8 | 22,093 | 45.3 |
+| 16,384 | 716.9 | 22,855 | **43.8** |
+
+Per-world cost falls 58.6 -> 43.8 us and is flattening; 8x the worlds buys 34% more throughput. If
+the GPU were launch-bound the ms/step column would be flat and more worlds would be nearly free. It
+is not - this is real work, converging on a work-bound asymptote around 43 us per world per policy
+step, and 16,384 envs is already ~95% of the way there.
+
+**So the appearance of an idle GPU is an artefact of how utilisation is reported.**
+`nvidia-smi utilization.gpu` is the fraction of time at least one kernel is resident, not the
+fraction of SMs busy; one kernel using 3% of the card reads as 100%. A MuJoCo step is a long chain
+of small, mutually dependent kernels - broadphase, narrowphase, constraint assembly, three Newton
+iterations, integrate - and each one occupies a sliver of the card while the rest waits on it. More
+VRAM, more cores and more RAM do nothing for latency of that shape.
+
+**Conclusion: stop optimising throughput.** ~22,000 policy steps/s is what this plant costs on this
+hardware, and it was enough to solve standing in one hour. What is left is sample efficiency -
+reward shaping, curriculum, or an off-policy learner that reuses data - not configuration.
+
+## 2026-09-09 23:15 — The perturbation ball never hit anything
+
+The balance policy scores 100% upright under "ball speed 6.0 m/s" in `eval.py` and falls over in the
+Godot scene at the first shot. The gap was not sim-to-sim. **The training projectile misses.**
+
+It is spawned 2 m from the target with its velocity pointed straight at the bone and no
+compensation for gravity. A projectile's range is `v^2/g`:
+
+| ball speed | max range | reaches a target 2 m away? | impulse delivered |
+|---|---|---|---|
+| 2.00 m/s | 0.41 m | **no, at any angle** | 16.8 N.s |
+| **2.42 m/s** (what the curriculum reached) | 0.60 m | **no, at any angle** | 18.0 N.s |
+| 4.00 m/s | 1.63 m | no | 41.6 N.s |
+| 6.00 m/s | 3.67 m | yes, but arrives 0.55 m low | 50.8 N.s |
+
+**The minimum speed that can reach 2 m is 4.43 m/s.** The curriculum ran 2.00 -> 2.42, so every
+shot of every perturb run was physically incapable of reaching the dummy - it hit the floor about
+60 cm after launch. The 241 and 351 "contacts" measured at those speeds are the ball ROLLING INTO
+THE FEET. Perturb has been stand training with a ball on the ground, which is exactly why the policy
+has no recovery behaviour: it was never given anything to recover from.
+
+### The fix: the projectile does not fall
+
+Gravity is cancelled on the ball alone (`xfrc_applied = m*g` upward, in both environments and in
+`MjBallGun`). The flight is a straight line, so the standoff and the reaction time are constant
+across the whole curriculum and speed maps linearly onto the impulse the ball carries. Measured as
+the DUMMY's own momentum change at contact:
+
+| ball speed | carries | delivered |
+|---|---|---|
+| 2.0 m/s | 30.0 N.s | 22.8 N.s |
+| 3.0 m/s | 45.0 N.s | 37.3 N.s |
+| 4.0 m/s | 60.0 N.s | 54.8 N.s |
+| 6.0 m/s | 90.0 N.s | 74.3 N.s |
+
+76-91% transfer, monotonic. That is a difficulty axis. The trainer now logs it as newton-seconds
+beside the speed. Both parity tests still pass at 1.49e-08.
+
+### `MjBallGun.DeliveredImpulse` measured the wrong body, twice
+
+It returned the BALL's velocity change since launch, which gravity dominates: a 15 kg ball in free
+flight for 0.33 s reports ~49 N.s before touching anything, so every shot cleared the 1 N.s hit
+threshold and the reported 74-104 N.s impacts were mostly gravity.
+
+Switching to the dummy's momentum change since launch was no better - a dummy that falls over
+accumulates the whole fall, and one shot reported 168.6 N.s for knocking it down. **One physics step
+is what separates them**: free fall contributes `g*dt*mass = 2.8 N.s` per step, an impact spikes far
+above it. Now per-step, with the hit threshold raised 1 -> 8 N.s. The same scene reads:
+
+```
+ball 1 -> Shin_L    42,1 N.s delivered        ball 5 -> Shin_L     9,2 N.s delivered
+ball 2 -> Forearm_L  8,1 N.s delivered        ball 7 -> Thigh_L    5,5 N.s MISS (no contact)
+ball 4 -> Shin_L    28,6 N.s delivered        ball 8 -> Pelvis    35,0 N.s delivered
+```
+
+Real hits, real misses, and magnitudes that match what the training environment delivers.
+
+**Nothing here is a training failure, and no amount of training minutes would have fixed it.** The
+perturb policy has to be retrained from the balance brain against a gun that actually connects.
+
+### Correction, same evening: gravity comes back after the approach
+
+Cancelling the ball's gravity for the whole episode was wrong in a way the first measurements did
+not show. A shot that MISSES then flies straight on for ever - it never lands, it re-enters, and it
+strikes the dummy from behind. A projectile that cannot fall is its own uncontrolled perturbation.
+
+Gravity is now cancelled only for the approach - `BALL_SPAWN_DISTANCE / speed * 1.2`, the nominal
+flight plus 20% - after which the ball is an ordinary object that drops, lands and rolls. Both
+environments and `MjBallGun` share the rule. Measured, the hit is unchanged and the ball ends up on
+the floor where it belongs:
+
+| ball speed | peak delivered | share of in-play time resting on the floor |
+|---|---|---|
+| 2.0 m/s | 19.9 N.s | 56% |
+| 4.0 m/s | 42.1 N.s | 60% |
+| 6.0 m/s | 65.2 N.s | 72% |
+
+## 2026-09-10 00:10 — RETRACTION: there was never a sim-to-sim gap. I was reading the wrong row.
+
+Several claims today said the balance policy scores "100% upright at 6 m/s, and 8 m/s" in the CPU
+scorer while falling in the Godot scene, and concluded there was a sim-to-sim discrepancy. **All of
+those numbers were the quiet-room row.** `eval.py` prints `POLICY, no ball` before `POLICY, under
+fire`, and the greps used to read those results took the first block. The same command, showing
+both sections:
+
+```
+=== POLICY, no ball ===        upright 100.0 %   never fell 100.0 %   time to fall 39.99 s
+=== POLICY, under fire ===     upright  10.2 %   never fell   0.0 %   time to fall  4.08 s
+```
+
+This is the second time on this project that a partial read of a multi-section report produced a
+confident wrong conclusion, and it wasted an evening chasing a gap that does not exist.
+
+### What the policy actually does
+
+Under fire, every 4 s, 16 envs x 40 s - reading the correct section:
+
+| ball | carried | upright | never fell |
+|---|---|---|---|
+| 2.0 m/s | 30 N.s | 19.1% | **0 of 16** |
+| 3.0 m/s | 45 N.s | 15.0% | 0 of 16 |
+| 4.0 m/s | 60 N.s | 14.1% | 0 of 16 |
+| 5.0 m/s | 75 N.s | 13.1% | 0 of 16 |
+
+And the time-to-fall tracks the FIRST shot exactly - 4.08 s at a 3 s cadence, 5.07 s at 4 s, 6.11 s
+at 5 s, 8.06 s at 7 s. **It falls about one second after the first ball, whatever the ball is.** It
+cannot take a single real impact of any size.
+
+### Godot agrees, and always did
+
+Same scene, same brain, gun switched off: **100% upright over 30 s, 6.5 cm of travel** - identical
+to the scorer's quiet room. Gun on: it falls. The two engines were never in disagreement; the C#
+observation build, the frame maps, the action mapping and the ONNX are all correct, and the
+gun-off run is the evidence.
+
+### So what is actually missing
+
+Nothing structural. The balance policy has only ever been trained against a projectile that
+**missed** - the curriculum reached 2.42 m/s from a 2 m standoff, where a ballistic ball cannot
+travel further than 0.60 m. It learned to stand, which it does perfectly, and it has never once
+been hit. The perturbation task starts now.
+
+## 2026-09-11 — two lessons from shipping the walk: the contract must carry what `step()` computes, and `cvel` is not a body velocity
+
+**The heading hold existed in training and not in Godot.** From 2026-09-10 22:00 every walk
+checkpoint was trained with a heading hold: while the commanded yaw is zero, the env writes a
+correction toward the heading the command began on into the yaw slot of the observation, inside
+`step()`. `MjPolicyDriver` wrote the raw zero. The observation LAYOUT was identical, every parity
+check passed, and the scene would still have run a different policy from the one that was scored -
+the Isaac track's contract failure, in a new place. The contract now carries a `command` block
+(`yaw_mode: heading_hold`, gain 0.5, the formula and the latch rule), `MjHeadingHold` applies it with
+a heading formula identical to the env's over 10,000 random rotations, and a reset forgets the held
+heading. **Anything the env computes into the observation is part of the contract, not only the
+layout.**
+
+**MuJoCo's `cvel` is referenced to the subtree centre of mass, not to the body.** Read raw,
+`cvel[foot, 3:6]` reported -0.14 m/s for a foot moving at +0.70 - the wrong sign - and a capture-step
+reward built on it paid for stepping AWAY from the fall. A body's own linear velocity is
+`lin + ang x (xpos - subtree_com[root])`, verified by finite difference. Any velocity read from
+`cvel` needs that shift, and a finite-difference check rather than trust in the field's name.
+
+`mujoco_rig/csharp_spike/` and `prove2.py`, referenced in earlier entries, have since been removed;
+`MjBridge` and the environments are what they became.

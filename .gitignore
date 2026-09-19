@@ -104,3 +104,12 @@ isaac_lab_3/exported/
 # The note above records that checkpoints once put 13 GB into this repo; this is the same mistake by
 # a different path.
 logs/
+
+# MuJoCo writes this next to the working directory on every model load.
+MUJOCO_LOG.TXT
+
+# Generated models and exported policies are rebuilt by build_mjcf.py / export_onnx.py. The two the
+# scenes actually load are committed deliberately; sweep variants are not.
+mujoco_rig/dummy_g*.xml
+mujoco_rig/dummy_soft*.xml
+mujoco_rig/*.onnx.data
