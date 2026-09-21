@@ -70,6 +70,64 @@ internal sealed class MjBridge : IDisposable, IMjPolicyPlant, IMjFoundationSenso
     /// <summary>Advances the simulation by one MuJoCo timestep.</summary>
     internal void Step() { EnsureAlive(); MjInterop.mj_step(_model, _data); }
 
+    /// <summary>Refresh derived poses and contacts after a complete control interval.</summary>
+    internal void Forward() { EnsureAlive(); MjInterop.mj_forward(_model, _data); }
+
+    internal void ReadNativeState(double[] qpos, double[] qvel)
+    {
+        ValidateStateSize(qpos, qvel);
+        Marshal.Copy(Marshal.ReadIntPtr(_data, MjLayout.DataQpos), qpos, 0, qpos.Length);
+        Marshal.Copy(Marshal.ReadIntPtr(_data, MjLayout.DataQvel), qvel, 0, qvel.Length);
+    }
+
+    internal void ResetNativeState(double[] qpos, double[] qvel)
+    {
+        ValidateStateSize(qpos, qvel);
+        foreach (double value in qpos)
+            if (!double.IsFinite(value)) throw new ArgumentException("Nonfinite pose");
+        foreach (double value in qvel)
+            if (!double.IsFinite(value)) throw new ArgumentException("Nonfinite velocity");
+        MjInterop.mj_resetData(_model, _data);
+        Marshal.Copy(qpos, 0, Marshal.ReadIntPtr(_data, MjLayout.DataQpos), qpos.Length);
+        Marshal.Copy(qvel, 0, Marshal.ReadIntPtr(_data, MjLayout.DataQvel), qvel.Length);
+        Forward();
+    }
+
+    internal void ReadNativeGroundForces(Vector3[] destination)
+    {
+        EnsureAlive();
+        if (destination.Length != BodyCount) throw new ArgumentException("Wrong body count");
+        (_footLoadSensor ??= new MjFootLoadSensor(_model, _data)).ReadWorldForces(destination);
+    }
+
+    internal bool HasCharacterContact(int projectileBody, int characterBodyCount)
+    {
+        EnsureAlive();
+        IntPtr contacts = Marshal.ReadIntPtr(_data, MjLayout.DataContact);
+        IntPtr bodies = Marshal.ReadIntPtr(_model, MjLayout.ModelGeomBodyid);
+        var wrench = new double[6];
+        int count = Marshal.ReadInt32(_data, MjLayout.DataNcon);
+        for (int i = 0; i < count; i++)
+        {
+            int offset = i * MjLayout.ContactStride + MjLayout.ContactGeom;
+            int a = Marshal.ReadInt32(bodies, Marshal.ReadInt32(contacts, offset) * sizeof(int));
+            int b = Marshal.ReadInt32(bodies, Marshal.ReadInt32(contacts, offset + sizeof(int)) * sizeof(int));
+            int other = a == projectileBody ? b : b == projectileBody ? a : -1;
+            if (other <= 0 || other >= characterBodyCount) continue;
+            MjInterop.mj_contactForce(_model, _data, i, wrench);
+            if (wrench[0] > 0) return true;
+        }
+        return false;
+    }
+
+    private void ValidateStateSize(double[] qpos, double[] qvel)
+    {
+        EnsureAlive();
+        if (qpos.Length != Marshal.ReadInt64(_model, MjLayout.ModelNq)
+            || qvel.Length != Marshal.ReadInt64(_model, MjLayout.ModelNv))
+            throw new ArgumentException("Native state dimensions do not match model");
+    }
+
     /// <summary>Index of a named body, or -1.</summary>
     public int BodyId(string name) { EnsureAlive(); return MjInterop.mj_name2id(_model, MjInterop.ObjBody, name); }
 

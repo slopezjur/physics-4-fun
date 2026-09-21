@@ -4,8 +4,21 @@
 dotnet test Physics4Fun.sln
 ```
 
-123 tests, ~40 ms. No Godot install, no scene tree, no display required — they run anywhere the .NET
+133 managed tests, ~40 ms. No Godot install, no scene tree, no display required — they run anywhere the .NET
 SDK does, including CI.
+
+One additional native foundation test is opt-in through `P4F_FOUNDATION_FIXTURES`.
+`MjMimicReferenceTests` covers non-looping reference interpolation and hash rejection.
+`MjMimicTargetControlTests` covers delayed targets, fresh physics feedback, queue
+observations, reset clearing and rejection of incompatible actuation contracts.
+`MjMimicPushTests` covers force-window boundaries, coordinate conversion, invalid
+pulse rejection and the uninterrupted post-push settling window. Python's
+`mujoco_rig.mimic.test_perturb` additionally checks native force expiry and partial
+reset isolation. `python -m mujoco_rig.mimic.godot_perturb --run <benchmark-directory>`
+validates the actual Godot force schedule, survival and recovery measurements.
+The experimental Stand actor's full observation/control boundary is checked in the
+actual Godot scene by `python -m mujoco_rig.mimic.godot_replay`; see
+`mujoco_rig/mimic/README.md` for setup and commands.
 
 `MjPolicyTests` exercises the MuJoCo deployment loop through managed simulation/inference fakes:
 contract validation, reordered observation channels, zero perturb commands, action clipping and

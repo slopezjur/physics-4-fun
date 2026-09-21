@@ -1,0 +1,44 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://Scenes/RL/Isaac3/MuJoCo/MimicStand.tscn" id="1_base"]
+[ext_resource type="Script" path="res://Source/RL/MuJoCo/MimicPerturb.cs" id="2_perturb"]
+
+[node name="MimicPerturb" instance=ExtResource("1_base")]
+script = ExtResource("2_perturb")
+ModelPath = "res://mujoco_rig/dummy_ball.xml"
+BundleDirectory = "res://logs/mimickit-stand/guarded-finetune-01/export"
+
+[node name="Title" parent="Hud/Margin/Controls" index="0"]
+text = "Mimic Perturb — Ball impacts"
+
+[node name="Help" parent="Hud/Margin/Controls" index="3"]
+text = "R: repeat trial · B: launch ball now · P: pause\nDirection buttons restart · Speed, target and launch timing: Inspector\nRight-drag: look · WASD / Q / E: move · Wheel: camera speed"
+
+[node name="Directions" type="HBoxContainer" parent="Hud/Margin/Controls" index="4"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Direction0" type="Button" parent="Hud/Margin/Controls/Directions"]
+layout_mode = 2
+focus_mode = 0
+text = "Forward"
+
+[node name="Direction1" type="Button" parent="Hud/Margin/Controls/Directions"]
+layout_mode = 2
+focus_mode = 0
+text = "Backward"
+
+[node name="Direction2" type="Button" parent="Hud/Margin/Controls/Directions"]
+layout_mode = 2
+focus_mode = 0
+text = "Left"
+
+[node name="Direction3" type="Button" parent="Hud/Margin/Controls/Directions"]
+layout_mode = 2
+focus_mode = 0
+text = "Right"
+
+[node name="Launch" type="Button" parent="Hud/Margin/Controls" index="5"]
+layout_mode = 2
+focus_mode = 0
+text = "Launch ball (B)"

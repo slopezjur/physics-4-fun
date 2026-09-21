@@ -13,6 +13,8 @@
       .gdignore so the editor does not scan it as game content.
     -->
     <Compile Remove="Tests/**/*.cs" />
+    <!-- Experiment snapshots can contain source copies; they are never game inputs. -->
+    <Compile Remove="logs/**/*.cs" />
 
     <!--
       Two pure actuator functions are `internal` rather than `private` purely so the test project

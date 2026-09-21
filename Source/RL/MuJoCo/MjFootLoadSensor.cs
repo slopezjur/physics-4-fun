@@ -49,4 +49,32 @@ internal sealed class MjFootLoadSensor
         }
         return new Vector2((float)left, (float)right);
     }
+
+    /// <summary>Per-body ground forces in native world coordinates; toes remain separate bodies.</summary>
+    internal void ReadWorldForces(Vector3[] destination)
+    {
+        Array.Clear(destination);
+        IntPtr contacts = Marshal.ReadIntPtr(_data, MjLayout.DataContact);
+        int count = Marshal.ReadInt32(_data, MjLayout.DataNcon);
+        for (int i = 0; i < count; i++)
+        {
+            int offset = i * MjLayout.ContactStride;
+            int first = Marshal.ReadInt32(contacts, offset + MjLayout.ContactGeom);
+            int second = Marshal.ReadInt32(contacts, offset + MjLayout.ContactGeom + sizeof(int));
+            int other = first == _floor ? second : second == _floor ? first : -1;
+            if (other < 0) continue;
+            int body = Marshal.ReadInt32(_geomBodies, other * sizeof(int));
+            MjInterop.mj_contactForce(_model, _data, i, _force);
+            var world = new Vector3();
+            for (int axis = 0; axis < 3; axis++)
+            {
+                double value = 0;
+                for (int row = 0; row < 3; row++)
+                    value += _force[row] * BitConverter.Int64BitsToDouble(Marshal.ReadInt64(
+                        contacts, offset + MjLayout.ContactFrame + (row * 3 + axis) * sizeof(double)));
+                world[axis] = (float)(first == _floor ? value : -value);
+            }
+            destination[body] += world;
+        }
+    }
 }

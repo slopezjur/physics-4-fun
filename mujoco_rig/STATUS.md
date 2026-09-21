@@ -1,5 +1,385 @@
 # MuJoCo track — status
 
+## 2026-09-21: MimicPerturb scene and controlled-push baseline
+
+Open `Scenes/RL/Isaac3/MuJoCo/MimicPerturb.tscn` with **F6**. This is live physics
+using the retained `guarded-finetune-01/export` Stand policy, not a trained Perturb
+actor. The main F5 scene remains MimicStand. Default: 20 N at the Chest COM for six
+control intervals (0.100008 s, 2.00016 N·s), starting at interval 60 (1.00008 s).
+Direction buttons restart the trial; R repeats, P pauses. Force, timing, duration
+and reference phase are Inspector settings. Completion or falling holds the result.
+
+`MimicTrial` shares scene lifecycle, controls and rendering between both scenes.
+`MjMimicPerturbTrial` shares force application and measurements between the viewer
+and batch replay. Pulses use world-frame force at body COM, expire after each
+control interval, and are cleared on reset without affecting peer environments.
+The push schedule is not included in policy observations. No rig, reward, actor,
+normalization or motor-control change was made; no training was run in this step.
+
+The fixed benchmark contains **52 five-second trials**: 10/20/40 N pulses in four
+horizontal directions, at two onset times and two reference phases, plus four
+matching unforced trials. Evidence: `logs/mimickit-perturb/baseline-02/`.
+
+- Native MuJoCo and Godot: **4/4 unforced, 16/16 at 10 N, 16/16 at 20 N, 13/16 at
+  40 N survived**. All three falls followed forward (+X) pushes.
+- Newton: identical unforced/10/20 N survival; **14/16 at 40 N** in the final run.
+  The earlier run gave 13/16. `40N-+x-p0.8-t60` is near the five-second survival
+  boundary; do not claim exact full-horizon GPU/native outcome parity there.
+- Short forced-rollout Newton/native pose discrepancy is 8.22e-6, root velocity
+  discrepancy 4.34e-6 m/s. Force expiry, partial-reset isolation and reset replay pass.
+- All **nine Godot/native parity checks** pass over the 52 trials, including pulse
+  timing, survival, recovery and movement metrics. Pose discrepancy in the push
+  windows is 4.75e-7; survival-time difference is at most 4e-7 s.
+- Native aggregate foot travel is 8.38 cm unforced, 8.45 cm at 10 N, 8.74 cm at
+  20 N and 11.78 cm at 40 N. This includes normal reference motion and is not a
+  standalone realism score or a penalty against necessary recovery steps.
+
+Settled recovery is a separate diagnostic: the final uninterrupted 0.5 s must have
+root height >=0.75 m, tilt <=15 degrees, horizontal speed <=0.2 m/s, angular speed
+<=1 rad/s and both foot loads >5 N. Only 2/4 unforced trials satisfy it; native
+counts are 7/16, 7/16 and 8/16 under 10/20/40 N. Newton also differs on four settled
+classifications. **Do not use this diagnostic as a training/promotion gate yet.**
+First define recovery relative to the matching unforced/reference behavior, then
+use mild-push fine-tuning with separate no-push retention and held-out push checks.
+The measurements identify a recovery task, not a demonstrated need to redesign the rig.
+
+Validation: 28 Python tests, 133 managed tests (one optional native fixture test
+skipped), build, both interactive scene checks, and actual Godot batch replay pass.
+Viewer checks cover pause, identical-repeat determinism, four directions, stopping
+at completion, and visible rejection of invalid pulse timing. All 14 protected
+baseline hashes and the retained Stand checkpoint hash remain unchanged.
+
+## 2026-09-21: fifteen-minute guarded Stand run holds balance but does not improve
+
+The requested run completed **901.156 seconds, 273 iterations, 1,118,208 samples**
+with 128 worlds, seed 210921, frozen normalization and actor KL bound 0.02.
+Output: `logs/mimickit-stand/guarded-15min-01/`. It initialized weights and
+normalization from `guarded-finetune-01/best.pt` (local iteration 33), with fresh
+optimizer/rollout state. The source hash was verified against its saved metadata.
+Reward, rig, controller and training settings were held fixed throughout the run.
+
+- All **18 periodic evaluations passed 8/8** three-second trials; no crash or
+  abrupt standing collapse occurred. Their root errors ranged from 0.02855 to 0.03590 m.
+- Final native and Newton policies both passed 8/8, with root errors **0.03406 m**
+  and **0.03405 m**. Initial native error was **0.02833 m**, so no later evaluated
+  checkpoint improved on the starting policy.
+- The final policy also passed 8/8 five-second native trials, root error **0.03620 m**.
+- Automatic selection retained the initial policy: `best.pt` tensors exactly match
+  `initial.pt`. Its five-second native test passes 8/8 at **0.03324 m**. Its export
+  passes all five actual Godot parity gates; ONNX max action error is **2.38e-7**.
+- All saved observation-normalizer tensors remained exactly unchanged. Maximum
+  accepted rollout KL was **0.01280**; 10,920 actor steps were accepted, none rejected.
+  This run therefore does not measure a benefit from activating rollback.
+
+Evidence: `report.json`, `learning_curve.json`, `updates.jsonl`,
+`extended-validation.json`, and `godot-parity.json` in the run directory.
+All 14 protected baseline hashes match. The interactive scene continues to use its
+previously accepted iteration 833 bundle; training does not promote policies automatically.
+
+**Decision: keep the retained candidate; another unchanged Stand run is not justified
+by these results.** Next, evaluate that candidate under small controlled pushes to
+measure recovery before defining the Perturb curriculum. This run establishes
+standing retention on the same finite clip and phases, not general reactive balance
+or proof that future optimization cannot regress.
+
+## 2026-09-21: guarded fine-tuning and automatic best-policy export validated
+
+The late-regression ablation implicates both actor updates and normalization drift.
+Iteration 1025 weights with their original normalization pass 8/8; using the final
+normalization reduces this to 6/8. Final weights fail 0/8 with either normalization.
+Evidence: `logs/mimickit-stand/ppo-regression-ablation-01.json`. This separates the
+components but does not identify the first damaging update or prove a unique cause.
+
+The local `GuardedPPO` extension freezes loaded observation statistics, clips actor
+gradient norm to 1, and rejects minibatches exceeding cumulative mean rollout KL
+0.02, restoring both weights and optimizer momentum. Fine-tuning requires explicit
+checkpoint/contract paths; it loads weights and normalization with fresh optimizer,
+rollout state and local counters. The external MimicKit checkout is unchanged.
+
+The trainer now retains the initial and best evaluated candidate as `best.pt` with
+hashed metadata and exports that selection. `model.pt` still records the final
+training state. Selection uses the fixed eight native phases and the existing
+standing gate, not held-out data. The viewer bundle is never replaced automatically.
+
+Validation: `logs/mimickit-stand/guarded-finetune-01/`, initialized from the accepted
+iteration 833 checkpoint, completed **181 seconds, 53 iterations, 217,088 samples**:
+
+- Every periodic evaluation and the final state passed 8/8 three-second trials.
+- Best local iteration 33: native root error **0.02833 m**, Newton **0.02827 m**,
+  compared with initial native **0.02968 m**. Both engines passed 8/8.
+- Selected five-second native test: **8/8**, root error **0.03324 m**.
+- ONNX max action discrepancy **2.38e-7**; all five actual Godot parity gates pass.
+- All three saved normalizer tensors remained exactly unchanged. Maximum accepted
+  rollout KL **0.01275**; 2,120 accepted actor steps, no rejection at the normal bound.
+- A separate one-iteration CPU integration check intentionally used KL limit 1e-12.
+  Its first update was rejected (attempted KL 7.68e-6), leaving actor weights,
+  normalization and optimizer state exactly unchanged. Seven safety unit tests pass;
+  all 23 Python regression tests passed during implementation.
+
+Reports: `report.json`, `invariants.json`, `godot-parity.json`, and
+`rollback-check/report.json` inside that run directory. Generated rig, shipped
+policies and the protected production checkpoint match all 14 baseline hashes.
+The interactive scene still uses the previously accepted iteration 833 bundle.
+
+**Next: a longer guarded Stand fine-tune to test stability over a comparable budget.**
+The short run establishes working safeguards and modest tracking improvement; it
+does not establish sustained stability, unseen-motion balance, or Perturb readiness.
+The KL bound applies per rollout on sampled states, not cumulative change across
+training. Do not treat best-checkpoint retention as a solution to generalization.
+
+## 2026-09-21: interactive MimicStand scene ready for F5
+
+`Scenes/RL/Isaac3/MuJoCo/MimicStand.tscn` is now the main scene. It runs live
+policy-controlled native physics with the selected `evaluation_000833` bundle,
+configured through Inspector properties. Its MuJoCo library directory points to
+the isolated Mimic environment; no environment variables are required.
+
+The default trial lasts five seconds, then holds the resulting pose for inspection.
+It also stops on a fall, without automatically resetting. R/button restarts;
+P/button pauses or resumes. The existing CameraController provides right-drag look,
+WASD/Q/E movement and wheel speed adjustment. Trial duration and reference start
+phase are configurable within the finite reference clip. This scene does not claim
+continuous indefinite standing or add a Perturb controller.
+
+`MimicStandReplay.tscn` is now batch-only, retaining the existing Python parity
+command and shared `MjMimicStandDriver`. Build, default main-scene startup without
+environment settings, five-second completion, button/keyboard pause and restart,
+and all five batch parity gates pass. No policy weights or controller settings changed.
+
+## 2026-09-21: 30-minute target/PD run learns Stand, then regresses late
+
+**Decision: retain checkpoint `evaluation_000833.pt` as the experimental Stand
+candidate. Investigate late PPO update stability and add best-checkpoint protection
+before another long run or Perturb training.** The selected actor passes the
+three-second gate and an additional five-second test; the final actor fails.
+This establishes learned standing on this reference, not general reactive balance.
+
+The requested fresh, unchanged-setting run completed **1,800.063 seconds**, 1,071
+iterations and 4,386,816 samples with 128 worlds, seed 210921 and fault tracing.
+No native crash occurred. Output: `logs/mimickit-stand/target-pd-30min-01/`.
+Controller, rig, reference, reward and PPO configuration were unchanged.
+
+Learning progressed from 0/8 successes to 8/8 at about 17.4 minutes. Both original
+gates first passed at 19.2 minutes, then passed at seven consecutive saved evaluation
+checkpoints through minute 29.0. The lowest root error among those checkpoints was
+at iteration 833 (24.15 minutes, 3,411,968 samples):
+
+- Re-evaluated native: **8/8 three-second successes**, mean root error **0.02968 m**.
+- Newton: **8/8 three-second successes**, mean root error **0.02972 m**.
+- Extended native ONNX test: **8/8 five-second successes**, mean root error **0.03407 m**.
+- Extended Newton test: **8/8 five-second successes**, mean root error **0.03378 m**.
+- Actual Godot replay: all five parity gates pass, **8/8 three-second successes**;
+  maximum prefix action error 7.49e-6 and episode-duration difference 2e-7 s.
+
+Selection uses the existing eight evaluation phases: among checkpoints passing
+8/8 survival and <=0.05 m mean root error, choose the smallest root error. This is
+checkpoint selection, not independent generalization evidence. The five-second
+test uses eight evenly spaced starts in `[0, reference_duration - 5]` within the
+same non-looping motion, with unchanged failure conditions and no further training.
+No longer hold, new motion, perturbation, or visual realism gate is established.
+
+**Late regression:** logged test return falls from 169.57 at iteration 1024 to
+50.00 at 1032, while PPO clip fraction rises from 0.506 to 0.933. The final actor
+has 0/8 successes, 1.652 s mean survival and 0.182 m root error in both native and
+Newton evaluation. It also passes Godot transfer checks, confirming this loss is
+present before deployment. The exact optimization/normalization cause is not yet
+isolated. The final model and failed export remain intact for diagnosis.
+
+Use **`target-pd-30min-01/selected-000833/export/`** for experimental replay, not
+the run's top-level `export/`. The selected `.pt` is the original saved checkpoint;
+its separate export and report are in `selected-000833/`, alongside
+`godot-parity.json` and `newton-evaluation.json`. The final actor's results remain
+in the run's `report.json`, `godot-parity.json`, and `five-second-final.json`.
+
+No training/controller source was changed for this run, no production policy was
+replaced, and no commit or push was made. The generated model and shipped policy
+hashes remain unchanged.
+
+## 2026-09-21: target/PD learning path implemented; five-minute comparison complete
+
+**Decision: retain the rig and bridge, keep this actor experimental, and use a
+fixed-setting 15-minute Stand benchmark as the next bounded learning test. Do not
+start Perturb or an overnight run yet.** The new control path transfers correctly;
+the short PPO run shows modest improvement but does not solve standing.
+
+The opt-in `--control target_pd` contract (`mimic_stand_target_pd_v1`) uses 30
+reference-relative joint targets and physics-rate bounded PD feedback. Targets and
+reference velocities wait two control intervals; the first two intervals apply
+zero policy torque. Residual scale is 0.25 rad, with joint-limit clipping. Feedback
+is `limit * clip(4 * angle_error + 0.08 * velocity_error, -1, 1)` on every native or
+Newton physics substep. Original torque authority, passive mechanics, head control,
+reference, reward and PPO YAML are retained. No support-force oracle is used.
+The queue's two position/velocity/validity tuples replace pending torque actions,
+giving 362 observations. Raw-torque 300-channel actors remain supported separately.
+
+Fresh run `logs/mimickit-stand/target-pd-5min-02` completed 177 iterations and 724,992
+samples in 302.344 seconds, with 128 worlds and seed 210921. Native mean survival
+improves from **1.808 to 2.013 s**; best final trial is 2.400 s. Native and Newton
+agree on all eight survival durations. **0/8 reaches three seconds**, and mean root
+tracking error is **0.162 m**, above the unchanged 0.05 m gate. Periodic native means
+are 1.786, 1.671, 1.781 s at 4k/266k/528k samples, followed by 2.013 s at the end.
+The initial policy has small random residuals; the separate exactly-zero residual
+baseline survives 1.786 s. More training is a hypothesis to test, not a demonstrated
+solution. The old raw-torque run used a different budget and is not a matched trial.
+
+Verification:
+
+- 16 Python regressions, 130 managed tests and the opt-in native foundation test pass.
+- Target native/Newton preflight passes 14 gates: short pose error 1.85e-6,
+  motor torque error 0.00034 Nm, including reset isolation.
+- Zero-residual and trained ONNX actors both pass all five actual Godot replay
+  gates. Trained prefix observation/action/pose errors are 3.61e-6 / 3.35e-6 /
+  2.76e-7; maximum episode-duration difference is 2e-7 s.
+- The existing raw-torque Godot replay still passes. Generated MJCF, shipped ONNX
+  files and the accepted production checkpoint match their baseline hashes.
+
+The first attempt (`target-pd-5min-01`) crashed in native code after roughly 25 s
+with Windows access violation 0xc0000005 and no Python traceback; it is not a
+completed training result. The identical-setting retry enabled unbuffered output
+and Python fault tracing and completed. The native crash's cause is unresolved;
+retain the failed run's `failure.json` and monitor any subsequent bounded run.
+
+Reports: `target-pd-preflight.json`, `target-pd-zero-01/godot-parity.json`, and
+`target-pd-5min-02/{report,godot-parity,learning_curve}.json` under
+`logs/mimickit-stand/`. See `mimic/README.md` for commands. No production actor was
+replaced, and no commit or push was made.
+
+## 2026-09-21: reference-controller diagnostics narrow the problem to balance/control design
+
+**Decision: preserve the rig and bridge; do not extend the current raw-torque PPO
+run. Prototype reference-relative joint targets with a physics-rate PD loop and
+learned balance corrections.** MimicKit's pinned `data/engines/newton_engine.yaml`
+uses `control_mode: pos`; our compatibility adaptation retained delayed raw torque.
+Keeping the skeleton/sim bridge does not require keeping that action representation.
+This is the next experiment, not a validated production change.
+
+Bounded reference-controller tests are complete. Each controller family had 12
+predeclared gain settings, calibrated on phases 0/3/7; selected parameters were then
+evaluated across all eight phases, including five unused for selection. Physical
+torque limits, passive joints, model and reference stayed unchanged. The primary
+PD tests retain the exact 60 Hz / two-step delayed-torque contract.
+
+- Primary normalized PD: 0/8 three-second successes; mean survival 1.002 s.
+  Inertia-scaled PD with optional joint-bias compensation also fails (0/8); some
+  cases become numerically unstable. Canonical corrected reports are
+  `reference-control-normalized-02` and `reference-control-inertia-02`.
+- Diagnostic zero-delay controls improve normalized PD to 1.502 s, still 0/8.
+  Thus delay contributes, but removing it alone does not produce balance.
+- A **different control contract**, with targets delayed two control intervals but
+  PD feedback evaluated every physics step, reaches 1.875 s, still 0/8.
+- Adding quasi-static support feedforward to that alternative reaches **7/8 at
+  three seconds**, 0.0147 rad mean joint RMSE and 0.29% clipped torques. It still
+  fails the root/foot tracking gates (0.0581 m / 0.0323 m) and **0/8 survive ten-second
+  fixed-pose holds**; mean hold survival is 3.586 s. Joint tracking alone is not balance.
+
+The support calculation uses prospective sole contacts within 1 mm of the floor,
+friction pyramids and the same motor torque limits. Over all 180 reference frames,
+the refined solution needs at most 14.4% of the available 60%-authority motor budget.
+It balances the free base and controlled joints, allowing passive joints to settle
+(up to 0.795 Nm residual at their exact reference angles). This is conditional
+quasi-static evidence, **not proof of dynamic feasibility or a fault-free rig**.
+Strict checks using only the reference's initial contacts fail because one foot is
+slightly lifted. Native stepping establishes both-foot support within 16.7 ms,
+before the first delayed motor command, so this transient does not explain the
+later multi-second collapse by itself.
+
+Diagnostic code: `mimic/reference_controller.py`, `probe_reference_control.py`,
+`probe_target_pd.py`, `static_support.py`. Reports live under
+`logs/mimickit-stand/reference-*` and `static-support.json`; the support-feedforward
+result is `reference-target-support-01/report.json`. Twelve Python regressions pass.
+The early `reference-control-01` selection minimized error among failed episodes,
+which favored early termination; version 2 ranks survival before error and detects
+numerical failures explicitly. Use the `*-02` primary reports above.
+
+No training, production controller replacement, body-strength increase, motion
+rewrite, commit or push occurred during this diagnostic. The alternative controller
+has only native-MuJoCo evidence so far; it needs a matching Godot control contract
+and transfer tests before an RL experiment or promotion.
+
+## 2026-09-21: fixed-setting 15-minute Stand run and actual Godot replay complete
+
+**Decision: keep the actor experimental.** The predeclared gate was eight of eight
+three-second successes and mean root tracking error at most 0.05 m. The final
+actor fails both gates; it is not promoted to Stand/Perturb production scenes.
+
+The fresh run used the same reference, plant, torque limits/delay, PPO YAML and
+reward as the smoke test: 128 worlds, 486 iterations, 1,990,656 samples in 900.515
+seconds (time budget includes periodic output/evaluation). Mean native standing
+time rises from 0.448 to 1.663 seconds; Newton gives 1.667 seconds. Best final trial
+is 2.134 seconds, **zero of eight reach three seconds**, and mean root tracking
+error is 0.117 m. Periodic checkpoint means progress from 1.20 s at 528k samples to
+1.46 s at 1.58M and 1.53 s at 1.84M. This is learning progress, not stable standing.
+Rendered native poses still show forward collapse.
+
+Added an isolated `MimicStandReplay.tscn` and hash-validated reference/control
+adapter using the existing native bridge. Actual headless Godot replay passes all
+five parity gates for the final ONNX actor. Across the first 16 steps of each phase,
+maximum observation/action/pose differences are 1.713e-5 / 3.540e-6 / 1.611e-6;
+all eight full episode outcomes agree and duration differences are below 1.01e-7 s.
+ONNX versus Torch action error is 1.79e-7. These bounded checks do not identify a
+Godot transfer mismatch as the cause of the falls.
+
+Validation: 127 managed C# tests, the opt-in native foundation sensor regression,
+and nine Python motion/control regressions pass. The generated ABI adds the contact
+frame offset; existing bridge APIs retain their semantics. Build input now excludes
+saved C# source snapshots under `logs/`. The MJCF, shipped actor and accepted old
+checkpoint match their preserved hashes. No commit or push was made.
+
+Artifacts: `logs/mimickit-stand/ppo-15min-01/{report,learning_curve,godot-parity}.json`,
+`model.pt`, periodic checkpoints, `export/` and `trained-poses.png`.
+
+**Next:** check whether reference tracking is achievable under the exact torque
+limits and action delay with a reference controller, before committing to another
+long PPO run or changing rewards. The current result does not distinguish slow
+direct-torque learning from an unsuitable tracking/control setup. Perturb remains gated.
+
+## 2026-09-21: licensed motion-guided Stand reaches its first PPO smoke test
+
+The isolated [MimicKit experiment](mimic/README.md) now uses a six-second neutral-idle
+excerpt from Ian Mason's 100STYLE, under CC BY 4.0 with attribution. Source hashes,
+license and changes accompany the adapted asset. Fixed-foot collision-aware IK
+preserves the original dummy; reference validation passes (maximum foot error
+0.355 mm, penetration 0.378 mm). No noncommercial source was used.
+
+Implemented native-hinge reference observations, partial resets, upstream DeepMimic
+reward and PPO, deterministic native evaluation and ONNX export. Nine regression
+tests and all 12 task preflight checks pass. Production rig, bridge, reward code
+and accepted/shipped policies are unchanged.
+
+**First run:** 128 worlds, 32 PPO iterations, 131,072 samples, 67.8 seconds. Across
+eight fixed phases, native MuJoCo standing time rises from 0.448 to 1.006 seconds;
+Newton gives 1.010 seconds. **All eight still fail the three-second episode.**
+Tracking error over the longer trajectories increases, so this is pipeline and
+early learning evidence, not a claim of realistic movement. ONNX action error is
+5.78e-8. Results/checkpoints/export are under `logs/mimickit-stand/ppo-smoke-01/`.
+
+**Next:** bounded Stand learning-curve evaluation with fixed settings; matching
+Godot observation/reference adapter and replay before policy promotion. No Perturb
+or long unattended training yet. The exported 300-channel actor is experimental
+and cannot replace the existing 105/140-channel Godot policies.
+
+## 2026-09-21: MimicKit compatibility setup passes; Stand task is next
+
+Implemented setup stages 1–5 in [mimic/README.md](mimic/README.md). A separate
+Python environment and project-local MimicKit Newton adapter preserve the native
+MuJoCo rig, offset hinge joints, passive mechanics, 33 actuators / 30 policy actions,
+60% torque authority and two-step action delay. The existing Godot bridge and
+accepted/shipped policies are unchanged. The original working tree and accepted
+checkpoint are preserved under `logs/mimickit-compat/baseline/`.
+
+Five regression tests and the GPU/native compatibility gates pass: 65 poses,
+matching collision eligibility and sampled contacts, delayed controls, a two-world
+0.5-second open-loop comparison and reset checks. Pose mapping error is below
+1.2e-6 m; the recorded rollout root/joint differences are 1.714e-6 m / 1.749e-5 rad.
+This establishes a bounded compatibility result, not learned Stand behavior or
+long-horizon sim-to-sim equivalence. GPU reset replay is tolerance-based, not bitwise.
+
+**Next:** select a motion with verified training/commercial-use permissions,
+retarget standing/weight shifting into native hinge coordinates, then implement
+the Stand reference observations, action space, per-world resets and Godot policy
+contract. No external motion/pretrained archive was downloaded and no training or
+policy export occurred. Do not resume the rejected demonstration candidate below.
+
 ## 2026-09-21: demonstration cloning calms standing but regresses recovery
 
 **Decision: reject the demonstration candidate.** Keep the accepted training actor

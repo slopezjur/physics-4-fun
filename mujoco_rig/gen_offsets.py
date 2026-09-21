@@ -76,6 +76,7 @@ def main():
     assert pointers['DataContact'] is not None
     contact_stride = contact.dist.strides[0]
     contact_geom = contact.geom.ctypes.data - contact.dist.ctypes.data
+    contact_frame = contact.frame.ctypes.data - contact.dist.ctypes.data
     # ncon is int32, not mjtSize. Probe a unique marker without invoking the engine
     # while the local data's count is changed, and restore it even on failure.
     original_count = data.ncon
@@ -105,7 +106,8 @@ def main():
     lines.extend(['    // Contact count is int32; contact.geom contains two int32 IDs.',
                   f'    public const int DataNcon = {ncon_offset};',
                   f'    public const int ContactStride = {contact_stride};',
-                  f'    public const int ContactGeom = {contact_geom};'])
+                  f'    public const int ContactGeom = {contact_geom};',
+                  f'    public const int ContactFrame = {contact_frame};'])
 
     body = "\n".join(lines)
     OUT.parent.mkdir(parents=True, exist_ok=True)

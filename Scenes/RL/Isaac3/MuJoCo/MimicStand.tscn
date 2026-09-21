@@ -1,0 +1,72 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://Source/RL/MuJoCo/MimicStand.cs" id="1_mimic"]
+[ext_resource type="Script" path="res://Source/Camera/CameraController.cs" id="2_cam"]
+
+[sub_resource type="PlaneMesh" id="Ground"]
+size = Vector2(10, 10)
+
+[sub_resource type="StandardMaterial3D" id="GroundMat"]
+albedo_color = Color(0.28, 0.30, 0.33, 1)
+
+[node name="MimicStand" type="Node3D"]
+script = ExtResource("1_mimic")
+ModelPath = "res://mujoco_rig/dummy.xml"
+BundleDirectory = "res://logs/mimickit-stand/target-pd-30min-01/selected-000833/export"
+MujocoLibraryDirectory = "res://mujoco_rig/mimic/.venv/Lib/site-packages/mujoco"
+TrialSeconds = 5.0
+
+[node name="Ground" type="MeshInstance3D" parent="."]
+mesh = SubResource("Ground")
+material_override = SubResource("GroundMat")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+position = Vector3(2.5, 1.7, 3.0)
+rotation_degrees = Vector3(-12, 40, 0)
+current = true
+script = ExtResource("2_cam")
+MoveSpeed = 3.0
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-45, -30, 0)
+shadow_enabled = true
+
+[node name="Hud" type="CanvasLayer" parent="."]
+
+[node name="Margin" type="MarginContainer" parent="Hud"]
+offset_left = 20.0
+offset_top = 20.0
+mouse_filter = 2
+
+[node name="Controls" type="VBoxContainer" parent="Hud/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 10
+mouse_filter = 2
+
+[node name="Title" type="Label" parent="Hud/Margin/Controls"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "Mimic Stand"
+
+[node name="Status" type="Label" parent="Hud/Margin/Controls"]
+layout_mode = 2
+text = "Loading standing policy…"
+
+[node name="Buttons" type="HBoxContainer" parent="Hud/Margin/Controls"]
+layout_mode = 2
+theme_override_constants/separation = 10
+mouse_filter = 2
+
+[node name="Restart" type="Button" parent="Hud/Margin/Controls/Buttons"]
+layout_mode = 2
+focus_mode = 0
+text = "Restart (R)"
+
+[node name="Pause" type="Button" parent="Hud/Margin/Controls/Buttons"]
+layout_mode = 2
+focus_mode = 0
+text = "Pause (P)"
+
+[node name="Help" type="Label" parent="Hud/Margin/Controls"]
+layout_mode = 2
+text = "Live physics · Reference-guided standing trial\nRight-drag: look · WASD / Q / E: move · Wheel: camera speed"

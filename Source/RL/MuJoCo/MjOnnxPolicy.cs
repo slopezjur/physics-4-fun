@@ -18,6 +18,9 @@ internal sealed class MjOnnxPolicy : IMjPolicyInference
     private readonly string[] _outputs;
 
     internal MjOnnxPolicy(byte[] model, MjPolicyContract contract)
+        : this(model, contract.NumObs, contract.NumActions) { }
+
+    internal MjOnnxPolicy(byte[] model, int numObservations, int numActions)
     {
         _session = new InferenceSession(model);
         try
@@ -26,8 +29,8 @@ internal sealed class MjOnnxPolicy : IMjPolicyInference
                 throw new InvalidOperationException("Policy must have one input and one output.");
             var input = _session.InputMetadata.Single();
             var output = _session.OutputMetadata.Single();
-            Validate(input.Value, contract.NumObs);
-            Validate(output.Value, contract.NumActions);
+            Validate(input.Value, numObservations);
+            Validate(output.Value, numActions);
             _input = input.Key;
             _outputs = new[] { output.Key };
         }

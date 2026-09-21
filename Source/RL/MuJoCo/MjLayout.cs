@@ -60,4 +60,5 @@ internal static class MjLayout
     public const int DataNcon = 161568;
     public const int ContactStride = 576;
     public const int ContactGeom = 532;
+    public const int ContactFrame = 32;
 }

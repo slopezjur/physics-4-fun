@@ -1,0 +1,46 @@
+{
+  "passed": true,
+  "checks": {
+    "finite": true,
+    "joint_limits": true,
+    "foot_position": true,
+    "foot_slide_speed": true,
+    "penetration": true,
+    "joint_speed": true
+  },
+  "source": {
+    "dataset": "100STYLE",
+    "author": "Ian Mason",
+    "source": "https://www.ianxmason.com/100style/",
+    "license": "CC-BY-4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "credit": "The 100STYLE Dataset - Ian Mason",
+    "verified_date": "2026-09-21",
+    "permission_basis": "Author explicitly permits creative/commercial use with attribution; CC BY 4.0 permits adaptation.",
+    "files": {
+      "Neutral_ID.bvh": {
+        "url": "https://drive.google.com/uc?export=download&id=1Vnz5wnFmOztNzaSBHjSt9v6y0pl0FK8X",
+        "sha256": "71aead2e3246bdb47a5b839cb3e60e0574e9a1a046c071cc147e2922a35f259f"
+      },
+      "Frame_Cuts.csv": {
+        "url": "https://drive.google.com/uc?export=download&id=1d0VM8k4UjA4dDmaviuZMjAf-WQNLUwnZ",
+        "sha256": "e3c1d2beab6486e083622cef6a5402fe9b20edc75a9963ea30675c67ec29ee82"
+      }
+    }
+  },
+  "source_frame_start": 700,
+  "source_frame_stop_exclusive": 1060,
+  "source_stride": 2,
+  "frames": 180,
+  "dt": 0.033334,
+  "model_sha256": "e2b9d6c1fabae13f1f7710cab0bcde65dc548b94699f480b5d299a208901b5b8",
+  "reference_sha256": "61a083f1805ca029b80db7f39e219092d83411d4a0301b6b792f820cb32feec0",
+  "changes": "Cropped/resampled; semantic-axis remapping; fixed-foot collision-aware IK; Gaussian temporal smoothing (sigma 1.2 frames); neck/wrists retain zero targets; non-looping excerpt.",
+  "metrics": {
+    "max_foot_position_error_m": 0.000354645898268717,
+    "max_slide_speed_m_s": 0.00012113916787416426,
+    "max_penetration_m": 0.0003777253888537918,
+    "max_joint_velocity_rad_s": 0.6739967520797719,
+    "mean_fit_residual": 0.1410076833974072
+  }
+}
