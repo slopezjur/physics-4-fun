@@ -40,6 +40,7 @@ import mujoco.viewer                                                 # noqa: E40
 
 from env_config import FALL_FRACTION                                 # noqa: E402
 from perturb_env import PerturbEnv                                   # noqa: E402
+from observation_contract import LEGACY, checkpoint_version          # noqa: E402
 from ppo import ActorCritic                                          # noqa: E402
 from walk_env import WalkEnv                                         # noqa: E402
 
@@ -54,6 +55,7 @@ TELEMETRY_HZ = 4.0
 def load_policy(path, num_obs=None):
     """The actor from a checkpoint, plus what it was trained on."""
     ck = torch.load(path, map_location="cpu", weights_only=False)
+    checkpoint_version(ck)
     net = ActorCritic(ck["num_obs"], ck["num_actions"])
     net.load_state_dict(ck["model"])
     net.eval()
@@ -206,7 +208,7 @@ def main() -> int:
     else:
         env = PerturbEnv(num_envs=1, episode_seconds=1e6, seed=args.seed,
                          model="dummy_ball.xml", ball_every=tuple(args.ball_every),
-                         ball_speed=speed)
+                         ball_speed=speed, observation_version=checkpoint_version(ck) if ck else LEGACY)
     net = None
     if args.checkpoint:
         net, _ = load_policy(args.checkpoint, num_obs=env.num_obs)

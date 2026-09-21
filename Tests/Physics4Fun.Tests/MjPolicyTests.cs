@@ -38,6 +38,56 @@ public class MjPolicyTests
         return new MjPolicyContract(document.RootElement);
     }
 
+    private static JsonObject FoundationContract()
+    {
+        var json = ContractJson();
+        json["task"] = "perturb";
+        json["observation_version"] = "foundation_v2";
+        json["num_obs"] = 24;
+        var channels = json["observation_layout"]!.AsArray();
+        channels.Add(JsonNode.Parse("""{"name":"pelvis_origin_linear_velocity","offset":18,"width":3}"""));
+        channels.Add(JsonNode.Parse("""{"name":"foot_normal_load_kN_L_R","offset":21,"width":2}"""));
+        channels.Add(JsonNode.Parse("""{"name":"oldest_pending_action","offset":23,"width":1}"""));
+        return json;
+    }
+
+    [Fact]
+    public void FoundationReadsPhysicalSensorsAndBothPendingActionsBeforeQueueAdvances()
+    {
+        var state = new FakeState();
+        var inference = new FakeInference { Output = .2f };
+        using var driver = new MjPolicyDriver(state, Parse(FoundationContract()), inference);
+        for (int i = 0; i < 4; i++) driver.Step();
+        inference.Output = -.3f;
+        for (int i = 0; i < 4; i++) driver.Step();
+        driver.Step();
+        var obs = inference.Observations[^1];
+        Assert.Equal(-.3f, obs[3]);
+        Assert.Equal(.2f, obs[23]);
+        Assert.Equal(2.4, state.Control, 5);
+        Assert.Equal(new[] { 0f, 0f, 0f }, obs[7..10]);
+        Assert.Equal(new[] { -3f, -1f, 2f }, obs[18..21]);
+        Assert.Equal(.25f, obs[21], 6);
+        Assert.Equal(.5f, obs[22], 6);
+        driver.Reset();
+        driver.Step();
+        Assert.Equal(0, inference.Observations[^1][23]);
+        Assert.Equal(0, inference.Observations[^1][3]);
+    }
+
+    [Fact]
+    public void FoundationRejectsMissingQueueAndWrongVersionOrLatency()
+    {
+        var json = FoundationContract();
+        var observation = new MjPolicyObservation(new FakeState(), Parse(json));
+        Assert.Throws<InvalidOperationException>(() => observation.Write(new float[24], new float[1], Vector3.Zero));
+        json["action_latency_steps"] = 1;
+        Assert.Throws<InvalidOperationException>(() => Parse(json));
+        json = FoundationContract();
+        json["observation_version"] = "future_v9";
+        Assert.Throws<InvalidOperationException>(() => Parse(json));
+    }
+
     [Fact]
     public void WritesDeclaredOffsetsAndSanitizesObservations()
     {
@@ -168,7 +218,7 @@ public class MjPolicyTests
         public void Dispose() => Disposals++;
     }
 
-    private sealed class FakeState : IMjPolicyPlant
+    private sealed class FakeState : IMjPolicyPlant, IMjFoundationSensors
     {
         internal double Control;
         internal double Velocity = 2;
@@ -179,6 +229,8 @@ public class MjPolicyTests
             new Vector3(0, body == 0 ? 0.8f : body == 1 ? 0.04f : 0.1f, 0));
         public Vector3 BodySpatialLinearVelocity(int body) => Vector3.Zero;
         public Vector3 BodyAngularVelocity(int body) => Vector3.Zero;
+        public Vector3 BodyOriginVelocity(int body) => new(1, 2, 3);
+        public Vector2 FootNormalLoads() => new(250, 500);
         public double JointPosition(int joint) => 0.2;
         public double JointVelocity(int joint) => Velocity;
         public void SetControl(int actuator, double value) => Control = value;

@@ -79,37 +79,14 @@ FOOT_CLEAR = 0.06
 # the risk of a fall. Strengthen the reason to walk before raising this.
 WALK_FOOT_CLEAR = 0.016
 
-# How far the centre of mass may sit from the midpoint between the feet before the body is
-# OFF BALANCE. Beyond this a step is the only real recovery, and the reward pays for one.
+# Legacy pose/step diagnostics, retained for scorer comparisons and preflight fixtures.
+# These are not recovery reward weights. Grounded support and settling are defined
+# in recovery_reward.py; neither swing speed nor airborne placement earns a bonus.
 OFF_BALANCE = 0.06
+CAPTURE_V = 1.0           # m/s, reference speed for the preflight kinematic fixture
 
-# Swing-foot speed toward the escaping centre of mass that earns the FULL recovery-step reward.
-# The perturb reward once paid for single support alone, and a stomp satisfies that completely:
-# measured at 6 m/s, 78% of foot lifts travelled under 5 cm and the rest were directionally random
-# (mean cos -0.069 to the COM escape). Paying for velocity projected onto that direction makes a
-# stomp worth nothing and a step the wrong way worth nothing.
-#
-# **1.0 m/s, raised from 0.5 on 2026-09-11.** At 0.5 a brisk swing already earned the whole reward,
-# and the policy learned exactly that: measured on a 71.5% brain, first steps were 6-12 cm long and
-# landed 10-22 cm SHORT of the capture point (com + v / omega0), the fallers furthest short.
-# Reaching the capture point after a 30 N.s hit takes a swing of about 1 m/s, so the payment now
-# keeps growing up to it.
-CAPTURE_V = 1.0
-
-# How close to the capture point (com + v / omega0, omega0 = sqrt(g / com height)) a swing foot has
-# to be to earn the placement reward, as the width of a Gaussian. Measured on an 80.9% brain, first
-# steps landed 0.16-0.23 m SHORT of it after high hits: at 0.15 a foot 0.2 m short earns 17% of the
-# term and one on the point earns all of it.
-CAPTURE_PLACE_SIGMA = 0.15
-
-# The REST STANCE a balanced body is pulled back to after a hit (perturb). Watched in the scenes, after
-# a few hits the dummy stood with its feet crossed or nearly touching, and the old stance term could
-# not see either: it measured |y_left - y_right| in WORLD axes, so crossed feet read as a normal width,
-# a body that had turned after a hit was measured along the wrong axis, and a fore-aft split was not
-# measured at all; the pose term averages every joint, so crossed legs cost it about 2%. The stance
-# is now the feet in the pelvis's own heading frame, SIGNED (the left foot belongs on the left), times
-# the leg joints against the rest pose. Still paid only while balanced: a protective step moves a
-# foot, and ungated the old term cut steps taken from 0.62 to 0.34.
+# Strict rest-pose similarity is reported as a diagnostic. The recovery objective
+# accepts a comfortable staggered stance instead of forcing this exact pose.
 STANCE_SIGMA = 0.15        # m - Gaussian width on the feet's offset from the rest stance
 LEG_POSE_SCALE = 0.10      # rad^2 - on the mean squared leg-joint error from the rest pose
 LEG_BONES = ("Thigh", "Shin", "Foot")

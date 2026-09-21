@@ -10,12 +10,14 @@ which the body fell to 33.4% upright. A policy here has to keep its feet under i
 
 Sessions are normally chained and scored by `scripts/overnight.py`. One by hand:
 
-    python mujoco_rig/rl/train.py --task perturb --num_envs 4096 --steps 16 --max_minutes 15
+    python mujoco_rig/rl/train.py --task perturb --num_envs 4096 --steps 16 --max_minutes 5 \
+        --init_from logs/mujoco/<validated-run>/model_N.pt
 """
 from __future__ import annotations
 
 import argparse
 import importlib
+import hashlib
 import pathlib
 import sys
 import time
@@ -26,6 +28,11 @@ import torch
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from env_config import FALL_PENALTY  # noqa: E402
 from ppo import PPO  # noqa: E402
+from recovery_reward import TEMPORAL_SMOOTHNESS  # noqa: E402
+from policy_reference import PolicyReference  # noqa: E402
+from observation_contract import LEGACY, FOUNDATION, VERSIONS, checkpoint_version  # noqa: E402
+
+TRAINING_VERSION = "timeout_bootstrap_separate_optimizers_v1"
 
 
 def parse_args(argv=None):
@@ -35,6 +42,8 @@ def parse_args(argv=None):
                    help="perturb = survive ball impacts; walk = follow a velocity command")
     p.add_argument("--backend", choices=("cpu", "warp"), default="warp",
                    help="warp = mujoco_warp on the GPU (training only); cpu = MuJoCo C")
+    p.add_argument('--observation_version', choices=VERSIONS, default=None,
+                   help='Perturb sensor contract; omitted resumes the checkpoint contract')
     p.add_argument("--num_envs", type=int, default=8192)
     p.add_argument("--iterations", type=int, default=400)
     p.add_argument("--steps", type=int, default=24, help="rollout steps per env per iteration")
@@ -44,10 +53,21 @@ def parse_args(argv=None):
     p.add_argument("--max_minutes", type=float, default=0.0)
     p.add_argument("--init_std", type=float, default=0.03)
     p.add_argument("--entropy_coef", type=float, default=0.0005)
+    p.add_argument("--temporal_smoothness", type=float, default=None,
+                   help="mean-action temporal L1 weight; defaults to 0.1 for perturb, 0 for walk")
+    p.add_argument('--reference_data', default='', help='fixed CPU standing/impact targets from build_policy_reference.py')
+    p.add_argument('--reference_coef', type=float, default=None,
+                   help='fixed-reference penalty; new references default to 1, resumes retain their coefficient; 0 disables')
     # A GPU batch is ~28x the CPU one, so its gradient is far less noisy - but PPO still moves
     # the policy only as far as the KL cap allows, which is why raising num_envs alone bought
     # bigger batches and NOT faster wall-clock learning. This is the knob that spends them.
-    p.add_argument("--desired_kl", type=float, default=0.01)
+    p.add_argument("--desired_kl", type=float, default=None)
+    p.add_argument("--critic_warmup_iters", type=int, default=None,
+                   help="actor-frozen iterations after a target/reward change; perturb defaults to 50")
+    p.add_argument("--critic_min_ev", type=float, default=0.5,
+                   help="minimum explained variance to finish an enabled critic warm-up")
+    p.add_argument("--from_scratch", action="store_true",
+                   help="explicitly allow a new zero-torque actor instead of a validated seed")
     # Continue from an existing checkpoint; its optimiser state comes too when the shapes match
     # (see seed_from_checkpoint).
     # **Exploration does not always travel with the weights.** A seed's std comes with it by
@@ -56,13 +76,17 @@ def parse_args(argv=None):
     # different task: the walk was seeded from a balance brain whose std had collapsed to ~0.08
     # after hours of learning to stand perfectly still, so it began unable to explore away from
     # standing, and eleven sessions drove entropy from -28.3 to -29.8 while it failed to move.
-    p.add_argument("--reset_std", action="store_true",
+    exploration = p.add_mutually_exclusive_group()
+    exploration.add_argument("--reset_std", action="store_true",
                    help="re-inflate the seed's exploration std to --init_std. Use when the seed "
                         "was trained on a DIFFERENT task.")
+    exploration.add_argument('--exploration_scale', type=float, default=None,
+                   help='explicit one-time multiplier of a seed\'s per-joint std; '
+                        'preserves actor means; Perturb refits its critic before learning')
     p.add_argument("--init_from", default="",
                    help="path to a model_*.pt to seed the networks from")
-    p.add_argument("--lr_max", type=float, default=1e-2,
-                   help="ceiling on the adaptive learning rate")
+    p.add_argument("--lr_max", type=float, default=None,
+                   help="actor adaptive LR ceiling; defaults to 1e-6 for perturb, 1e-2 for walk")
     p.add_argument("--walk_stage", type=int, default=3, choices=(1, 2, 3, 4, 5),
                    help="walk only: how much of the command space to ask for. "
                         "See walk_config.STAGES.")
@@ -115,7 +139,13 @@ def parse_args(argv=None):
                         "so the critic can re-fit before the policy is allowed to move far")
     p.add_argument("--promote_lr", type=float, default=1e-4,
                    help="the learning-rate cap applied during that cooldown")
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    if args.exploration_scale is not None:
+        if not np.isfinite(args.exploration_scale) or args.exploration_scale <= 0:
+            p.error('--exploration_scale must be finite and positive')
+        if not args.init_from:
+            p.error('--exploration_scale requires --init_from')
+    return args
 
 
 # ---------------------------------------------------------------- tasks
@@ -123,6 +153,11 @@ class Task:
     """What the trainer needs from one task. A new task is a new one of these, nothing else."""
 
     envs: dict[str, str] = {}      # backend -> "module.Class"
+    temporal_smoothness = 0.0
+    lr_max = 1e-2
+    desired_kl = 0.01
+    value_clip = 0.2
+    critic_warmup_iters = 0
 
     def prepare(self, args):
         """Anything that must be set before the environment is built."""
@@ -138,6 +173,21 @@ class Task:
 
 class PerturbTask(Task):
     envs = {"cpu": "perturb_env.PerturbEnv", "warp": "perturb_env_warp.PerturbEnvWarp"}
+    temporal_smoothness = TEMPORAL_SMOOTHNESS
+    lr_max = 1e-6
+    desired_kl = 0.001
+    value_clip = None
+    critic_warmup_iters = 50
+
+    def prepare(self, args):
+        if args.from_scratch and args.init_from:
+            raise ValueError("Choose --init_from or --from_scratch, not both")
+        if not args.init_from and not args.from_scratch:
+            raise ValueError("Perturb requires --init_from <validated checkpoint>; "
+                             "use --from_scratch only for an intentional fresh-policy experiment")
+        if args.init_from:
+            from seed_validation import validate_checkpoint
+            validate_checkpoint(args.init_from)
 
     def env_kwargs(self, args):
         weights = {}
@@ -145,7 +195,11 @@ class PerturbTask(Task):
             if item.strip():
                 bone, weight = item.split("=")
                 weights[bone.strip()] = float(weight)
-        return {"ball_every": tuple(args.ball_every), "target_weights": weights or None}
+        version = getattr(args, 'observation_version', None)
+        if version is None and args.init_from:
+            version = checkpoint_version(torch.load(args.init_from, map_location='cpu', weights_only=False))
+        return {"ball_every": tuple(args.ball_every), "target_weights": weights or None,
+                "observation_version": version or LEGACY}
 
     def progress(self, env, curriculum):
         return f"speed {curriculum.speed:4.2f} ({curriculum.impulse:4.0f}N.s)"
@@ -156,6 +210,8 @@ class WalkTask(Task):
 
     def prepare(self, args):
         from walk_config import STAGES
+        if getattr(args, 'observation_version', None) not in (None, LEGACY):
+            raise ValueError('foundation_v2 is currently supported only for Perturb')
         s = STAGES[args.walk_stage]
         print(f"[train] walk stage {args.walk_stage}: forward {s['forward']} "
               f"lateral {s['lateral']} turn {s['turn']}", flush=True)
@@ -187,6 +243,13 @@ def seed_from_checkpoint(algo, env, args, device):
     """Start `algo` from `args.init_from`: its weights, its exploration std unless `--reset_std`,
     and its optimiser state when the shapes allow."""
     seed_ck = torch.load(args.init_from, map_location=device, weights_only=False)
+    source_version = seed_ck.get('observation_version', LEGACY)
+    if hasattr(env, 'observation_version'):
+        source_version = checkpoint_version(seed_ck)
+    destination_version = getattr(env, 'observation_version', LEGACY)
+    observation_changed = source_version != destination_version
+    if observation_changed and (source_version, destination_version) != (LEGACY, FOUNDATION):
+        raise ValueError('Unsupported observation migration; channels cannot be removed or reinterpreted')
     state = seed_ck["model"]
     if seed_ck["num_actions"] != env.num_actions:
         raise SystemExit(
@@ -213,6 +276,14 @@ def seed_from_checkpoint(algo, env, args, device):
             widened.append(f"{key} {tuple(old.shape)} -> {tuple(new.shape)}")
         print(f"[train] widened {seed_ck['num_obs']} -> {env.num_obs} obs, new channels zeroed: "
               + "; ".join(widened), flush=True)
+    objective_changed = (seed_ck.get("reward_version") != getattr(env, "reward_version", None)
+                         or seed_ck.get("training_version") != TRAINING_VERSION or observation_changed)
+    if objective_changed:
+        # Preserve the behaviour seed, but do not import values or Adam moments
+        # fitted to rewards that paid for hovering and rapid foot movements.
+        state.update({k: v for k, v in algo.net.state_dict().items() if k.startswith("critic.")})
+        print("[train] reward/target version changed: retaining actor, resetting critic and optimizers",
+              flush=True)
     algo.net.load_state_dict(state)
     seed_std = algo.net.log_std.detach().exp().mean().item()
     # The seed's exploration std comes with it. A converged policy has a small std, and
@@ -225,18 +296,78 @@ def seed_from_checkpoint(algo, env, args, device):
     # The optimiser state travels too (see save_checkpoint) - but only when the shapes match: a
     # widened input layer has different parameter tensors, and Adam's moments are per-tensor.
     carried = "weights only"
-    if "optimizer" in seed_ck and seed_ck.get("num_obs") == env.num_obs:
+    if not objective_changed and "optimizer" in seed_ck and seed_ck.get("num_obs") == env.num_obs:
         try:
             algo.opt.load_state_dict(seed_ck["optimizer"])
-            algo.lr = float(seed_ck.get("lr", algo.lr))
+            algo.critic_opt.load_state_dict(seed_ck["critic_optimizer"])
+            algo.lr = min(float(seed_ck.get("lr", algo.lr)), algo.lr_max)
             for g in algo.opt.param_groups:
                 g["lr"] = algo.lr
             carried = f"with optimiser state, lr {algo.lr:.2e}"
-        except ValueError as exc:
-            print(f"[train] optimiser state not carried: {exc}", flush=True)
+        except (ValueError, KeyError) as exc:
+            raise ValueError("Compatible checkpoint has incomplete or invalid optimizer state") from exc
+    warmup = getattr(args, "critic_warmup_iters", None)
+    if objective_changed:
+        algo.critic_warmup_remaining = TASKS[args.task].critic_warmup_iters if warmup is None else warmup
+        if observation_changed:
+            algo.critic_warmup_remaining = max(algo.critic_warmup_remaining, TASKS[args.task].critic_warmup_iters)
+    else:
+        algo.critic_warmup_remaining = int(seed_ck.get('critic_warmup_remaining', 0)) if warmup is None else warmup
+    scale = getattr(args, 'exploration_scale', None)
+    if scale is not None and scale != 1.0:
+        if not np.isfinite(scale) or scale <= 0 or args.reset_std:
+            raise ValueError('Exploration scaling requires a positive finite factor and no --reset_std')
+        # Change only exploration: retain the learned pattern across joints and
+        # all actor-mean weights/moments. Old std moments describe another scale.
+        with torch.no_grad():
+            algo.net.log_std.add_(float(np.log(scale)))
+        algo.opt.state.pop(algo.net.log_std, None)
+        minimum = TASKS[args.task].critic_warmup_iters
+        algo.critic_warmup_remaining = max(algo.critic_warmup_remaining, minimum)
+        print(f'[train] exploration scaled once by {scale:g}; std {seed_std:.3f} -> '
+              f'{algo.net.log_std.exp().clamp_min(algo.net.min_std).mean():.3f}; '
+              f'critic warm-up {algo.critic_warmup_remaining}', flush=True)
+    if seed_ck.get('policy_reference') is not None:
+        if seed_ck.get('task') != args.task or seed_ck['num_obs'] != env.num_obs:
+            if seed_ck.get('task') != args.task or not getattr(args, 'reference_data', ''):
+                raise ValueError('Observation migration requires explicit recollected --reference_data; task cannot change')
+        else:
+            algo.reference = PolicyReference.from_state_dict(seed_ck['policy_reference'], device)
     print(f"[train] seeded from {args.init_from} "
           f"(task {seed_ck.get('task', '?')}, std {algo.net.log_std.exp().mean():.3f}, "
           f"{carried})", flush=True)
+
+
+def configure_reference(algo, env, args):
+    """Changed artifacts replace the teacher; repeated or omitted flags preserve continuation."""
+    if args.reference_coef is not None and (not np.isfinite(args.reference_coef) or args.reference_coef < 0):
+        raise ValueError('--reference_coef must be finite and non-negative')
+    if args.reference_data:
+        data = torch.load(args.reference_data, map_location='cpu', weights_only=False)
+        coefficient = 1.0 if args.reference_coef is None else args.reference_coef
+        supplied = PolicyReference(data, algo.device, coefficient)
+        if algo.reference is None or not algo.reference.same_targets(supplied):
+            algo.reference = supplied
+        elif args.reference_coef is not None:
+            algo.reference.coefficient = args.reference_coef
+    elif args.reference_coef is not None:
+        if algo.reference is None and args.reference_coef:
+            raise ValueError('--reference_coef requires --reference_data or a reference-constrained seed')
+        if algo.reference is not None:
+            algo.reference.coefficient = args.reference_coef
+    if algo.reference is None:
+        return
+    reference = algo.reference
+    if (reference.num_obs, reference.num_actions) != (env.num_obs, env.num_actions):
+        raise ValueError('Reference observation/action dimensions do not match the environment')
+    if reference.source.get('observation_version', LEGACY) != getattr(env, 'observation_version', LEGACY):
+        raise ValueError('Reference observation semantics do not match the environment')
+    root = pathlib.Path(__file__).resolve().parents[1]
+    expected = reference.source.get('model_sha256', {})
+    for name in ('dummy.xml', 'dummy_ball.xml'):
+        if hashlib.sha256((root / name).read_bytes()).hexdigest() != expected.get(name):
+            raise ValueError(f'Reference plant differs from current {name}; rebuild the reference')
+    print(f"[train] fixed reference {reference.source['checkpoint']} coefficient {reference.coefficient:g}", flush=True)
 
 
 def save_checkpoint(path, algo, env, args, steps, speed):
@@ -252,9 +383,17 @@ def save_checkpoint(path, algo, env, args, steps, speed):
     budget.
     """
     torch.save({"model": algo.net.state_dict(), "optimizer": algo.opt.state_dict(),
+                "critic_optimizer": algo.critic_opt.state_dict(),
+                "training_version": TRAINING_VERSION,
+                "observation_version": getattr(env, 'observation_version', LEGACY),
+                "critic_warmup_remaining": algo.critic_warmup_remaining,
+                "policy_reference": algo.reference.state_dict() if algo.reference is not None else None,
+                "training_args": vars(args),
                 "lr": algo.lr, "num_obs": env.num_obs,
                 "steps": steps, "num_envs": env.num_envs,
                 "task": args.task, "ball_speed": speed,
+                "reward_version": getattr(env, "reward_version", None),
+                "temporal_smoothness": algo.temporal_smoothness_coef,
                 "ball_every": tuple(args.ball_every),
                 "num_actions": env.num_actions}, path)
 
@@ -267,6 +406,7 @@ class EpisodeStats:
         self.device = device
         self.returns: list[float] = []
         self.lengths: list[float] = []
+        self.recoveries: list[float] = []
         self.resize(num_envs)
 
     def resize(self, num_envs):
@@ -278,7 +418,7 @@ class EpisodeStats:
         self._return = torch.zeros(num_envs, device=self.device)
         self._length = torch.zeros(num_envs, device=self.device)
 
-    def record(self, reward, done):
+    def record(self, reward, done, recovered=None):
         """Accumulate one step of every world; returns how many episodes it finished."""
         self._return += reward
         self._length += 1
@@ -289,12 +429,15 @@ class EpisodeStats:
             return 0
         self.returns.extend(self._return[finished].tolist())
         self.lengths.extend(self._length[finished].tolist())
+        if recovered is not None:
+            self.recoveries.extend(recovered[finished].float().tolist())
         self._return[finished] = 0.0
         self._length[finished] = 0.0
         # Bound the history; a GPU run finishes millions of episodes.
         if len(self.lengths) > 4000:
             del self.lengths[:-2000]
             del self.returns[:-2000]
+            del self.recoveries[:-2000]
         return int(finished.numel())
 
     def mean_return(self, last):
@@ -306,6 +449,7 @@ class EpisodeStats:
     def clear(self):
         self.returns.clear()
         self.lengths.clear()
+        self.recoveries.clear()
 
 
 def collect_rollout(env, algo, obs, steps, episodes, device):
@@ -318,17 +462,24 @@ def collect_rollout(env, algo, obs, steps, episodes, device):
     # copy 196k x 120 floats across PCIe every step and undo the entire point of the port.
     z = dict(device=device)
     buf = {"obs": torch.zeros(steps, env.num_envs, env.num_obs, **z),
+           "next_obs": torch.zeros(steps, env.num_envs, env.num_obs, **z),
            "act": torch.zeros(steps, env.num_envs, env.num_actions, **z),
            "logp": torch.zeros(steps, env.num_envs, **z),
            "rew": torch.zeros(steps, env.num_envs, **z),
            "done": torch.zeros(steps, env.num_envs, **z),
            "val": torch.zeros(steps, env.num_envs, **z)}
+    buf['timeout_value'] = torch.zeros(steps, env.num_envs, **z)
     finished = 0
     nonfinite = torch.zeros((), device=device)
     for t in range(steps):
         action, logp, value = algo.act(obs)
         buf["obs"][t], buf["act"][t], buf["logp"][t], buf["val"][t] = obs, action, logp, value
-        obs, reward, done, _ = env.step(action)
+        obs, reward, done, extras = env.step(action)
+        buf["next_obs"][t] = obs
+        timeout = extras['time_outs']
+        if timeout.any():
+            with torch.no_grad():
+                buf['timeout_value'][t, timeout] = algo.net.value(extras['terminal_observation'][timeout])
         # **Last line of defence.** The envs retire a diverged world and replace its reward, but
         # one non-finite reward reaching the buffer turns the whole update into NaN - which is
         # how walk training died twice on 2026-09-10. Replace it, count it, and say so.
@@ -336,7 +487,7 @@ def collect_rollout(env, algo, obs, steps, episodes, device):
         nonfinite = nonfinite + bad.sum()
         reward = torch.where(bad, torch.full_like(reward, -FALL_PENALTY), reward)
         buf["rew"][t], buf["done"][t] = reward, done.float()
-        finished += episodes.record(reward, done)
+        finished += episodes.record(reward, done, extras.get("recovered"))
     return buf, obs, finished, int(nonfinite)
 
 
@@ -381,8 +532,7 @@ class Curriculum:
         return self.speed * self.ball_kg
 
     def cap_lr(self, it, algo):
-        """The cooldown after a promotion. The adaptive controller reacts to a bad step AFTER it
-        has been taken; this is the only thing that stops the step being taken at all."""
+        """Cap the initial step after a curriculum change, in addition to PPO's KL guard."""
         if it - self.promoted_at < self.cooldown and algo.lr > self.cooldown_lr:
             algo.lr = self.cooldown_lr
             for g in algo.opt.param_groups:
@@ -416,7 +566,9 @@ class Curriculum:
                 and self.stage_episodes >= self.min_episodes
                 and self.stage_iters >= dwell
                 and len(episodes.lengths) >= 100
-                and episodes.mean_length(100) > target):
+                and episodes.mean_length(100) > target
+                and (not episodes.recoveries
+                     or np.mean(episodes.recoveries[-100:]) >= self.promote_at)):
             return
         # What the gate actually saw. Every session on 2026-09-10 promoted at exactly iterations
         # 75 and 150, which reads like a clock rather than a mastery test.
@@ -491,18 +643,28 @@ def main() -> int:
     make_env = env_factory(task, args, device)
     schedule = WorldSchedule(args)
     env = make_env(schedule.first(args.num_envs))
+    smoothness = args.temporal_smoothness
+    if smoothness is None:
+        smoothness = task.temporal_smoothness
+    if not np.isfinite(smoothness) or smoothness < 0:
+        raise ValueError("--temporal_smoothness must be finite and non-negative")
+    lr_max = args.lr_max if args.lr_max is not None else task.lr_max
     algo = PPO(env.num_obs, env.num_actions, device=device,
                init_std=args.init_std, entropy_coef=args.entropy_coef,
-               desired_kl=args.desired_kl, epochs=args.epochs,
-               minibatches=args.minibatches, lr_max=args.lr_max)
+               desired_kl=task.desired_kl if args.desired_kl is None else args.desired_kl, epochs=args.epochs,
+               minibatches=args.minibatches, lr_max=lr_max,
+               temporal_smoothness_coef=smoothness, value_clip=task.value_clip)
+    if args.critic_warmup_iters is not None and args.critic_warmup_iters < 0:
+        raise ValueError("--critic_warmup_iters must be non-negative")
     if args.init_from:
         seed_from_checkpoint(algo, env, args, device)
+    configure_reference(algo, env, args)
 
     log_dir = pathlib.Path("logs/mujoco") / (time.strftime("%Y-%m-%d_%H-%M-%S") + "_" + args.run_name)
     log_dir.mkdir(parents=True, exist_ok=True)
     print(f"[train] task={args.task} {env.num_envs} envs, {env.num_obs} obs, "
           f"{env.num_actions} actions, episode {env.max_episode_length} steps, NO balance assist, "
-          f"init_std {args.init_std}, "
+          f"policy_std {algo.net.log_std.exp().clamp_min(algo.net.min_std).mean():.3f}, "
           f"ball every {args.ball_every[0]:.0f}-{args.ball_every[1]:.0f}s -> {log_dir}", flush=True)
 
     curriculum = Curriculum(args, env)
@@ -528,7 +690,8 @@ def main() -> int:
                   f"replaced by the fall penalty - an env guard is missing", flush=True)
         with torch.no_grad():
             last_value = algo.net.value(obs)
-        adv, ret = algo.compute_returns(buf["rew"], buf["done"], buf["val"], last_value)
+        adv, ret = algo.compute_returns(buf["rew"], buf["done"], buf["val"], last_value,
+                                       timeout_values=buf['timeout_value'])
         curriculum.stage_iters += 1
 
         grown = schedule.grow(it, env.num_envs, episodes, steps)
@@ -544,14 +707,21 @@ def main() -> int:
             episodes.resize(env.num_envs)
         curriculum.cap_lr(it, algo)
 
+        warming = algo.critic_warmup_remaining > 0
         stats = algo.update((
             buf["obs"].reshape(-1, env.num_obs),
             buf["act"].reshape(-1, env.num_actions),
             buf["logp"].reshape(-1),
             adv.reshape(-1),
             ret.reshape(-1),
-            buf["val"].reshape(-1)))
-        curriculum.maybe_promote(it, env, steps, episodes)
+            buf["val"].reshape(-1)), next_obs=buf["next_obs"].reshape(-1, env.num_obs),
+            transition_valid=1.0 - buf["done"].reshape(-1), critic_only=warming)
+        if warming:
+            algo.critic_warmup_remaining = max(0, algo.critic_warmup_remaining - 1)
+            if not np.isfinite(stats['explained_variance']) or stats['explained_variance'] < args.critic_min_ev:
+                algo.critic_warmup_remaining = max(1, algo.critic_warmup_remaining)
+        else:
+            curriculum.maybe_promote(it, env, steps, episodes)
 
         if it % 5 == 0 or it == 1:
             minutes = (time.time() - started) / 60.0
@@ -559,6 +729,16 @@ def main() -> int:
                   f"ep_len {episodes.mean_length(200):6.1f}/{env.max_episode_length}  "
                   f"{task.progress(env, curriculum)}  "
                   f"kl {stats['kl']:+.4f}  lr {algo.lr:.2e}  entropy {stats['entropy']:6.2f}"
+                  f"  temporal {stats['temporal_loss']:.4f}"
+                  f"  value {stats['value_loss']:.1f} ev {stats['explained_variance']:.3f}"
+                  f"  ev_before {stats['value_ev_before']:.3f}"
+                  f"  bias_before {stats['value_bias_before']:+.1f}"
+                  f"  rmse_before {stats['value_rmse_before']:.1f}"
+                  f"  adv_std {stats['advantage_std']:.1f}"
+                  f"  actor_updates {stats['actor_updates']} kl_stop {stats['kl_stopped']}"
+                  f"  warmup {algo.critic_warmup_remaining}"
+                  + (f"  ref_quiet {stats['reference_quiet']:.5f} ref_impact {stats['reference_impact']:.5f}"
+                     if algo.reference is not None else "")
                   + (f"  n{env.num_envs}" if schedule.sizes else "")
                   + f"  {minutes:5.1f} min", flush=True)
 
@@ -571,6 +751,8 @@ def main() -> int:
             break
 
     print(f"[train] done -> {log_dir}", flush=True)
+    if algo.critic_warmup_remaining:
+        print("[train] critic warm-up is incomplete; the actor remains frozen", flush=True)
     return 0
 
 

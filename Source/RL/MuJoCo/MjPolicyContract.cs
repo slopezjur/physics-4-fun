@@ -10,6 +10,7 @@ internal sealed class MjPolicyContract
 {
     internal readonly record struct Channel(string Name, int Offset, int Width);
     internal string Task { get; }
+    internal string ObservationVersion { get; }
     internal int NumObs { get; }
     internal int NumActions { get; }
     internal int Decimation { get; }
@@ -26,6 +27,9 @@ internal sealed class MjPolicyContract
     internal MjPolicyContract(JsonElement root)
     {
         Task = root.TryGetProperty("task", out var task) ? task.GetString()! : "perturb";
+        ObservationVersion = root.TryGetProperty("observation_version", out var version)
+            ? version.GetString()! : "legacy_v1";
+        Require(ObservationVersion is "legacy_v1" or "foundation_v2", "Unsupported observation version.");
         NumObs = root.GetProperty("num_obs").GetInt32();
         NumActions = root.GetProperty("num_actions").GetInt32();
         Decimation = root.GetProperty("decimation").GetInt32();
@@ -53,6 +57,14 @@ internal sealed class MjPolicyContract
             ["command_vx_vy_yaw"] = 3,
         };
         var channels = new List<Channel>();
+        if (ObservationVersion == "foundation_v2")
+        {
+            Require(Task == "perturb" && ActionLatencySteps == 2,
+                "foundation_v2 requires Perturb with a two-step action queue.");
+            widths["pelvis_origin_linear_velocity"] = 3;
+            widths["foot_normal_load_kN_L_R"] = 2;
+            widths["oldest_pending_action"] = NumActions;
+        }
         var occupied = new bool[NumObs];
         var names = new HashSet<string>();
         foreach (var item in root.GetProperty("observation_layout").EnumerateArray())
@@ -71,6 +83,8 @@ internal sealed class MjPolicyContract
             channels.Add(new Channel(name, offset, width));
         }
         Require(occupied.All(v => v), "Observation layout contains gaps.");
+        if (ObservationVersion == "foundation_v2")
+            Require(names.SetEquals(widths.Keys), "foundation_v2 requires every sensor channel.");
         Channels = channels.AsReadOnly();
 
         var map = root.TryGetProperty("action_to_control", out var control)

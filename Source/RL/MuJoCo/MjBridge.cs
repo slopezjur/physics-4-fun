@@ -14,10 +14,11 @@ namespace Physics4Fun.RL.MuJoCo;
 /// <para>The rig is generated from the Godot scene by <c>mujoco_rig/build_mjcf.py</c>, so there is no
 /// second hand-maintained skeleton to drift.</para>
 /// </remarks>
-internal sealed class MjBridge : IDisposable, IMjPolicyPlant
+internal sealed class MjBridge : IDisposable, IMjPolicyPlant, IMjFoundationSensors
 {
     private IntPtr _model;
     private IntPtr _data;
+    private MjFootLoadSensor? _footLoadSensor;
 
     /// <summary>Bodies in the model, including the world body at index 0.</summary>
     internal int BodyCount { get; }
@@ -416,7 +417,13 @@ internal sealed class MjBridge : IDisposable, IMjPolicyPlant
     }
 
     /// <summary>Velocity at a body's origin, rather than cvel's subtree COM reference point.</summary>
-    internal Vector3 BodyOriginVelocity(int body) => LinearVelocityAt(body, MjLayout.DataXpos);
+    public Vector3 BodyOriginVelocity(int body) => LinearVelocityAt(body, MjLayout.DataXpos);
+
+    public Vector2 FootNormalLoads()
+    {
+        EnsureAlive();
+        return (_footLoadSensor ??= new MjFootLoadSensor(_model, _data)).Read();
+    }
 
     private Vector3 LinearVelocityAt(int body, int positionOffset)
     {

@@ -10,7 +10,7 @@ What a task is scored on is `scoring.py`'s. What a chain does for a task beyond 
 train.py arguments, when a running session is hopeless, how a finished one is judged and where the
 next one starts - is a `SessionPolicy` here.
 
-    python mujoco_rig/scripts/overnight.py --task perturb --sessions 12 --minutes 15 \
+    python mujoco_rig/scripts/overnight.py --task perturb --sessions 12 --minutes 5 \
         --seed logs/mujoco/<run>/model_N.pt
 """
 from __future__ import annotations
@@ -41,6 +41,11 @@ class SessionPolicy(ABC):
 
     task = ""
     tolerance = 0.0    # how far below the best a session may score and still be chained from
+    minutes = 15.0
+    stop_on_rejection = False
+
+    def validate(self, args):
+        """Validate task-specific launch requirements before starting subprocesses."""
 
     def train_args(self, speed_now, args):
         """Extra train.py arguments for the next session."""
@@ -48,6 +53,10 @@ class SessionPolicy(ABC):
 
     def abort_verdict(self, rows, text, args):
         """A reason to stop a running session early, or None."""
+        return None
+
+    def regression(self, name, accepted_name, scratch):
+        """Optional secondary outcome gate against the accepted seed."""
         return None
 
     @abstractmethod
@@ -59,21 +68,36 @@ class SessionPolicy(ABC):
 
 class PerturbSessions(SessionPolicy):
     task = "perturb"
-    # Only a CLEAR regression is rejected - about four standard errors of single-hit survival at the
-    # default 512 envs. A session whose episode length went 252 -> 735 was once discarded over a
-    # 0.9-point difference, which is noise, and the chain then could not advance at all.
-    tolerance = 8.0
+    # Both recovery and survival must hold before a candidate can seed another chunk.
+    tolerance = 0.0
+    minutes = 5.0
+    stop_on_rejection = True
+
+    def validate(self, args):
+        if not args.seed:
+            raise ValueError("Perturb chaining requires --seed <validated checkpoint>")
+        if not 0 < args.minutes <= 5:
+            raise ValueError("Perturb sessions must be in (0, 5] minutes; increase --sessions for more training")
+
+    def regression(self, name, accepted_name, scratch):
+        if accepted_name is None:
+            return None
+        scorer = TASKS[self.task]
+        new = scorer.read(scratch / f"{name}.score.json")
+        old = scorer.read(scratch / f"{accepted_name}.score.json")
+        if new is None or old is None:
+            return "missing recovery comparison"
+        return scorer.regression(new, old)
 
     def train_args(self, speed_now, args):
         # **The curriculum position travels with the chain.** train.py starts at --speed_start, so
         # without this every session would quietly go back to the start of the curriculum.
         #
-        # **At most one step per session.** Every session on 2026-09-10 climbed two whether or not
-        # the policy had mastered the stage, and handed the next a difficulty it had never beaten.
-        # Where the next session starts is decided from measurement, in `score`.
+        # Keep the stage fixed within a session. Only the CPU settled-recovery
+        # measurement below can raise it; episode length alone is not mastery.
         return ["--ball_every", args.ball_every[0], args.ball_every[1],
                 "--speed_start", speed_now,
-                "--speed_end", min(args.speed_end, speed_now * args.speed_step),
+                "--speed_end", speed_now,
                 "--speed_step", args.speed_step,
                 "--stage_min_episodes", 3000, "--stage_min_iters", 15]
 
@@ -101,23 +125,26 @@ class PerturbSessions(SessionPolicy):
         ref = scorer.read(ref_json) if codes[0] == 0 else None
         here = scorer.read(stage_json) if codes[1] == 0 else None
         metric = scorer.metric(ref) if ref else float("nan")
-        detail = (f"{ref['survived']:.1f}% one hit at {args.speed_ref:.2f} "
+        rejected = scorer.collapsed(ref) if ref else 'reference scoring failed'
+        if rejected:
+            return metric, rejected, speed_now, rejected
+        detail = (f"{ref['recovered']:.1f}% recovered at {args.speed_ref:.2f} "
                   f"(aimed {ref['aimed']:.0f}%, no-step {ref['no_step']:.0f}%, "
                   f"stance {ref.get('stance', float('nan')):.2f}) | "
-                  + (f"{here['survived']:.1f}% at {speed}" if here else "-")
+                  + (f"{here['recovered']:.1f}% recovered at {speed}" if here else "-")
                   if ref else "- | -")
         if here is None:
-            # Nothing measured at the session's own difficulty: keep the stage the trainer reached.
-            import torch
-            reached = torch.load(ck, map_location="cpu", weights_only=False).get("ball_speed")
-            return metric, detail, float(reached or speed_now), None
+            return metric, detail, speed_now, 'stage scoring failed'
+        rejected = scorer.collapsed(here)
+        if rejected:
+            return metric, detail, speed_now, rejected
         # **The difficulty follows measured competence, in both directions.** It used to be
         # inherited from the checkpoint, so it could only ratchet: four sessions climbed
         # 2.66 -> 5.70 m/s while survival at the training difficulty fell 64.5% -> 25.2%.
         reached = float(speed)
-        if here["survived"] >= args.advance_at:
+        if here["recovered"] >= args.advance_at:
             nxt, move = min(args.speed_end, reached * args.speed_step), "advance"
-        elif here["survived"] < args.descend_below:
+        elif here["recovered"] < args.descend_below:
             nxt, move = max(args.speed_min, reached / args.speed_step), "descend"
         else:
             nxt, move = reached, "hold"
@@ -199,12 +226,15 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--task", choices=tuple(POLICIES), required=True)
+    p.add_argument("--backend", choices=("cpu", "warp"), default="warp")
+    p.add_argument("--training_seed", type=int, default=0)
     p.add_argument("--seed", default="", help="checkpoint to start the first session from")
     p.add_argument("--sessions", type=int, default=8)
-    p.add_argument("--minutes", type=float, default=15.0)
+    p.add_argument("--minutes", type=float, default=None)
     p.add_argument("--tag", default="")
     p.add_argument("--envs", type=int, default=16384)
     p.add_argument("--steps", type=int, default=16)
+    p.add_argument("--seconds", type=float, default=20.0)
     p.add_argument("--ball_speed", type=float, default=None,
                    help="the first session's difficulty. Given explicitly it wins over the seed's "
                         "stored one; it used to be silently replaced by it.")
@@ -228,8 +258,8 @@ def main() -> int:
                    help="one curriculum step, passed to train.py so the two agree what it is")
     p.add_argument("--speed_min", type=float, default=2.0,
                    help="the curriculum never descends below this")
-    p.add_argument("--advance_at", type=float, default=50.0,
-                   help="single-hit survival %% at the session's own difficulty needed to advance")
+    p.add_argument("--advance_at", type=float, default=85.0,
+                   help="settled recovery %% at the session's own difficulty needed to advance")
     p.add_argument("--descend_below", type=float, default=25.0,
                    help="below this the next session trains one step EASIER. Nothing could lower "
                         "the difficulty before: four sessions climbed 2.66 -> 5.70 m/s while "
@@ -251,6 +281,9 @@ def main() -> int:
     p.add_argument("--note", default="", help="one line written into the log header")
     args = p.parse_args()
     policy = POLICIES[args.task]
+    if args.minutes is None:
+        args.minutes = policy.minutes
+    policy.validate(args)
     if args.tolerance is None:
         args.tolerance = policy.tolerance
 
@@ -266,6 +299,8 @@ def main() -> int:
     seed = args.seed
     best = None
     best_checkpoint = None
+    accepted_name = None
+    stopped_on_rejection = False
     speed_now = args.ball_speed
     if speed_now is None:
         speed_now = 1.5
@@ -274,18 +309,24 @@ def main() -> int:
             speed_now = float(torch.load(seed, map_location="cpu",
                                          weights_only=False).get("ball_speed", speed_now))
     if seed:
-        metric, _, _, collapsed = policy.score(seed, str(speed_now), speed_now,
+        metric, detail, next_speed, collapsed = policy.score(seed, str(speed_now), speed_now,
                                                f"{tag}_seed", scratch, args)
         if not math.isfinite(metric) or collapsed:
             print(f"[night] initial seed has no usable score: {collapsed or 'scoring failed'}")
             return 1
         best, best_checkpoint = metric, seed
+        accepted_name = f"{tag}_seed"
+        # The evaluated seed can already have mastered its saved difficulty.
+        # Apply the same curriculum decision used after an accepted chunk.
+        speed_now = next_speed
+        print(f"[night] seed: {detail}", flush=True)
     for s in range(1, args.sessions + 1):
         name = f"{tag}_s{s}"
         log = scratch / f"{name}.log"
-        cmd = [PY, "-u", RL / "train.py", "--task", args.task, "--backend", "warp",
+        cmd = [PY, "-u", RL / "train.py", "--task", args.task, "--backend", args.backend,
+               "--seed", args.training_seed,
                "--num_envs", args.envs, "--steps", args.steps, "--iterations", 1000000,
-               "--seconds", 20, "--max_minutes", args.minutes, "--init_std", 0.2,
+               "--seconds", args.seconds, "--max_minutes", args.minutes, "--init_std", 0.2,
                "--epochs", 5, "--minibatches", 4, "--entropy_coef", args.entropy_coef,
                "--run_name", name] + policy.train_args(speed_now, args)
         if seed:
@@ -309,6 +350,9 @@ def main() -> int:
             with open(table, "a") as fh:
                 fh.write(f"| {s} | {(time.time()-t0)/60:.0f} | - | - | - | - | - | "
                          + f"ABORTED: {aborted} |" + chr(10))
+            if policy.stop_on_rejection:
+                stopped_on_rejection = True
+                break
             continue                      # same seed, next session
         rows = re.findall(r"^it\s+(\d+)\s+return\s+(\S+)\s+ep_len\s+(\S+)/\d+\s+"
                           r"(?:speed\s+(\S+)|vx\s+(\S+))", text, re.M)
@@ -318,6 +362,7 @@ def main() -> int:
             print(f"[night] {name} produced no usable iterations - stopping", flush=True)
             with open(table, "a") as fh:
                 fh.write(f"| {s} | {args.minutes:.0f} | - | - | - | - | - | FAILED |\n")
+            stopped_on_rejection = policy.stop_on_rejection
             break
         it, _, ep, speed = rows[-1]
 
@@ -325,10 +370,12 @@ def main() -> int:
         ck = newest_checkpoint(run_dir) if run_dir else None
         if ck is None:
             print(f"[night] {name} wrote no checkpoint - stopping", flush=True)
+            stopped_on_rejection = policy.stop_on_rejection
             break
 
         metric, detail, next_speed, collapsed = policy.score(ck, speed, speed_now, name, scratch,
                                                             args)
+        collapsed = collapsed or policy.regression(name, accepted_name, scratch)
         # Chain unless this is a CLEAR regression. `best` still tracks the high-water mark, so a
         # slow drift downward cannot walk the chain away from a good policy one tolerance at a time.
         # **Never chain a crashed or collapsed session.** A tolerance of 3 metres waved through
@@ -341,10 +388,11 @@ def main() -> int:
         note = ("chained" if ok
                 else "REJECTED: the trainer crashed" if crashed
                 else f"REJECTED: {collapsed}" if collapsed
-                else f"REGRESSED from {best:.1f}, re-chaining from previous" if best is not None
+                else f"REGRESSED from {best:.1f}, retaining previous seed" if best is not None
                 else "no usable score")
         if ok:
             seed = str(ck)
+            accepted_name = name
             speed_now = next_speed
             if best is None or metric > best:
                 best = metric
@@ -354,11 +402,14 @@ def main() -> int:
                      f"{detail} | {note} |\n")
         print(f"[night] {name}: it {it}, ep_len {ep}, difficulty {speed} -> {detail}  ({note})",
               flush=True)
+        if not ok and policy.stop_on_rejection:
+            stopped_on_rejection = True
+            break
 
     # Ship the best of the run, but only if it beats what the scenes already load. The decision
     # belongs to a measurement, not to whoever remembers to run export_onnx.py: a manual promotion
     # once put a policy that walked BACKWARDS into the scenes.
-    if best_checkpoint and not args.no_promote:
+    if best_checkpoint and not args.no_promote and not stopped_on_rejection:
         promoted = subprocess.run([str(PY), "-u", str(ROOT / "mujoco_rig" / "scripts" / "promote.py"),
                         "--task", args.task, "--checkpoint", best_checkpoint,
                         "--walk_speed", str(args.walk_speed)],
@@ -368,8 +419,13 @@ def main() -> int:
             return promoted.returncode
 
     print(f"\n[night] table: {table}")
+    if seed:
+        print(f"[night] accepted seed (includes continuation state): {seed}")
     if best_checkpoint:
         print(f"[night] best checkpoint: {best_checkpoint}")
+    if stopped_on_rejection:
+        print("[night] stopped after rejection; accepted seed retained. Adjust the experiment before retrying.")
+        return 2
     return 0 if best_checkpoint else 1
 
 

@@ -145,6 +145,7 @@ foreach ($pkg in @('mujoco', 'mujoco_warp', 'warp', 'torch')) {
 # adds three command channels, 120 -> 123) and in the reward. Scripts accept -Task to override this
 # for one command without editing the file.
 $Task = "perturb"
+if ($TaskOverride) { $Task = $TaskOverride }
 
 # Commanded velocity used when SCORING a walk policy and when driving the Godot scene:
 # forward m/s, lateral m/s, turn rate rad/s.
@@ -294,36 +295,22 @@ $Iterations = 0
 $MaxMinutes = 30
 
 # --- PPO ---------------------------------------------------------------------
-# Initial policy std. **Measured against the plant, not inherited from a tutorial.**
-# probe_noise.py: what governs survival is std x $Authority - the size of the random jump in the
-# joint target, which a position actuator at kp up to 1800 answers immediately.
-#
-#     std x authority   0.0375  0.0250  0.0125  0.0100  0.0075  0.0050
-#     time to fall       1.57s   2.33s   6.96s  10.81s   never   never
-#
-# At the 0.25 authority a protective step needs, 0.03 is the largest std with a 100% survival rate.
-# The textbook 0.5 puts the body on the floor in 1.6 s - before the first ball even fires.
+# Fresh-policy exploration only. A validated seed retains its learned std.
+# Old PD-hold noise measurements do not describe the current torque-controlled plant.
 $InitStd = 0.03
 
-# Summed over 36 action dims the usual 0.005 outweighs the advantage signal and drives std UP
-# (0.500 -> 0.512 over 475 iterations) on a plant where randomness is what topples the body.
+# Keep the entropy bonus small; fine-tuning preserves the seed's learned exploration.
 $EntropyCoef = 0.0005
 
-# KL target for the adaptive learning rate. A GPU batch has a far cleaner gradient than a CPU one,
-# so it can afford a larger step; this is where the extra samples get spent.
-$DesiredKl = 0.01
+# KL target for adaptive learning rate and actor early stopping within an update.
+$DesiredKl = if ($Task -eq 'perturb') { 0.001 } else { 0.01 }
 $Epochs = 5
 
 # --- The task ----------------------------------------------------------------
-# Episode length in seconds. The unaided body's median fall under fire is 12.8 s, so a 12 s episode
-# leaves almost no headroom to measure improvement against - 20 s does.
+# Training episode duration. Time limits bootstrap from the final state; falls do not.
 $Seconds = 20.0
 
-# Seconds between ball impacts, min and max.
-#
-# **The authored 2-4 s made the task impossible for every controller.** A single 10 kg impact is
-# survivable 75% of the time with no policy at all, but the same ball every 2-4 s topples 8/8 in
-# 6.8 s, because the next one lands mid-recovery and no recovery ever finishes.
+# Seconds between projectile launches, min and max. Flight time precedes impact.
 $BallEvery = @(4.0, 7.0)
 
 # --- Curriculum --------------------------------------------------------------
@@ -333,7 +320,7 @@ $BallEvery = @(4.0, 7.0)
 #
 # A protective step is too large a behaviour for 0.03 std to discover, so it has to be GROWN: every
 # increment stays inside the small noise ball around the policy that already works.
-$SpeedStart = 3.0      # 30 N.s on the 10 kg ball - about where the unaided body starts failing
+$SpeedStart = 2.0      # direct/fresh runs; resumed Perturb chains inherit the checkpoint's stage
 $SpeedEnd   = 6.0      # what the Godot Perturb scene actually fires
 $SpeedStep  = 1.10
 
@@ -354,11 +341,8 @@ $EvalEnvs = 12
 # this project; travel is also reported per quarter, because a fall produces distance.
 $EvalSeconds = 40.0
 
-# The number to beat, measured with NO policy at $BallEvery and $SpeedEnd:
-#     under fire   30.1% upright, 0/12 survived, median fall 12.8 s
-#     quiet room  100.0% upright, 12/12 survived
-# The quiet row matters: an all-zero action is a stiff PD hold on the rest pose and it stands
-# indefinitely, so any policy scoring below 100% quiet has DESTROYED a working controller.
+# Seeded Perturb training requires a 40-second CPU quiet-room gate. Zero torque is
+# a limp body on the current motor plant; it is not the historical PD-hold baseline.
 
 # --- Run selection -----------------------------------------------------------
 # Scripts pick the newest run that reached at least this many checkpoints. "Newest run" alone is
@@ -382,7 +366,6 @@ if ($BackendOverride) { $Backend = $BackendOverride }
 if ($EnvsOverride -gt 0) { $Envs = $EnvsOverride }
 if ($MinutesOverride -ge 0) { $MaxMinutes = $MinutesOverride }
 
-if ($TaskOverride) { $Task = $TaskOverride }
 if ($Task -ne "perturb" -and $Task -ne "walk") {
     throw "Unknown `$Task '$Task'. Use 'perturb' or 'walk'."
 }

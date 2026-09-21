@@ -23,7 +23,7 @@ MODEL_SPAN = 8_192
 DATA_PTRS = ("xpos", "xquat", "xipos", "ctrl", "qpos", "qvel", "xfrc_applied", "cvel", "subtree_com")
 # jnt_qposadr / jnt_dofadr locate a joint's slice of qpos and qvel. Assuming the ball
 # is "the last joint" would work today and break the moment the rig gains a body.
-MODEL_PTRS = ("body_mass", "jnt_qposadr", "jnt_dofadr", "body_rootid")
+MODEL_PTRS = ("body_mass", "jnt_qposadr", "jnt_dofadr", "body_rootid", "geom_bodyid")
 MODEL_SCALARS = ("nq", "nv", "nu", "nbody")
 
 
@@ -68,6 +68,27 @@ def main():
         assert off is not None, "could not locate mjData." + name
         pointers["Data" + pascal(name)] = off
 
+    # mjContact.dist is its first member (verified against the installed header).
+    # NumPy exposes the actual native stride and field addresses, including padding.
+    assert data.ncon > 1
+    contact = data.contact
+    pointers['DataContact'] = find_ptr(data._address, DATA_SPAN, contact.dist.ctypes.data)
+    assert pointers['DataContact'] is not None
+    contact_stride = contact.dist.strides[0]
+    contact_geom = contact.geom.ctypes.data - contact.dist.ctypes.data
+    # ncon is int32, not mjtSize. Probe a unique marker without invoking the engine
+    # while the local data's count is changed, and restore it even on failure.
+    original_count = data.ncon
+    try:
+        data.ncon = 123456789
+        raw = ctypes.string_at(data._address, DATA_SPAN)
+        hits = [i for i in range(0, DATA_SPAN - 4, 4)
+                if int.from_bytes(raw[i:i + 4], 'little') == data.ncon]
+        assert len(hits) == 1, 'ambiguous mjData.ncon offset'
+        ncon_offset = hits[0]
+    finally:
+        data.ncon = original_count
+
     lines = []
     for name, off in scalars.items():
         lines.append("    /// <summary>Offset of <c>mjModel." + name
@@ -81,6 +102,10 @@ def main():
         lines.append("    /// <summary>Offset of <c>" + struct + "." + field
                      + "</c> (pointer).</summary>")
         lines.append("    public const int " + name + " = " + str(off) + ";")
+    lines.extend(['    // Contact count is int32; contact.geom contains two int32 IDs.',
+                  f'    public const int DataNcon = {ncon_offset};',
+                  f'    public const int ContactStride = {contact_stride};',
+                  f'    public const int ContactGeom = {contact_geom};'])
 
     body = "\n".join(lines)
     OUT.parent.mkdir(parents=True, exist_ok=True)

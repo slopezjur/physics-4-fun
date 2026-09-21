@@ -248,39 +248,28 @@ def check_reward_ranking(env, capture=False):
 
 
 def check_step_is_worth_taking(env):
-    """Does the reward pay more for a CAPTURE step than for a stomp?
-
-    The perturb reward once paid for single support while off balance, and a stomp satisfies that
-    completely. Measured on 2026-09-10 at 6 m/s: 78% of foot lifts travelled under 5 cm, the rest
-    were directionally random (mean cos -0.069 to the COM escape), and four sessions learned
-    nothing. Three states identical in POSITION that differ only in how the lifted foot is moving:
-    not at all, toward the escaping centre of mass, and away from it. Only the capture should earn.
-    """
-    fixture = _step_fixture(env)
-    if fixture is None:
-        report(WARN, "reward: capture beats stomp",
-               "could not build an off-balance, one-foot fixture on this model; not judged")
-        return
-    set_state, rate = fixture
-    a = np.zeros(env.num_actions)
-    scores = {}
-    for label, w in (("stomp", 0.0), ("capture", rate), ("away", -rate)):
-        set_state(w)
-        scores[label] = env.reward(0, a)
-
-    gain = scores["capture"] - scores["stomp"]
-    report(OK if gain > 0.1 else FAIL, "reward: capture beats stomp",
-           f"capture {scores['capture']:+.2f} vs stomp {scores['stomp']:+.2f}"
-           + ("" if gain > 0.1 else "  <- a stomp earns what a step earns; the policy will farm it"))
-    # **Within 1% of what a capture earns, not exactly zero.** The placement term pays the swing
-    # foot's closeness to the capture point, which moves with the COM velocity - and swinging a leg
-    # moves the COM. On this fixture that couples a swing away to +0.0003 of placement, 0.01% of the
-    # capture's advantage; a real leak is the size of recover_step itself.
-    leak = scores["away"] - scores["stomp"]
-    clean = leak <= 0.01 * max(gain, 0.0)
-    report(OK if clean else FAIL, "reward: stepping away is not paid",
-           f"away {scores['away']:+.4f} vs stomp {scores['stomp']:+.4f}"
-           + ("" if clean else "  <- a step AWAY from the falling COM is rewarded"))
+    """Placement must help once grounded; faster hovering must not earn a bonus."""
+    from recovery_reward import reward_terms
+    env.reset_all()
+    f = env.recovery_features(0)
+    f.update(velocity=np.zeros(3), foot_velocity=np.zeros((2, 3)), slip_speed_sq=np.zeros(2),
+             action=np.zeros(env.num_actions), previous_action=np.zeros(env.num_actions),
+             rapid_replants=0.0)
+    f['com'] = f['com'].copy()
+    f['com'][0] += 0.30
+    f['feet'] = f['feet'].copy()
+    f['feet'][0, :2] = f['com'][:2]
+    f['grounded'] = np.array([False, True])
+    hover = sum(reward_terms(np, **f).values())
+    f['foot_velocity'][0, 0] = 2.0
+    fast = sum(reward_terms(np, **f).values())
+    f['foot_velocity'][:] = 0.0
+    f['grounded'][0] = True
+    landed = sum(reward_terms(np, **f).values())
+    report(OK if landed > hover + 0.1 else FAIL, 'reward: useful landing beats hover',
+           f'{landed:+.2f} vs {hover:+.2f}')
+    report(OK if fast <= hover else FAIL, 'reward: airborne speed earns no bonus',
+           f'{fast:+.2f} vs {hover:+.2f}')
 
 
 def check_walk_beats_statue(env):

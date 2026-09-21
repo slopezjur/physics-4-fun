@@ -128,6 +128,13 @@ class BodyEnv(ABC):
     def _before_physics(self, i, d, t):
         """A task's part of each control step for world `i`, before the physics runs."""
 
+    def _after_physics(self, i, d):
+        """Update task history once per control step, before reading its reward."""
+
+    def _step_extras(self):
+        """Task metrics captured before automatic resets clear episode history."""
+        return {}
+
     @abstractmethod
     def reward(self, i, action):
         """The task's reward for world `i` after this step's physics."""
@@ -218,6 +225,7 @@ class BodyEnv(ABC):
             self._before_physics(i, d, float(self.episode_length_buf[i]) * self.dt * self.decimation)
             for _ in range(self.decimation):
                 mujoco.mj_step(self.model, d)
+            self._after_physics(i, d)
             rewards[i] = self.reward(i, a[i])
 
         self.prev_action = a
@@ -236,11 +244,16 @@ class BodyEnv(ABC):
         rewards[fell] -= FALL_PENALTY
         rewards[diverged] = -FALL_PENALTY
 
+        extras = self._step_extras()
+        # Preserve the next state before reset; a time limit must bootstrap from
+        # this state, never from the unrelated reset observation.
+        terminal_observation = self.get_observations()
         idx = np.nonzero(dones)[0]
         if self.auto_reset and len(idx):
             self.reset_idx(idx)
 
-        return (self.get_observations(),
+        return (self.get_observations() if self.auto_reset and len(idx) else terminal_observation,
                 torch.tensor(rewards, dtype=torch.float32, device=self.device),
                 torch.tensor(dones, dtype=torch.bool, device=self.device),
-                {"time_outs": torch.tensor(timeout, dtype=torch.bool, device=self.device)})
+                {"time_outs": torch.tensor(timeout & ~fell, dtype=torch.bool, device=self.device),
+                 "terminal_observation": terminal_observation, **extras})

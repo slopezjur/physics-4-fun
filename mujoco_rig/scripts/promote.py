@@ -115,9 +115,13 @@ def main() -> int:
                  else "unscorable"))
         if old_value is not None:
             win = new_value > old_value + settings["margin"]
+            regression = scorer.regression(new, old)
+            if regression:
+                print(f"[promote] NOT shipped: {regression}")
+                return 0
             if scorer.paired:
                 b, c, z = paired_z(scorer.outcomes(new), scorer.outcomes(old))
-                print(f"[promote] paired: challenger alone survived {b}, incumbent alone {c}, "
+                print(f"[promote] paired: challenger alone succeeded {b}, incumbent alone {c}, "
                       f"z {z:+.2f} (needs {args.z:+.2f})")
                 win = win and z >= args.z
 

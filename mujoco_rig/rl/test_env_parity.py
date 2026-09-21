@@ -6,12 +6,13 @@ one that trains). Two implementations drift apart. When they do here, the failur
 expensive: training optimises one reward and scoring reports another, and the gap looks like a
 transfer problem rather than a bug.
 
-A shared abstraction would have to straddle a per-env NumPy loop and a batched CUDA kernel, fighting
-both. So the contract is enforced by measurement instead - the same thing that keeps the rest of this
-project honest.
+Reward arithmetic is shared in recovery_reward.py; state extraction and history updates still
+need this integration check across MuJoCo C and mujoco_warp.
 
-This puts BOTH environments in an identical state and asserts they agree on the observation and the
-reward. Tolerances are loose enough for float32-vs-float64 and nothing else.
+This puts BOTH environments in an identical state and checks observations and rewards.
+Standing fixtures compare native measurements end to end. Severely penetrating fixtures
+also report independent contact-solver differences, then check reward arithmetic with
+matched slip measurements. test_foot_contacts separately checks native load/slip parity.
 
     python mujoco_rig/rl/test_env_parity.py
 """
@@ -26,6 +27,7 @@ import torch
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from perturb_env import PerturbEnv  # noqa: E402
 from perturb_env_warp import PerturbEnvWarp  # noqa: E402
+from recovery_reward import reward_terms  # noqa: E402
 
 N = 8
 # float32 vs float64 on quantities of order 1-10. Anything larger is a real disagreement.
@@ -72,19 +74,34 @@ def main() -> int:
     rng = np.random.default_rng(7)
     worst_obs = worst_rew = 0.0
 
-    # Several distinct states, including ones well away from the rest pose: agreement at the rest
-    # pose alone would prove very little, since most of the observation is zero there.
-    for trial in range(4):
+    # Retain the original severe pose fixtures for observation/reward arithmetic.
+    # They bury feet in the floor (loads up to 22 kN); independent CPU/GPU solvers
+    # distribute their contact forces differently. Compare arithmetic with the
+    # same measured slip input there, and report the raw difference separately.
+    # The additional standing fixtures compare end-to-end measurements/rewards
+    # without substitution. test_foot_contacts also checks native load/slip parity
+    # in flat, heel, toe, moving and airborne states, including zero contact buffers.
+    for trial in range(8):
+        severe = trial < 4
         for i, d in enumerate(cpu.datas):
-            d.qpos[cpu.qadr] = rng.uniform(-0.35, 0.35, size=cpu.num_actions)
+            d.qpos[cpu.qadr] = (rng.uniform(-0.35, 0.35, size=cpu.num_actions) if severe else
+                               cpu.rest_qpos[cpu.qadr] + rng.uniform(-.05, .05, size=cpu.num_actions))
             d.qvel[cpu.vadr] = rng.uniform(-1.5, 1.5, size=cpu.num_actions)
-            d.qpos[2] = 0.70 + 0.2 * rng.random()          # pelvis height
+            d.qpos[2] = (0.70 + 0.2 * rng.random() if severe else
+                         cpu.rest_pelvis_z + rng.uniform(-.01, .01))
             d.qvel[0:3] = rng.uniform(-0.5, 0.5, size=3)
             import mujoco
             mujoco.mj_forward(cpu.model, d)
             gpu.qpos[i] = torch.tensor(d.qpos, dtype=torch.float32, device=gpu.device)
             gpu.qvel[i] = torch.tensor(d.qvel, dtype=torch.float32, device=gpu.device)
         gpu._mjw.forward(gpu._m, gpu._d)
+        for i, d in enumerate(cpu.datas):
+            cpu._after_physics(i, d)
+        gpu._after_physics()
+        np.testing.assert_array_equal(cpu.grounded, gpu.grounded.cpu().numpy())
+        np.testing.assert_allclose(cpu.since_landing, gpu.since_landing.cpu().numpy(), atol=1e-6)
+        np.testing.assert_allclose(cpu.rapid_replants, gpu.rapid_replants.cpu().numpy(), atol=1e-6)
+        np.testing.assert_allclose(cpu.settle_hold, gpu.settle_hold.cpu().numpy(), atol=1e-6)
 
         action = rng.uniform(-1.0, 1.0, size=(N, cpu.num_actions))
         prev = rng.uniform(-1.0, 1.0, size=(N, cpu.num_actions))
@@ -96,6 +113,18 @@ def main() -> int:
         rew_cpu = np.array([cpu.reward(i, action[i]) for i in range(N)])
         rew_gpu = gpu.reward(torch.tensor(action, dtype=torch.float32,
                                            device=gpu.device)).cpu().numpy()
+
+        if severe:
+            raw = float(np.abs(rew_cpu - rew_gpu).max())
+            f = gpu.recovery_features()
+            f['slip_speed_sq'] = torch.tensor(np.stack([
+                cpu.recovery_features(i)['slip_speed_sq'] for i in range(N)]),
+                dtype=torch.float32, device=gpu.device)
+            rew_gpu = sum(reward_terms(torch, **f,
+                action=torch.tensor(action, dtype=torch.float32, device=gpu.device),
+                previous_action=gpu.prev_action).values()).cpu().numpy()
+            print(f"  buried fixture {trial}: raw solver-dependent reward difference {raw:.2e}; "
+                  "checking arithmetic with matched slip inputs")
 
         d_obs = float(np.abs(obs_cpu - obs_gpu).max())
         d_rew = float(np.abs(rew_cpu - rew_gpu).max())
@@ -113,10 +142,35 @@ def main() -> int:
                 print(f"      {name:12s} max {per[at:at + width].max():.2e}")
                 at += width
 
+    cpu.reset_idx([0, 3])
+    gpu.reset_idx(torch.tensor([0, 3], device=gpu.device))
+    np.testing.assert_array_equal(cpu.grounded, gpu.grounded.cpu().numpy())
+    np.testing.assert_allclose(cpu.since_landing, gpu.since_landing.cpu().numpy(), atol=1e-6)
+    np.testing.assert_allclose(cpu.rapid_replants, gpu.rapid_replants.cpu().numpy(), atol=1e-6)
+    np.testing.assert_allclose(cpu.settle_hold, gpu.settle_hold.cpu().numpy(), atol=1e-6)
+    # Exercise actual step/reset boundaries: timeouts bootstrap from the final
+    # state, a simultaneous fall does not, and reset observations stay separate.
+    cpu.reset_all()
+    gpu.reset_all()
+    cpu.episode_length_buf[:] = cpu.max_episode_length - 1
+    gpu.episode_length_buf[:] = gpu.max_episode_length - 1
+    cpu.datas[1].qpos[2] = 0.1
+    mujoco.mj_forward(cpu.model, cpu.datas[1])
+    gpu.qpos[1, 2] = 0.1
+    gpu._mjw.forward(gpu._m, gpu._d)
+    for env in (cpu, gpu):
+        device = getattr(env, 'device', 'cpu')
+        obs, _, done, extras = env.step(torch.full((N, env.num_actions), .1, device=device))
+        assert done.all()
+        assert extras['time_outs'][0] and not extras['time_outs'][1]
+        torch.testing.assert_close(extras['terminal_observation'][0, -33:-3],
+                                   torch.full((30,), .1, device=device))
+        torch.testing.assert_close(obs[0, -33:-3], torch.zeros(30, device=device))
+    print("[parity] terminal observations, timeout bootstrapping masks and reset isolation agree")
     ok = worst_obs <= OBS_TOL and worst_rew <= REWARD_TOL
     print(f"\n  worst observation {worst_obs:.2e} (tol {OBS_TOL:.0e}), "
           f"worst reward {worst_rew:.2e} (tol {REWARD_TOL:.0e})")
-    print("  PASS - the two environments define the same task" if ok else
+    print("  PASS - standing rewards and arithmetic with matched contact inputs agree" if ok else
           "  FAIL - the environments have drifted apart")
     return 0 if ok else 1
 

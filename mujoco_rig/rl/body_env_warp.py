@@ -185,6 +185,13 @@ class BodyEnvWarp(ABC):
     def _before_physics(self, t):
         """A task's part of each control step, before the physics runs. `t` is each world's time."""
 
+    def _after_physics(self):
+        """Update task history once per control step, before reading its reward."""
+
+    def _step_extras(self):
+        """Task metrics captured before automatic resets clear episode history."""
+        return {}
+
     @abstractmethod
     def reward(self, action):
         """The task's reward for every world after this step's physics."""
@@ -323,6 +330,7 @@ class BodyEnvWarp(ABC):
         for _ in range(self.decimation):
             self._mjw.step(self._m, self._d)
 
+        self._after_physics()
         rewards = self.reward(a)
         self.prev_action = a
         self.episode_length_buf += 1
@@ -346,8 +354,12 @@ class BodyEnvWarp(ABC):
         rewards = torch.where(fell, rewards - FALL_PENALTY, rewards)
         rewards = torch.where(diverged, torch.full_like(rewards, -FALL_PENALTY), rewards)
 
+        extras = self._step_extras()
+        terminal_observation = self.get_observations()
         idx = torch.nonzero(dones).flatten()
         if self.auto_reset and idx.numel():
             self.reset_idx(idx)
 
-        return self.get_observations(), rewards, dones, {"time_outs": timeout}
+        obs = self.get_observations() if self.auto_reset and idx.numel() else terminal_observation
+        return obs, rewards, dones, {"time_outs": timeout & ~fell,
+                                    "terminal_observation": terminal_observation, **extras}

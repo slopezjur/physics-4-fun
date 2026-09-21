@@ -187,7 +187,9 @@ mujoco_rig/
 ├── rl/
 │   ├── env_config.py        # Constants that define the tasks
 │   ├── body_env*.py         # CPU / GPU base environment: plant, observation, reset, step, guards
-│   ├── perturb_env*.py      # + projectile, capture-step reward
+│   ├── perturb_env*.py      # + projectile, contact history, recovery features
+│   ├── recovery_reward.py   # Shared NumPy/Torch grounded support and settling
+│   ├── recovery_metrics.py  # Sustained recovery and movement quality
 │   ├── walk_env*.py         # + commands, heading hold
 │   ├── train.py             # PPO loop: Task table, Curriculum, WorldSchedule, EpisodeStats
 │   ├── eval.py, eval_walk.py  # CPU scorers; --json
@@ -229,7 +231,8 @@ Source/RL/MuJoCo/
 ### Boundaries enforced by the unstaged-code audit
 
 * The policy loop depends on `IMjPolicyPlant` and `IMjPolicyInference`; the observation builder
-  receives only `IMjPolicyState`. Tests supply managed fakes, with no scene tree or native library.
+  receives `IMjPolicyState`, plus optional `IMjFoundationSensors` for versioned physical inputs.
+  Tests supply managed fakes, with no scene tree or native library.
   Contract parsing, observation construction, inference ownership and actuation timing have separate
   reasons to change. Unsupported channels and inconsistent shapes fail at load.
 * The contract declares observation offsets, command source, decimation and action latency. Perturb
@@ -237,13 +240,35 @@ Source/RL/MuJoCo/
   Reset clears the previous action, delayed actions, inference clock and held heading together.
 * `MjBridge` checks the native version before reading generated offsets, frees partially constructed
   handles and rejects use after disposal. Whole-body velocity shifts spatial velocities to each
-  body's COM. Policy observations deliberately retain their trained subtree-reference semantics.
+  body's COM. Legacy policy channels retain their trained subtree-reference semantics;
+  `foundation_v2` appends body-origin velocity without reinterpreting existing weights.
 * CPU and GPU walk environments depend on immutable `WalkCommandConfig` instances. Constructing a
   different training stage cannot change an existing environment's command distribution. Stage 2
   samples reverse and lateral commands through the general sampler rather than the forward-only
   straight-line branch. Episode reset clears landing history and heading corrections.
 * Scoring configures `auto_reset` and `max_shots_per_episode`; it no longer replaces live environment
   methods to suppress resets or count shots. Explicit reset remains available during evaluation.
+* Environments expose final observations before resetting. PPO bootstraps timeouts from those
+  states, but stops GAE at every episode boundary. Falls never bootstrap. Actor and critic have
+  independent optimizers and gradient clipping; critic warm-up cannot change actor weights,
+  exploration or actor Adam moments. Checkpoints version the target semantics and preserve both
+  optimizers and unfinished warm-up. Perturb uses unclipped value loss and an actor KL early stop.
+* Perturb fine-tuning requires an explicit seed that passes the shared CPU quiet-room gate.
+  `seed_validation.py` owns that gate; both training and scoring use it. The PowerShell entry point
+  divides long budgets into chunks of at most five minutes. CPU survival and settled-recovery
+  regressions stop the chain, preserving the previous accepted seed and curriculum difficulty.
+* Optional policy retention lives in `policy_reference.py`, independent of rewards and environment
+  stepping. Its fixed CPU corpus is built separately from successful incumbent trajectories. PPO
+  consumes a balanced auxiliary actor loss; the trainer owns loading, plant compatibility and
+  checkpoint persistence. Resuming does not turn the newest actor into a moving reference.
+* Perturb contact measurements live in `foot_contacts.py` and `foot_contacts_warp.py`:
+  each backend reads floor-only foot/toe loads and contact-point tangential slip at the final
+  physics substep. Shared load hysteresis and landing history feed the reward. The additive
+  `foundation_v2` observation contract exposes floor loads and both pending actions to the policy;
+  `MjFootLoadSensor` supplies matching native measurements, with generated ABI offsets.
+  `legacy_v1` remains compatible. The CPU scorer separately owns its frozen height-proxy history,
+  reporting new measured-contact metrics alongside existing promotion scores. Sensor changes
+  cannot silently redefine the acceptance baseline.
 * Promotion requires successful finite scores for both candidates when an incumbent exists. Export
   validates the network and contract in a temporary directory before replacement, restoring the old
   pair on a replacement error. This is exception recovery, not a cross-process atomic transaction.

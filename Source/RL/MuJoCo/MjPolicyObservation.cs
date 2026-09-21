@@ -12,6 +12,7 @@ internal sealed class MjPolicyObservation
     private readonly int _pelvis, _footL, _footR;
     private readonly int[] _joints;
     private readonly MjHeadingHold? _heading;
+    private readonly IMjFoundationSensors? _foundation;
 
     internal MjPolicyObservation(IMjPolicyState state, MjPolicyContract contract)
     {
@@ -22,11 +23,15 @@ internal sealed class MjPolicyObservation
         _footR = Required(state.BodyId("Foot_R"), "Foot_R");
         _joints = contract.Joints.Select(n => Required(state.JointId(n), n)).ToArray();
         _heading = contract.HeadingGain is float gain ? new MjHeadingHold(gain) : null;
+        if (contract.ObservationVersion == "foundation_v2")
+            _foundation = state as IMjFoundationSensors
+                ?? throw new InvalidOperationException("foundation_v2 requires physical sensors.");
     }
 
     internal void Reset() => _heading?.Reset();
 
-    internal void Write(float[] destination, float[] previousAction, Vector3 command)
+    internal void Write(float[] destination, float[] previousAction, Vector3 command,
+        float[]? oldestPendingAction = null)
     {
         Transform3D pelvis = _state.BodyTransform(_pelvis);
         Basis inverse = pelvis.Basis.Inverse();
@@ -51,6 +56,18 @@ internal sealed class MjPolicyObservation
                     output[1] = _state.BodyTransform(_footR).Origin.Y < 0.05f ? 1 : 0;
                     break;
                 case "previous_action": previousAction.AsSpan().CopyTo(output); break;
+                case "pelvis_origin_linear_velocity":
+                    Put(output, MjBridge.GodotToMj(inverse * _foundation!.BodyOriginVelocity(_pelvis)));
+                    break;
+                case "foot_normal_load_kN_L_R":
+                    Vector2 load = _foundation!.FootNormalLoads() * 0.001f;
+                    output[0] = load.X; output[1] = load.Y;
+                    break;
+                case "oldest_pending_action":
+                    if (oldestPendingAction?.Length != channel.Width)
+                        throw new InvalidOperationException("Missing pending action history.");
+                    oldestPendingAction.AsSpan().CopyTo(output);
+                    break;
                 case "command_vx_vy_yaw":
                     Put(output, _contract.AcceptsCommand
                         ? _heading?.Apply(command, pelvis) ?? command : Vector3.Zero);

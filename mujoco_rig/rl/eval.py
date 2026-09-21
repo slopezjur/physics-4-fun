@@ -28,6 +28,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from perturb_env import PerturbEnv
 from env_config import FALL_FRACTION, FOOT_CLEAR  # noqa: E402
 from ppo import ActorCritic  # noqa: E402
+from recovery_metrics import (RecoveryMetrics, HeightProxyRecoveryMetrics,
+                              LEGACY_METRIC_VERSION, CONTACT_METRIC_VERSION)  # noqa: E402
+from env_config import BALL_SPAWN_DISTANCE  # noqa: E402
 
 # The same pelvis height the training fall penalty uses - read from the ENVIRONMENT, which
 # derives it from the model. Hardcoding it at 0.55 silently changed what "upright" meant
@@ -37,10 +40,10 @@ STEP_TRAVEL = 0.05         # horizontal travel during one flight that counts as 
 
 
 def rollout(policy, num_envs, seconds, seed, ball, label, ball_every=(4.0, 7.0), ball_speed=6.0,
-            single_hit=False):
+            single_hit=False, observation_version="legacy_v1"):
     """One scored run. `policy` of None is the zero-action baseline."""
     env = PerturbEnv(num_envs=num_envs, episode_seconds=seconds, seed=seed,
-                     ball_every=ball_every, ball_speed=ball_speed,
+                     ball_every=ball_every, ball_speed=ball_speed, observation_version=observation_version,
                      model="dummy_ball.xml" if ball else "dummy.xml")
     env.reset_all()
     env.auto_reset = False          # score the fall, do not undo it
@@ -48,6 +51,10 @@ def rollout(policy, num_envs, seconds, seed, ball, label, ball_every=(4.0, 7.0),
     steps = env.max_episode_length
     dt = env.dt * env.decimation
     n = num_envs
+    flight_seconds = BALL_SPAWN_DISTANCE / max(ball_speed, 1e-6) * 1.2
+    recovery = HeightProxyRecoveryMetrics(n, dt, flight_seconds, env.rest_foot_z)
+    contact_recovery = RecoveryMetrics(n, dt, flight_seconds)
+    previous_action = np.zeros((n, env.num_actions))
 
     # Episode behavior is configuration; reset and firing methods retain their normal contracts.
     env.max_shots_per_episode = 1 if single_hit else None
@@ -69,6 +76,7 @@ def rollout(policy, num_envs, seconds, seed, ball, label, ball_every=(4.0, 7.0),
         with torch.no_grad():
             action = policy.actor(obs) if policy is not None else torch.zeros(n, env.num_actions)
         obs, _, _, _ = env.step(action)
+        clipped_action = action.clamp(-1.0, 1.0).cpu().numpy()
 
         for i, d in enumerate(env.datas):
             up = d.xmat[env.pelvis].reshape(3, 3) @ np.array([0.0, 0.0, 1.0])
@@ -79,16 +87,20 @@ def rollout(policy, num_envs, seconds, seed, ball, label, ball_every=(4.0, 7.0),
             elif not fallen[i]:
                 fallen[i], alive[i] = True, t
 
+            features = env.recovery_features(i)
+            for metrics in (recovery, contact_recovery):
+                metrics.record(i, features, d.cvel[env.pelvis, :3],
+                               not fallen[i], hits[i], clipped_action[i] - previous_action[i])
+
             com = env.com(d)[:2]
             if not fallen[i]:
                 quarter[min(3, (t * 4) // steps), i] += float(np.linalg.norm(com - com_prev[i]))
             com_prev[i] = com
 
             # A protective step is a foot that leaves the floor and lands somewhere else.
-            # **Airborne above its REST height, exactly as the reward measures it.** This read an
-            # absolute 0.06 m while the reward reads rest + 0.06 = 0.104 m, so the scorer and the
-            # trainer disagreed about what a lifted foot is. Step counts from before 2026-09-10
-            # are not comparable with later ones.
+            # Historical protective-step diagnostic: rest height + 6 cm. The new
+            # recovery gate separately uses the tighter contact proxy and foot speed;
+            # a low shuffle must not disappear from the quality measurements.
             for k, body in enumerate((env.foot_l, env.foot_r)):
                 p = d.xpos[body]
                 air = p[2] > env.rest_foot_z[k] + FOOT_CLEAR
@@ -108,11 +120,21 @@ def rollout(policy, num_envs, seconds, seed, ball, label, ball_every=(4.0, 7.0),
                                                                  * np.linalg.norm(want))))
                 foot_air[k][i] = air
 
+        previous_action = clipped_action
+
     pct = 100.0 * upright / steps
     survived = 100.0 * np.mean(~fallen)
+    quality = recovery.result(~fallen, require_shot=ball)
+    contact_quality = contact_recovery.result(~fallen, require_shot=ball)
     print(f"\n=== {label} ===")
     print(f"  upright        {pct.mean():6.1f} %   (best env {pct.max():.1f}, worst {pct.min():.1f})")
     print(f"  never fell     {survived:6.1f} %   of {n} envs over {seconds:.0f} s")
+    print(f"  recovered      {quality['recovered']:6.1f} %   stable for the final 0.5 s")
+    print(f"  contact audit  {contact_quality['recovered']:6.1f} % recovered; "
+          f"{contact_quality['foot_sliding_m']:.3f} m/world RMS contact slip (diagnostic only)")
+    print(f"  foot sliding   {quality['foot_sliding_m']:6.3f} m/world while alive; "
+          f"rapid replants {quality['rapid_replants']:.2f}; "
+          f"mean action change {quality['action_change']:.4f}")
     print(f"  time to fall   {np.mean(alive) * dt:6.2f} s  (median {np.median(alive) * dt:.2f})")
     print(f"  travel/quarter " + "  ".join(f"{q:.3f}" for q in quarter.mean(axis=1)) + "  m")
     print(f"  steps taken    {step_count.mean():6.2f}   (max {step_count.max():.0f})")
@@ -142,7 +164,10 @@ def rollout(policy, num_envs, seconds, seed, ball, label, ball_every=(4.0, 7.0),
             "stance": stance["score"], "stance_width": stance["width"],
             "stance_split": stance["split"], "stance_crossed": crossed,
             "leg_rms": stance["leg_rms"], "trunk_rms": stance["trunk_rms"],
-            "at_limit": stance["at_limit"]}
+            "at_limit": stance["at_limit"], **quality,
+            "metric_version": LEGACY_METRIC_VERSION,
+            "contact_metric_version": CONTACT_METRIC_VERSION,
+            **{'contact_' + key: value for key, value in contact_quality.items()}}
 
 
 def write_json(path, checkpoint, settings, sections):
@@ -165,6 +190,9 @@ def main() -> int:
     p.add_argument("--checkpoint", default="")
     p.add_argument("--num_envs", type=int, default=16)
     p.add_argument("--seconds", type=float, default=40.0)
+    p.add_argument("--quiet_seconds", type=float, default=None,
+                   help="separate quiet-room duration (promotion uses 40 seconds)")
+    p.add_argument("--quiet_envs", type=int, default=None)
     p.add_argument("--seed", type=int, default=17)
     # Scored at the SAME firing rate it was trained at; 2-4 s is impossible for any controller.
     p.add_argument("--ball_every", type=float, nargs=2, default=(4.0, 7.0))
@@ -176,12 +204,14 @@ def main() -> int:
     p.add_argument("--single_hit", action="store_true",
                    help="fire only the first scheduled shot per env")
     p.add_argument("--under_fire_only", action="store_true",
-                   help="skip the quiet-room rollout; the promotion gates never read it")
+                   help="diagnostic only: skip the quiet-room rollout required by promotion")
     p.add_argument("--json", default="",
                    help="also write every section's numbers here, as data (scripts/scoring.py)")
     args = p.parse_args()
     settings = dict(num_envs=args.num_envs, seconds=args.seconds, seed=args.seed,
-                    ball_every=list(args.ball_every), single_hit=args.single_hit)
+                    ball_every=list(args.ball_every), single_hit=args.single_hit,
+                    quiet_seconds=args.quiet_seconds or args.seconds,
+                    quiet_envs=args.quiet_envs or args.num_envs)
 
     if args.baseline_only:
         speed = args.ball_speed or 6.0
@@ -197,6 +227,8 @@ def main() -> int:
         return 0
 
     ck = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+    from observation_contract import checkpoint_version
+    observation_version = checkpoint_version(ck)
     net = ActorCritic(ck["num_obs"], ck["num_actions"])
     net.load_state_dict(ck["model"])
     net.eval()
@@ -208,17 +240,17 @@ def main() -> int:
 
     # The policy is scored quiet AND under fire. Without the quiet run a policy that merely stands
     # still cannot be told apart from one that rejects an impact.
-    # `--under_fire_only` skips the quiet run for the promotion gates, which read only the
-    # under-fire block; it is half the scoring time.
+    # Diagnostic callers can skip quiet trials; promotion and chaining require both sections.
     sections = {}
     if not args.under_fire_only:
-        sections["no_ball"] = rollout(net, args.num_envs, args.seconds, args.seed, ball=False,
+        sections["no_ball"] = rollout(net, args.quiet_envs or args.num_envs,
+                                      args.quiet_seconds or args.seconds, args.seed, ball=False,
                                       label="POLICY, no ball", ball_every=tuple(args.ball_every),
-                                      ball_speed=speed)
+                                      ball_speed=speed, observation_version=observation_version)
     hit = sections["under_fire"] = rollout(net, args.num_envs, args.seconds, args.seed, ball=True,
                                            label="POLICY, under fire",
                                            ball_every=tuple(args.ball_every), ball_speed=speed,
-                                           single_hit=args.single_hit)
+                                           single_hit=args.single_hit, observation_version=observation_version)
     if not args.no_baseline:
         base = sections["baseline"] = rollout(
             None, args.num_envs, args.seconds, args.seed, ball=True,
@@ -227,7 +259,8 @@ def main() -> int:
         print(f"\n  policy vs unaided under fire: upright {hit['upright']:.1f} % vs "
               f"{base['upright']:.1f} %, steps {hit['steps']:.2f} vs {base['steps']:.2f}")
     if args.json:
-        write_json(args.json, args.checkpoint, dict(settings, ball_speed=speed), sections)
+        write_json(args.json, args.checkpoint,
+                   dict(settings, ball_speed=speed, observation_version=observation_version), sections)
     return 0
 
 

@@ -24,6 +24,7 @@ internal static class MjInterop
 
     /// <summary>mjOBJ_JOINT, verified against <c>mujoco.mjtObj</c>.</summary>
     internal const int ObjJoint = 3;
+    internal const int ObjGeom = 5;
 
     /// <summary>
     /// mjOBJ_ACTUATOR. Verified against <c>mujoco.mjtObj</c>, not guessed: 8 is mjOBJ_LIGHT, and
@@ -105,6 +106,9 @@ internal static class MjInterop
 
     [DllImport(Lib)]
     internal static extern void mj_forward(IntPtr m, IntPtr d);
+
+    [DllImport(Lib)]
+    internal static extern void mj_contactForce(IntPtr m, IntPtr d, int id, [Out] double[] result);
 
     [DllImport(Lib)]
     internal static extern void mj_resetData(IntPtr m, IntPtr d);

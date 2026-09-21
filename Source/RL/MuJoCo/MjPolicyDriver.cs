@@ -64,7 +64,8 @@ internal sealed class MjPolicyDriver : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_sinceInference == 0)
         {
-            _observation.Write(_obs, _previous, Command);
+            _observation.Write(_obs, _previous, Command,
+                _pending.Length > 0 ? _pending[_queueIndex] : null);
             _inference.Predict(_obs, _prediction);
             if (_prediction.Any(v => !float.IsFinite(v)))
                 throw new InvalidOperationException("Policy produced a non-finite action.");

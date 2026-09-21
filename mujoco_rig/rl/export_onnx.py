@@ -26,10 +26,12 @@ from ppo import ActorCritic  # noqa: E402
 from policy_artifacts import publish_pair  # noqa: E402
 from walk_env import WalkEnv  # noqa: E402
 from walk_config import HEADING_GAIN  # noqa: E402
+from observation_contract import LEGACY, layout, checkpoint_version  # noqa: E402
 
 # The one-world CPU environment each task's contract is read from.
 CONTRACT_ENV = {
-    "perturb": lambda: PerturbEnv(num_envs=1, model="dummy_ball.xml"),
+    "perturb": lambda observation_version=LEGACY: PerturbEnv(num_envs=1, model="dummy_ball.xml",
+                                                            observation_version=observation_version),
     "walk": lambda: WalkEnv(num_envs=1),
 }
 
@@ -65,6 +67,7 @@ class Actor(torch.nn.Module):
 def load_actor(checkpoint):
     """The checkpoint's metadata and its network, ready for inference."""
     ck = torch.load(checkpoint, map_location="cpu", weights_only=False)
+    checkpoint_version(ck)
     net = ActorCritic(ck["num_obs"], ck["num_actions"])
     net.load_state_dict(ck["model"])
     net.eval()
@@ -94,21 +97,9 @@ def export_actor(net, num_obs, out):
 
 def observation_layout(env, num_obs):
     """Every observation channel, its offset and its width, in the order the env writes them."""
-    channels = [("projected_gravity", 3), ("pelvis_linear_velocity", 3),
-                ("pelvis_angular_velocity", 3), ("pelvis_height", 1),
-                ("joint_position", env.num_actions),
-                ("joint_velocity_scaled_0.1", env.num_actions),
-                ("foot_contact_L_R", 2), ("previous_action", env.num_actions),
-                # Present for EVERY task. Walk fills it with (vx, vy, yaw) in the pelvis frame;
-                # perturb leaves it at zero. One shared layout is what lets a perturb brain seed a
-                # walk one directly.
-                ("command_vx_vy_yaw", 3)]
-    layout, at = [], 0
-    for name, width in channels:
-        layout.append({"name": name, "offset": at, "width": width})
-        at += width
-    assert at == num_obs, f"layout {at} != {num_obs}"
-    return layout
+    result = layout(env.num_actions, getattr(env, 'observation_version', LEGACY))
+    assert sum(c['width'] for c in result) == num_obs
+    return result
 
 
 def action_to_control(env):
@@ -136,8 +127,12 @@ def build_contract(task, checkpoint, ck, env):
     `obs_action_contract.md` was wrong four separate ways, and the fix was to stop writing prose."""
     if ck["num_obs"] != env.num_obs or ck["num_actions"] != env.num_actions:
         raise ValueError("Checkpoint dimensions differ from the deployment environment")
+    version = checkpoint_version(ck)
+    if version != getattr(env, 'observation_version', LEGACY):
+        raise ValueError('Checkpoint observation semantics differ from the deployment environment')
     return {
         "task": task,
+        "observation_version": version,
         "source_checkpoint": checkpoint,
         "num_obs": ck["num_obs"],
         "num_actions": ck["num_actions"],
@@ -155,6 +150,8 @@ def build_contract(task, checkpoint, ck, env):
             "Frames are MuJoCo's: Z up. Godot -> MuJoCo is (-z, -x, y).",
             "Pelvis velocities are expressed in the PELVIS frame (R.T @ world).",
             "Foot contact is foot-origin height < 0.05 m, left then right.",
+            "foundation_v2 appends pelvis-origin velocity, summed foot/toe floor normal loads in kN, "
+            "and the oldest of two pending actions; previous_action is the newest pending action.",
             "The pelvis balance assist must be OFF; this policy replaces it.",
             "Joint order below is mjModel actuator order; read joint angles with "
             "MjBridge.JointPosition, which indexes qpos through jnt_qposadr.",
@@ -198,7 +195,8 @@ def main() -> int:
     task = args.task if args.task != "auto" else ck.get("task", "perturb")
     out = pathlib.Path(args.out or f"mujoco_rig/{POLICY_FAMILY.get(task, task)}_policy.onnx")
     out.parent.mkdir(parents=True, exist_ok=True)
-    env = CONTRACT_ENV[task]()
+    env = (CONTRACT_ENV[task](observation_version=checkpoint_version(ck)) if task == 'perturb'
+           else CONTRACT_ENV[task]())
     contract = build_contract(task, args.checkpoint, ck, env)
     with tempfile.TemporaryDirectory(prefix="policy_export_", dir=out.parent) as scratch:
         staged = pathlib.Path(scratch) / out.name

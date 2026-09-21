@@ -34,6 +34,8 @@ internal static class MjLayout
     public const int ModelJntDofadr = 2064;
     /// <summary>Offset of <c>mjModel.BodyRootid</c> (pointer).</summary>
     public const int ModelBodyRootid = 1760;
+    /// <summary>Offset of <c>mjModel.GeomBodyid</c> (pointer).</summary>
+    public const int ModelGeomBodyid = 2392;
     /// <summary>Offset of <c>mjData.Xpos</c> (pointer).</summary>
     public const int DataXpos = 161800;
     /// <summary>Offset of <c>mjData.Xquat</c> (pointer).</summary>
@@ -52,4 +54,10 @@ internal static class MjLayout
     public const int DataCvel = 162216;
     /// <summary>Offset of <c>mjData.SubtreeCom</c> (pointer).</summary>
     public const int DataSubtreeCom = 161888;
+    /// <summary>Offset of <c>mjData.Contact</c> (pointer).</summary>
+    public const int DataContact = 161656;
+    // Contact count is int32; contact.geom contains two int32 IDs.
+    public const int DataNcon = 161568;
+    public const int ContactStride = 576;
+    public const int ContactGeom = 532;
 }

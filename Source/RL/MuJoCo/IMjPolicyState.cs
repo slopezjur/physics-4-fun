@@ -20,3 +20,10 @@ internal interface IMjPolicyPlant : IMjPolicyState
     int ActuatorId(string name);
     void SetControl(int actuator, double value);
 }
+
+/// <summary>Physical sensors added by foundation_v2; legacy policies need only IMjPolicyState.</summary>
+internal interface IMjFoundationSensors
+{
+    Vector3 BodyOriginVelocity(int body);
+    Vector2 FootNormalLoads();
+}

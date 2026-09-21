@@ -31,6 +31,7 @@ LOGS = ROOT / "logs" / "mujoco"
 
 sys.path.insert(0, str(RL))
 from env_config import POLICY_FAMILY  # noqa: E402
+from seed_validation import quiet_rejection  # noqa: E402
 
 
 # ---------------------------------------------------------------- processes
@@ -125,6 +126,10 @@ class Scorer(ABC):
         """Why a result is unusable as a seed whatever its metric says, or None."""
         return None
 
+    def regression(self, new, old):
+        """An outcome that must not be traded away to improve the primary metric."""
+        return None
+
     def summary(self, result):
         """A few words about a result beyond its metric, for the promotion log."""
         return ""
@@ -149,7 +154,7 @@ class Scorer(ABC):
 
 
 class PerturbScorer(Scorer):
-    """Survival of ONE real hit at a hard, fixed impulse.
+    """Survival plus a stable final hold after ONE shot at a fixed impulse.
 
     **One hit, then time to recover.** Forty seconds of hits every 4-7 s compounds seven of them and
     floors at 0% for every policy, and an easy reference read 81-89% for checkpoints no better than
@@ -158,12 +163,13 @@ class PerturbScorer(Scorer):
     schedules the next shot after each one, and 6 s at 2.0-2.4 s holds two. `--single_hit`
     suppresses the second, and eval.py reports hits per env so the label is checked, not trusted.
 
-    512 envs puts one standard error near 2 points; the hit lands at ~1.65 s, leaving 4.35 s for a
-    fall to register. The margin is 0 because the paired z-test sizes it from how much two policies
+    512 envs puts one standard error near 2 points; launch occurs at 1.5-1.8 s, followed by
+    flight time. Success requires a stable final hold and no fall. The margin is 0 because
+    the paired z-test sizes it from how much two policies
     actually disagree, instead of a guessed constant that turned out to sit inside the noise.
     """
 
-    task, unit, paired = "perturb", "% survived one hit", True
+    task, unit, paired = "perturb", "% settled after one shot", True
     defaults = dict(envs=512, seconds=6.0, ball_speed=6.0, ball_every=(1.5, 1.8),
                             margin=0.0)
 
@@ -172,23 +178,44 @@ class PerturbScorer(Scorer):
         return [PY, "-u", RL / "eval.py", "--checkpoint", checkpoint, "--num_envs", s["envs"],
                 "--seconds", s["seconds"], "--ball_speed", s["ball_speed"],
                 "--ball_every", s["ball_every"][0], s["ball_every"][1],
-                "--single_hit", "--under_fire_only", "--no_baseline", "--json", json_out]
+                "--single_hit", "--quiet_seconds", 40, "--quiet_envs", 16,
+                "--no_baseline", "--json", json_out]
 
     def read(self, json_path):
         # **The section matters.** eval.py can score the quiet room too, and reading that block
         # instead of this one is what produced "100% upright at 6 m/s" for a policy that fell to
         # every hit.
-        return self._load(json_path, "sections", "under_fire")
+        sections = self._load(json_path, "sections")
+        if not sections or 'under_fire' not in sections:
+            return None
+        quiet = sections.get('no_ball', {})
+        return dict(sections['under_fire'], quiet_survived=quiet.get('survived', float('nan')),
+                    quiet_recovered=quiet.get('recovered', float('nan')))
+
+    def collapsed(self, result):
+        return quiet_rejection(result.get('quiet_survived', float('nan')),
+                               result.get('quiet_recovered', float('nan')))
 
     def metric(self, result):
-        return result["survived"]
+        return result.get("recovered", float("nan"))
 
     def outcomes(self, result):
-        return np.asarray(result["survived_mask"], dtype=bool)
+        return np.asarray(result["recovered_mask"], dtype=bool)
+
+    def regression(self, new, old):
+        before, after = old.get("survived", float("nan")), new.get("survived", float("nan"))
+        if not np.isfinite([before, after]).all():
+            return "missing finite survival measurements"
+        if after < before:
+            return f"survival regressed {before:.1f}% -> {after:.1f}%"
+        return None
 
     def summary(self, result):
         nan = float("nan")
-        return (f"(end stance {result.get('stance', nan):.2f}, width "
+        return (f"(survived {result.get('survived', nan):.1f}%, "
+                f"sliding {result.get('foot_sliding_m', nan):.2f} m, "
+                f"replants {result.get('rapid_replants', nan):.1f}, "
+                f"end stance {result.get('stance', nan):.2f}, width "
                 f"{result.get('stance_width', nan):.2f} m, crossed "
                 f"{result.get('stance_crossed', nan):.0f}%, trunk {result.get('trunk_rms', nan):.2f} "
                 f"rad, {result.get('at_limit', nan):.1f} joints on a limit)")
@@ -196,7 +223,7 @@ class PerturbScorer(Scorer):
     def describe(self, settings):
         s = self._settings(settings)
         return (f"{s['envs']} envs x {s['seconds']:.0f} s, ONE ball at {s['ball_speed']:.1f} m/s "
-                f"after {s['ball_every'][0]:.1f}-{s['ball_every'][1]:.1f} s")
+                f"after {s['ball_every'][0]:.1f}-{s['ball_every'][1]:.1f} s, final stable hold 0.5 s")
 
 
 class WalkScorer(Scorer):

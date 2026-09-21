@@ -16,11 +16,17 @@ from __future__ import annotations
 
 import mujoco
 import numpy as np
+import torch
 
 from body_env import BodyEnv
-from env_config import (BALL_SPAWN_DISTANCE, CAPTURE_PLACE_SIGMA, CAPTURE_V, FOOT_CLEAR,
-                        JOINT_SOFT_LIMIT, LEG_BONES, LEG_POSE_SCALE, OFF_BALANCE, STANCE_SIGMA,
+from env_config import (BALL_SPAWN_DISTANCE,
+                        JOINT_SOFT_LIMIT, LEG_BONES, LEG_POSE_SCALE, STANCE_SIGMA,
                         TARGET_BONES, TRUNK_BONES, TRUNK_POSE_SCALE, target_probabilities)
+from foot_contacts import FootContacts, loaded_feet
+from observation_contract import LEGACY, FOUNDATION, observation_size
+from recovery_reward import (CONFIG, REWARD_VERSION, contact_history, reward_terms,
+                             settled_state, support_state)
+
 
 
 class PerturbEnv(BodyEnv):
@@ -28,8 +34,10 @@ class PerturbEnv(BodyEnv):
 
     def __init__(self, num_envs=64, device="cpu", episode_seconds=12.0,
                  ball_every=(2.0, 4.0), ball_speed=6.0, seed=0, model="dummy_ball.xml",
-                 target_weights=None):
+                 target_weights=None, observation_version=LEGACY):
         # Set before the base constructor runs: its first reset already schedules a shot.
+        self.reward_version = REWARD_VERSION
+        self.observation_version = observation_version
         self.ball_every = ball_every
         self.max_shots_per_episode = None
         self.ball_speed = ball_speed
@@ -39,6 +47,9 @@ class PerturbEnv(BodyEnv):
 
     # ---------------------------------------------------------------- task hooks
     def _extra_init(self):
+        self.num_obs = observation_size(self.num_actions, self.observation_version)
+        if self.observation_version == FOUNDATION and len(self.action_queue) != 2:
+            raise ValueError("foundation_v2 requires a two-step action queue")
         m = self.model
         name2id = mujoco.mj_name2id
         self.ball = name2id(m, mujoco.mjtObj.mjOBJ_BODY, "ball")
@@ -68,6 +79,11 @@ class PerturbEnv(BodyEnv):
         self.targets = [name2id(m, mujoco.mjtObj.mjOBJ_BODY, b) for b in TARGET_BONES]
         self.next_ball = np.zeros(self.num_envs)
         self.shots_fired = np.zeros(self.num_envs, dtype=int)
+        self.grounded = np.ones((self.num_envs, 2), dtype=bool)
+        self.foot_contacts = FootContacts(m)
+        self.since_landing = np.full((self.num_envs, 2), CONFIG.replant_interval)
+        self.rapid_replants = np.zeros(self.num_envs)
+        self.settle_hold = np.zeros(self.num_envs)
         # The joints the rest stance pulls back: the legs and the trunk. The arms stay free to swing.
         self.leg_q = self.qadr[[i for i, n in enumerate(self.act_names)
                                 if n.split("_")[0] in LEG_BONES]]
@@ -79,11 +95,26 @@ class PerturbEnv(BodyEnv):
         rest = self.rest_qpos[self.qadr]
         self.soft_lo, self.soft_hi = np.minimum(mid - half, rest), np.maximum(mid + half, rest)
 
+    def _obs_one(self, i):
+        legacy = super()._obs_one(i)
+        if self.observation_version == LEGACY:
+            return legacy
+        d = self.datas[i]
+        rotation = d.xmat[self.pelvis].reshape(3, 3)
+        load, _ = self.foot_contacts.read(d)
+        obs = np.concatenate((legacy, rotation.T @ self._foot_velocity(d, self.pelvis),
+                              load * 0.001, self.action_queue[0][i]))
+        return np.clip(np.nan_to_num(obs, nan=0.0, posinf=0.0, neginf=0.0), -100, 100)
+
     def _reset_world(self, i, d):
         self._park_ball(d)
         self.next_ball[i] = self.rng.uniform(*self.ball_every)
         self.ball_flight[i] = 0.0
         self.shots_fired[i] = 0
+        self.grounded[i] = True
+        self.since_landing[i] = CONFIG.replant_interval
+        self.rapid_replants[i] = 0.0
+        self.settle_hold[i] = 0.0
 
     def _before_physics(self, i, d, t):
         if self.ball < 0:
@@ -138,7 +169,7 @@ class PerturbEnv(BodyEnv):
 
     # ---------------------------------------------------------------- reward
     def stance_of(self, d):
-        """How far the body stands from its rest stance - the reward's `stance` before its gate.
+        """Strict rest-stance similarity for historical diagnostics.
 
         The feet in the pelvis's own heading frame: `width` is the lateral distance between them,
         positive on the side the rest pose puts the left foot and negative when crossed; `split` is
@@ -165,46 +196,41 @@ class PerturbEnv(BodyEnv):
         q = d.qpos[self.qadr]
         return float(np.sum(np.maximum(q - self.soft_hi, 0.0) + np.maximum(self.soft_lo - q, 0.0)))
 
-    def reward(self, i, action):
-        """Take the hit, keep the feet under the body, and go back to standing.
+    def _after_physics(self, i, d):
+        f = self.recovery_features(i)
+        ground, elapsed, rapid = contact_history(
+            np, f['grounded'], self.grounded[i], self.since_landing[i], self.dt * self.decimation)
+        self.grounded[i], self.since_landing[i], self.rapid_replants[i] = ground, elapsed, rapid
+        error, _ = support_state(np, f['com'], f['velocity'], f['feet'], f['grounded'])
+        settled = settled_state(np, f['up'], f['pelvis_z'] / self.rest_pelvis_z,
+                                f['velocity'], d.cvel[self.pelvis, :3], f['foot_velocity'],
+                                f['grounded'], error)
+        self.settle_hold[i] = self.settle_hold[i] + self.dt * self.decimation if settled else 0.0
 
-        Mirrors PerturbEnvWarp.reward exactly; the reasoning for every term is written there.
-        """
+    def _step_extras(self):
+        now = self.episode_length_buf.cpu().numpy() * self.dt * self.decimation
+        exposed = ((self.shots_fired > 0) & (now >= self.ball_flight + CONFIG.settle_seconds)
+                   if self.ball >= 0 else True)
+        return {'recovered': torch.tensor((self.settle_hold >= CONFIG.settle_seconds) & exposed,
+                                          dtype=torch.bool, device=self.device)}
+
+    def recovery_features(self, i):
+        """Physical inputs also used by the independent recovery scorer."""
         d = self.datas[i]
-        up = d.xmat[self.pelvis].reshape(3, 3) @ np.array([0.0, 0.0, 1.0])
-        com = self.com(d)
-        com_v = self.com_velocity(d)
-        feet_mid = 0.5 * (d.xpos[self.foot_l][:2] + d.xpos[self.foot_r][:2])
-        off = float(np.linalg.norm(com[:2] - feet_mid))
+        feet = d.xpos[[self.foot_l, self.foot_r]]
+        load, slip_speed_sq = self.foot_contacts.read(d)
+        grounded = loaded_feet(np, load, self.grounded[i])
+        stance = self.stance_of(d)
+        return dict(up=d.xmat[self.pelvis].reshape(3, 3)[2, 2],
+                    pelvis_z=d.xpos[self.pelvis, 2], rest_pelvis_z=self.rest_pelvis_z,
+                    com=self.com(d), velocity=self.com_velocity(d), feet=feet,
+                    foot_velocity=np.stack([self._foot_velocity(d, self.foot_l),
+                                            self._foot_velocity(d, self.foot_r)]),
+                    grounded=grounded, slip_speed_sq=slip_speed_sq,
+                    pose_error=np.mean((d.qpos[self.qadr] - self.rest_qpos[self.qadr]) ** 2),
+                    width=stance['width'], split=stance['split'], rest_width=self.rest_stance,
+                    limit_excess=self.past_soft_limits(d), rapid_replants=self.rapid_replants[i])
 
-        upright = float(np.clip(up[2], 0.0, 1.0))
-        height = float(np.exp(-40.0 * (d.xpos[self.pelvis][2] - self.rest_pelvis_z) ** 2))
-        support = float(np.exp(-12.0 * off))
-        balanced = float(off < OFF_BALANCE)
-        still = float(np.exp(-2.0 * np.linalg.norm(com_v))) * balanced
-
-        q_err = float(np.mean(np.square(d.qpos[self.qadr] - self.rest_qpos[self.qadr])))
-        pose = float(np.exp(-2.0 * q_err))
-
-        stance = self.stance_of(d)["score"] * balanced
-        over = self.past_soft_limits(d)
-
-        foot_z = np.array([d.xpos[self.foot_l][2], d.xpos[self.foot_r][2]])
-        airborne = foot_z > (self.rest_foot_z + FOOT_CLEAR)
-        want = com[:2] - feet_mid
-        want_hat = want / max(float(np.linalg.norm(want)), 1e-6)
-        swing = self._foot_velocity(d, self.foot_l if airborne[0] else self.foot_r)
-        progress = min(max(float(swing[:2] @ want_hat), 0.0), CAPTURE_V) / CAPTURE_V
-        recover_step = float(airborne.sum() == 1) * progress * (1.0 - balanced)
-        omega0 = np.sqrt(9.81 / max(float(com[2]), 0.3))
-        capture = com[:2] + com_v[:2] / omega0
-        swing_xy = d.xpos[self.foot_l if airborne[0] else self.foot_r][:2]
-        gap = float(np.sum(np.square(swing_xy - capture)))
-        place = (float(airborne.sum() == 1) * (1.0 - balanced)
-                 * float(np.exp(-gap / CAPTURE_PLACE_SIGMA ** 2)))
-
-        effort = float(np.mean(np.square(action)))
-        jerk = float(np.mean(np.square(action - self.prev_action[i])))
-        return (2.0 * upright + 1.0 * height + 3.0 * support
-                + 1.5 * pose + 2.5 * recover_step + 2.0 * place + 2.0 * stance + 0.2 * still
-                + 0.2 - 0.05 * effort - 0.05 * jerk - 2.0 * over)
+    def reward(self, i, action):
+        return sum(reward_terms(np, **self.recovery_features(i), action=action,
+                                previous_action=self.prev_action[i]).values())

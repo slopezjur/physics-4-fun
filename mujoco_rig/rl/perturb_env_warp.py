@@ -11,9 +11,15 @@ import numpy as np
 import torch
 
 from body_env_warp import BodyEnvWarp
-from env_config import (BALL_SPAWN_DISTANCE, CAPTURE_PLACE_SIGMA, CAPTURE_V, FOOT_CLEAR,
-                        JOINT_SOFT_LIMIT, LEG_BONES, LEG_POSE_SCALE, OFF_BALANCE, STANCE_SIGMA,
-                        TARGET_BONES, TRUNK_BONES, TRUNK_POSE_SCALE, target_probabilities)
+from env_config import (BALL_SPAWN_DISTANCE,
+                        JOINT_SOFT_LIMIT, LEG_BONES,
+                        TARGET_BONES, TRUNK_BONES, target_probabilities)
+from foot_contacts import loaded_feet
+from foot_contacts_warp import FootContactsWarp
+from observation_contract import LEGACY, FOUNDATION, observation_size
+from recovery_reward import (CONFIG, REWARD_VERSION, contact_history, reward_terms,
+                             settled_state, support_state)
+
 
 
 class PerturbEnvWarp(BodyEnvWarp):
@@ -21,8 +27,10 @@ class PerturbEnvWarp(BodyEnvWarp):
 
     def __init__(self, num_envs=4096, device="cuda", episode_seconds=20.0,
                  ball_every=(4.0, 7.0), ball_speed=6.0, seed=0, model="dummy_ball.xml",
-                 target_weights=None):
+                 target_weights=None, observation_version=LEGACY):
         # Set before the base constructor runs: its first reset already schedules a shot.
+        self.reward_version = REWARD_VERSION
+        self.observation_version = observation_version
         self.ball_every = ball_every
         self.max_shots_per_episode = None
         self.ball_speed = ball_speed
@@ -32,6 +40,9 @@ class PerturbEnvWarp(BodyEnvWarp):
 
     # ---------------------------------------------------------------- task hooks
     def _extra_init(self):
+        self.num_obs = observation_size(self.num_actions, self.observation_version)
+        if self.observation_version == FOUNDATION and len(self.action_queue) != 2:
+            raise ValueError("foundation_v2 requires a two-step action queue")
         m = self.model
         dev = torch.device(self.device)
         name2id = mujoco.mj_name2id
@@ -75,9 +86,28 @@ class PerturbEnvWarp(BodyEnvWarp):
                                            device=dev).expand(self.num_envs, 4)
         self.next_ball = torch.zeros(self.num_envs, device=dev)
         self.shots_fired = torch.zeros(self.num_envs, dtype=torch.long, device=dev)
+        self.grounded = torch.ones((self.num_envs, 2), dtype=torch.bool, device=dev)
+        self.foot_contacts = FootContactsWarp(m, self._m, self._d, self.num_envs, self.device)
+        self.since_landing = torch.full((self.num_envs, 2), CONFIG.replant_interval, device=dev)
+        self.rapid_replants = torch.zeros(self.num_envs, device=dev)
+        self.settle_hold = torch.zeros(self.num_envs, device=dev)
+
+    def get_observations(self):
+        legacy = super().get_observations()
+        if self.observation_version == LEGACY:
+            return legacy
+        rotation = self.xmat[:, self.pelvis].reshape(-1, 3, 3)
+        velocity = torch.bmm(rotation.transpose(1, 2), self._foot_velocity(self.pelvis).unsqueeze(-1)).squeeze(-1)
+        load, _ = self.foot_contacts.read()
+        obs = torch.cat((legacy, velocity, load * 0.001, self.action_queue[0]), dim=-1)
+        return torch.nan_to_num(obs, nan=0.0, posinf=0.0, neginf=0.0).clamp(-100, 100)
 
     def _reset_worlds(self, idx):
         self.shots_fired[idx] = 0
+        self.grounded[idx] = True
+        self.since_landing[idx] = CONFIG.replant_interval
+        self.rapid_replants[idx] = 0.0
+        self.settle_hold[idx] = 0.0
         self._park_ball(idx)
         self.next_ball[idx] = self._rand(idx.numel(), lo=self.ball_every[0], hi=self.ball_every[1])
 
@@ -150,105 +180,43 @@ class PerturbEnvWarp(BodyEnvWarp):
         self.ball_flight[idx] = now + BALL_SPAWN_DISTANCE / max(self.ball_speed, 1e-6) * 1.2
 
     # ---------------------------------------------------------------- reward
-    def reward(self, action):
-        """Take the hit, keep the feet under the body, and go back to standing.
+    def _after_physics(self):
+        f = self.recovery_features()
+        self.grounded, self.since_landing, self.rapid_replants = contact_history(
+            torch, f['grounded'], self.grounded, self.since_landing, self.dt * self.decimation)
+        error, _ = support_state(torch, f['com'], f['velocity'], f['feet'], f['grounded'])
+        settled = settled_state(torch, f['up'], f['pelvis_z'] / self.rest_pelvis_z,
+                                f['velocity'], self.cvel[:, self.pelvis, :3], f['foot_velocity'],
+                                f['grounded'], error)
+        self.settle_hold = torch.where(settled, self.settle_hold + self.dt * self.decimation, 0.0)
 
-        **Rewritten after a night of measurement.** The previous version paid 2.0 upright + 1.0
-        height + 0.2 still + 3.0 support + a flat 0.5, and produced a body that braces: stance
-        widened by 13 cm under fire, feet shuffled 7-12 cm, and single support measured 0.0%. Every
-        one of those terms is satisfiable without ever picking a foot up, so "recover" was never
-        actually the cheapest thing to do. Four changes, each aimed at one of them:
+    def _step_extras(self):
+        now = self.episode_length_buf * self.dt * self.decimation
+        exposed = ((self.shots_fired > 0) & (now >= self.ball_flight + CONFIG.settle_seconds)
+                   if self.ball >= 0 else True)
+        return {'recovered': (self.settle_hold >= CONFIG.settle_seconds) & exposed}
 
-          * `pose` is what "get back to the original stance" means numerically. Nothing previously
-            distinguished standing upright in the authored pose from standing upright in whatever
-            tangle the last impact left.
-          * `recover_step` pays for the swing foot moving TOWARD the escaping COM, while the COM is
-            outside the feet. A step is only a recovery when the body needs one; paying for it
-            unconditionally buys a flamingo, and paying for the lift alone bought a stomp.
-          * `still` is gated on being balanced. Paying for a motionless centre of mass while the
-            body is toppling is a headwind on the one behaviour the task is named after.
-          * the flat survival bonus is 0.2, not 0.5. It pays the body for existing, which is what a
-            statue does best; the walk reward removed its own for the same reason.
-        """
+    def recovery_features(self):
         r = self.xmat[:, self.pelvis]
-        up_z = r[:, 2, 2]                                    # (R @ [0,0,1])[2]
-        com = self.com()
-        com_v = self.com_velocity()
-        feet_mid = 0.5 * (self.xpos[:, self.foot_l, :2] + self.xpos[:, self.foot_r, :2])
-        off = (com[:, :2] - feet_mid).norm(dim=-1)
-
-        upright = torch.clamp(up_z, 0.0, 1.0)
-        height = torch.exp(-40.0 * (self.xpos[:, self.pelvis, 2] - self.rest_pelvis_z) ** 2)
-        support = torch.exp(-12.0 * off)
-        balanced = (off < OFF_BALANCE).float()
-        still = torch.exp(-2.0 * com_v.norm(dim=-1)) * balanced
-
-        # Back to the authored stance, joint by joint.
-        q_err = (self.qpos[:, self.qadr] - self.rest_qpos[self.qadr]).square().mean(dim=-1)
-        pose = torch.exp(-2.0 * q_err)
-
-        # **Stance width.** Measured on the shipped brain under fire, the feet splay to 1.02 m
-        # against a 0.30 m rest stance - a 72 cm brace. Nothing in the reward objected: `support`
-        # measures the COM against the MIDPOINT between the feet, and widening the base moves the
-        # midpoint hardly at all while making the body far harder to topple. It is the cheapest
-        # way to survive a hit and it looks nothing like a person.
-        #
-        # **Gated on being balanced, and that gate is not optional.** Ungated, this term penalises
-        # the one behaviour the task exists to produce: a protective step MOVES a foot, so it
-        # necessarily changes the separation, and paying only for the rest stance makes stepping
-        # cost reward. Measured - one session with it ungated took `steps taken` from 0.62 to 0.34.
-        #
-        # **In the pelvis's own heading frame, signed, and the legs too** (2026-09-11): measured in
-        # world axes with abs(), crossed feet read as a normal width - see env_config.STANCE_SIGMA.
         heading = torch.atan2(r[:, 1, 0], r[:, 0, 0])
         ch, sh = torch.cos(heading), torch.sin(heading)
         rel = self.xpos[:, self.foot_l, :2] - self.xpos[:, self.foot_r, :2]
-        fwd = ch * rel[:, 0] + sh * rel[:, 1]
-        left = self.rest_lateral_sign * (-sh * rel[:, 0] + ch * rel[:, 1])
-        leg_err = (self.qpos[:, self.leg_q] - self.rest_qpos[self.leg_q]).square().mean(dim=-1)
-        trunk_err = (self.qpos[:, self.trunk_q] - self.rest_qpos[self.trunk_q]).square().mean(dim=-1)
-        stance = (torch.exp(-((left - self.rest_stance).square() + fwd.square()) / STANCE_SIGMA ** 2)
-                  * torch.exp(-leg_err / LEG_POSE_SCALE) * torch.exp(-trunk_err / TRUNK_POSE_SCALE)
-                  * balanced)
-
-        # **Off the joint stops** - see env_config.JOINT_SOFT_LIMIT. Always on: a stop holds a pose
-        # for no torque, and that free ride is the thing being taken away.
+        split = ch * rel[:, 0] + sh * rel[:, 1]
+        width = self.rest_lateral_sign * (-sh * rel[:, 0] + ch * rel[:, 1])
+        feet = self.xpos[:, [self.foot_l, self.foot_r]]
+        load, slip_speed_sq = self.foot_contacts.read()
+        grounded = loaded_feet(torch, load, self.grounded)
         q = self.qpos[:, self.qadr]
-        over = ((q - self.soft_hi).clamp_min(0.0) + (self.soft_lo - q).clamp_min(0.0)).sum(dim=-1)
+        over = ((q - self.soft_hi).clamp_min(0.0) + (self.soft_lo - q).clamp_min(0.0)).sum(-1)
+        return dict(up=r[:, 2, 2], pelvis_z=self.xpos[:, self.pelvis, 2],
+            rest_pelvis_z=self.rest_pelvis_z, com=self.com(), velocity=self.com_velocity(),
+            feet=feet, foot_velocity=torch.stack([self._foot_velocity(self.foot_l),
+                                                  self._foot_velocity(self.foot_r)], dim=1),
+            grounded=grounded, slip_speed_sq=slip_speed_sq,
+            pose_error=(q - self.rest_qpos[self.qadr]).square().mean(-1),
+            width=width, split=split, rest_width=self.rest_stance, limit_excess=over,
+            rapid_replants=self.rapid_replants)
 
-        # A foot is airborne relative to where it rests, not to the floor: the sole sits at a
-        # non-zero height and a fixed threshold would read one foot as permanently up.
-        foot_z = torch.stack([self.xpos[:, self.foot_l, 2], self.xpos[:, self.foot_r, 2]], dim=-1)
-        airborne = foot_z > (self.rest_foot_z + FOOT_CLEAR)
-        single = (airborne.sum(dim=-1) == 1).float()
-
-        # **A step is a recovery only when the foot GOES somewhere useful.** This paid for single
-        # support alone, and a stomp satisfies that completely: measured at 6 m/s, 78% of foot
-        # lifts travelled under 5 cm and the rest were directionally random (mean cos -0.069 to
-        # the COM escape), across four sessions that learned nothing. Pay for the swing foot's
-        # velocity along the direction the COM has escaped to - a stomp earns nothing, and so does
-        # a step the wrong way.
-        want = com[:, :2] - feet_mid
-        want_hat = want / want.norm(dim=-1, keepdim=True).clamp_min(1e-6)
-        swing = torch.where(airborne[:, :1], self._foot_velocity(self.foot_l),
-                            self._foot_velocity(self.foot_r))
-        progress = (swing[:, :2] * want_hat).sum(dim=-1).clamp(0.0, CAPTURE_V) / CAPTURE_V
-        recover_step = single * progress * (1.0 - balanced)
-
-        # **Where the step lands, not only how fast it swings.** With CAPTURE_V at 1.0 the steps
-        # grew, but on an 80.9% brain the first step after a high hit still landed 0.16-0.23 m
-        # SHORT of the capture point - the point a foot must reach for the body to come to rest
-        # over it (com + v / omega0, the linear inverted pendulum). Paid while off balance on one
-        # foot, for the swing foot's closeness to it.
-        omega0 = torch.sqrt(9.81 / com[:, 2].clamp_min(0.3))
-        capture = com[:, :2] + com_v[:, :2] / omega0.unsqueeze(-1)
-        swing_xy = torch.where(airborne[:, :1], self.xpos[:, self.foot_l, :2],
-                               self.xpos[:, self.foot_r, :2])
-        gap = (swing_xy - capture).square().sum(dim=-1)
-        place = single * (1.0 - balanced) * torch.exp(-gap / CAPTURE_PLACE_SIGMA ** 2)
-
-        effort = action.square().mean(dim=-1)
-        jerk = (action - self.prev_action).square().mean(dim=-1)
-        return (2.0 * upright + 1.0 * height + 3.0 * support
-                + 1.5 * pose + 2.5 * recover_step + 2.0 * place + 2.0 * stance + 0.2 * still
-                + 0.2 - 0.05 * effort - 0.05 * jerk - 2.0 * over)
+    def reward(self, action):
+        return sum(reward_terms(torch, **self.recovery_features(), action=action,
+                                previous_action=self.prev_action).values())

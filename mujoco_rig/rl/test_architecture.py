@@ -151,7 +151,8 @@ class ScoringTests(unittest.TestCase):
     def test_unscorable_incumbent_never_ships_challenger(self):
         with patch.object(sys, "argv", ["promote", "--task", "perturb", "--checkpoint", "new.pt"]), \
              patch.object(promote, "incumbent_of", return_value="old.pt"), \
-             patch.object(promote, "score_all", return_value=[{"survived": 80}, None]), \
+             patch.object(promote, "score_all", return_value=[
+                 {"recovered": 80, "quiet_survived": 100, "quiet_recovered": 100}, None]), \
              patch.object(promote, "ship") as ship:
             self.assertEqual(promote.main(), 1)
             ship.assert_not_called()
@@ -159,7 +160,7 @@ class ScoringTests(unittest.TestCase):
     def test_nonfinite_score_never_ships_into_empty_slot(self):
         with patch.object(sys, "argv", ["promote", "--task", "perturb", "--checkpoint", "new.pt"]), \
              patch.object(promote, "incumbent_of", return_value=None), \
-             patch.object(promote, "score_all", return_value=[{"survived": float("nan")}]), \
+             patch.object(promote, "score_all", return_value=[{"recovered": float("nan")}]), \
              patch.object(promote, "ship") as ship:
             self.assertEqual(promote.main(), 1)
             ship.assert_not_called()
