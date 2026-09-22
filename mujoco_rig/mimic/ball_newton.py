@@ -12,7 +12,56 @@ from .target_control import DelayedTargetControl
 class BallNewtonEngine(DummyNewtonEngine):
     def __init__(self, rig, num_envs, device="cuda:0", control_factory=DelayedTargetControl):
         self.character = rig
+        # Keep hit state on the same device as the simulation.  Newton exposes contact
+        # shape ids after each control interval; the sticky flag gives BallTask and the
+        # parity probe the same observable that BallNativeEngine already provides.
+        self.hit = torch.zeros(num_envs, dtype=torch.bool, device=device)
         super().__init__(load_ball_rig(rig), num_envs, device, control_factory)
+        labels = self._sim_model.shape_label
+        total_shapes = self._sim_model.shape_count
+        if total_shapes % self.get_num_envs():
+            raise ValueError("Newton projectile shape buffer is not environment-strided")
+        self._shape_stride = total_shapes // self.get_num_envs()
+        ball_shapes = [i for i, label in enumerate(labels) if label.endswith("/g_ball")]
+        floor_shapes = [i for i, label in enumerate(labels) if label.endswith("/floor")]
+        if not ball_shapes or any(i % self._shape_stride != ball_shapes[0] % self._shape_stride
+                                  for i in ball_shapes) or not floor_shapes:
+            raise ValueError("Projectile world must contain one consistent g_ball/floor shape per world")
+        self._ball_shape = ball_shapes[0] % self._shape_stride
+        self._floor_shape = floor_shapes[0] % self._shape_stride
+        if self._shape_stride <= self._ball_shape:
+            raise ValueError("Invalid Newton projectile shape mapping")
+
+    def _record_ball_contacts(self):
+        """Mark worlds with a current ball/character contact in Newton's contact buffer."""
+        count = int(wp.to_torch(self._contacts.rigid_contact_count).reshape(-1)[0].item())
+        if count <= 0:
+            return
+        shape0 = wp.to_torch(self._contacts.rigid_contact_shape0)[:count]
+        shape1 = wp.to_torch(self._contacts.rigid_contact_shape1)[:count]
+        local0 = shape0.remainder(self._shape_stride)
+        local1 = shape1.remainder(self._shape_stride)
+        ball0 = local0 == self._ball_shape
+        ball1 = local1 == self._ball_shape
+        has_ball = ball0 | ball1
+        if not bool(has_ball.any()):
+            return
+        other = torch.where(ball0, local1, local0)
+        # The ball may also touch the floor.  Only a ball/character pair is a gameplay hit.
+        character = (other != self._ball_shape) & (other != self._floor_shape)
+        valid = has_ball & character
+        if not bool(valid.any()):
+            return
+        world0 = torch.div(shape0, self._shape_stride, rounding_mode="floor")
+        world1 = torch.div(shape1, self._shape_stride, rounding_mode="floor")
+        worlds = torch.where(ball0, world0, world1)[valid].long()
+        worlds = worlds[(worlds >= 0) & (worlds < self.hit.numel())]
+        if worlds.numel():
+            self.hit[worlds] = True
+
+    def step(self):
+        super().step()
+        self._record_ball_contacts()
 
     def _apply_start_xform(self):
         # This MJCF contains two articulations in one builder. Its authored initial
@@ -24,6 +73,7 @@ class BallNewtonEngine(DummyNewtonEngine):
         v = torch.zeros((len(ids), self.rig.model.nv), device=self._device)
         q[:, :46], v[:, :45] = qpos, qvel
         super().reset_envs(ids, q, v)
+        self.hit[ids] = False
 
     def launch_ball(self, ids, position, velocity):
         position = torch.as_tensor(position, device=self._device, dtype=torch.float32)

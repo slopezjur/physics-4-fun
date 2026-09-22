@@ -6,7 +6,9 @@
 [node name="MimicPerturb" instance=ExtResource("1_base")]
 script = ExtResource("2_perturb")
 ModelPath = "res://mujoco_rig/dummy_ball.xml"
-BundleDirectory = "res://logs/mimickit-stand/guarded-finetune-01/export"
+BundleDirectory = "res://logs/mimickit-perturb/guarded-perturb-04/export"
+BallTarget = "Random"
+Direction = 4
 
 [node name="Title" parent="Hud/Margin/Controls" index="0"]
 text = "Mimic Perturb — Ball impacts"
@@ -37,6 +39,11 @@ text = "Left"
 layout_mode = 2
 focus_mode = 0
 text = "Right"
+
+[node name="Direction4" type="Button" parent="Hud/Margin/Controls/Directions"]
+layout_mode = 2
+focus_mode = 0
+text = "Random"
 
 [node name="Launch" type="Button" parent="Hud/Margin/Controls" index="5"]
 layout_mode = 2

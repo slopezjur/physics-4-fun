@@ -17,6 +17,43 @@ public class MjMimicPushTests
     }
 
     [Fact]
+    public void BallDirectionsUseTheSameMuJoCoWorldFrameAsPushes()
+    {
+        Assert.Equal(new Vector3(1, 0, 0), MjBridge.GodotToMj(Vector3.Forward));
+        Assert.Equal(new Vector3(-1, 0, 0), MjBridge.GodotToMj(Vector3.Back));
+        Assert.Equal(new Vector3(0, -1, 0), MjBridge.GodotToMj(Vector3.Right));
+        Assert.Equal(new Vector3(0, 1, 0), MjBridge.GodotToMj(Vector3.Left));
+
+        var (position, velocity) = MjMimicBallTrial.BallisticLaunch(new Vector3(1, 2, 3), Vector3.Right, 2);
+        Assert.InRange(position.X, 0.3499f, 0.3501f);
+        Assert.Equal(2, position.Y);
+        Assert.Equal(3, position.Z);
+        Assert.InRange(velocity.X, 1.9999f, 2.0001f);
+        Assert.InRange(velocity.Y, -0.0001f, 0.0001f);
+        Assert.InRange(velocity.Z, 1.5940f, 1.5943f);
+    }
+
+    [Fact]
+    public void BallTrialRejectsNonHorizontalAndAcceptsHorizontalGodotDirections()
+    {
+        // Non-horizontal directions must throw ArgumentException
+        Assert.Throws<ArgumentException>(() => new MjMimicBallTrial(null!, null!, Vector3.Up, 2, 60, "Chest"));
+        Assert.Throws<ArgumentException>(() => new MjMimicBallTrial(null!, null!, Vector3.Down, 2, 60, "Chest"));
+        Assert.Throws<ArgumentException>(() => new MjMimicBallTrial(null!, null!, new Vector3(1, 0.5f, 0).Normalized(), 2, 60, "Chest"));
+        Assert.Throws<ArgumentException>(() => new MjMimicBallTrial(null!, null!, Vector3.Forward, 0.5f, 60, "Chest"));
+        Assert.Throws<ArgumentException>(() => new MjMimicBallTrial(null!, null!, Vector3.Forward, 9.0f, 60, "Chest"));
+        Assert.Throws<ArgumentException>(() => new MjMimicBallTrial(null!, null!, Vector3.Forward, 2, -1, "Chest"));
+
+        // All 4 Godot UI directions have Y == 0 and must pass the direction check (reaching bridge call)
+        Vector3[] horizontalDirections = { Vector3.Forward, Vector3.Back, Vector3.Right, Vector3.Left };
+        foreach (var dir in horizontalDirections)
+        {
+            var ex = Record.Exception(() => new MjMimicBallTrial(null!, null!, dir, 2, 60, "Chest"));
+            Assert.IsNotType<ArgumentException>(ex);
+        }
+    }
+
+    [Fact]
     public void RejectsInvalidAndTruncatedPushes()
     {
         Assert.Throws<ArgumentException>(() => new MjMimicPush(Vector3.One, 290, 6).Validate(0, .016668f, 5.9667f));

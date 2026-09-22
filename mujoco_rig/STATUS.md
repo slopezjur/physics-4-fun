@@ -1,11 +1,79 @@
 # MuJoCo track — status
 
-## 2026-09-21: MimicPerturb scene and controlled-push baseline
+## 2026-09-22: Physical-ball Perturb multi-body training and Godot F5 integration
 
-Open `Scenes/RL/Isaac3/MuJoCo/MimicPerturb.tscn` with **F6**. This is live physics
-using the retained `guarded-finetune-01/export` Stand policy, not a trained Perturb
-actor. The main F5 scene remains MimicStand. Default: 20 N at the Chest COM for six
-control intervals (0.100008 s, 2.00016 N·s), starting at interval 60 (1.00008 s).
+`Scenes/RL/Isaac3/MuJoCo/MimicPerturb.tscn` (the project's F5 default scene) now supports
+interactive multi-body physical ball perturbations across 12 target bones with live
+aiming, auto-firing, and the newly promoted `guarded-perturb-04` policy.
+
+- **F5 Crash Fix:** Resolved an unhandled `System.ArgumentException` in
+  `Source/RL/MuJoCo/MjMimicBallTrial.cs`. The previous check (`Math.Abs(direction.Z) > 1e-6`)
+  assumed a Z-up coordinate system; Godot uses Y-up, causing standard horizontal
+  directions (e.g. `Vector3.Forward = (0, 0, -1)`) to fail validation. Corrected to
+  `Math.Abs(direction.Y) > 1e-6`.
+- **Ball Parity & Parameter Alignment:** Confirmed ball collision and ballistic launch
+  parity across native MuJoCo, Newton, and Godot (`logs/mimickit-perturb/ball-parity-02/`).
+  Aligned physical parameters to 8 kg mass, 9 cm radius, and compliant contact pair dynamics.
+- **Throughput Scaling Benchmark:** Benchmarked Newton/MuJoCo-Warp GPU simulation
+  throughput across environment counts (`Envs = 128, 256, 512, 1024, 2048, 4096`).
+  Peak throughput was reached at `Envs = 2048` (~7,500 SPS), doubling training throughput
+  relative to the 128-env baseline (~2,800 SPS) without GPU VRAM exhaustion or numerical
+  degradation.
+- **12-Bone Multi-Body Random Targeting Architecture:**
+  - Expanded targeting from hardcoded single-bone `Chest` to a 12-bone pool matching
+    legacy `MujocoPerturb.tscn`: `Head`, `Chest`, `Spine`, `Pelvis`, `UpperArm_L`,
+    `UpperArm_R`, `Forearm_L`, `Forearm_R`, `Thigh_L`, `Thigh_R`, `Shin_L`, `Shin_R`.
+  - Dynamic limb aiming: `mujoco_rig/mimic/ball_task.py` queries live kinematic body
+    coordinates at the exact launch step (`engine.get_body_pos()`) to compute the
+    ballistic trajectory towards moving limbs.
+  - Evaluation protocol uses deterministic round-robin limb assignments ensuring equal
+    multi-body coverage across evaluation phases.
+- **Interactive Scene & Test Suite Isolation:**
+  - `MimicPerturb.cs` and `MimicPerturb.tscn` provide a `Random` direction button (360°
+    random azimuth and randomized limb selection), continuous `AutoFire`, and configurable
+    `FireInterval`.
+  - `MjMimicBallTrial.cs` replaced native Godot `RandomNumberGenerator` with managed
+    `System.Random` to prevent unmanaged engine crashes during headless `dotnet test`.
+- **Curriculum Progression & Policy Promotion:**
+  - `guarded-perturb-01` (15 min, single-body Chest): 4/8 survivals, 3.85 s mean survival,
+    212.03 return.
+  - `guarded-perturb-02` (45 min, single-body Chest): 4/8 survivals, 3.99 s mean survival,
+    218.67 return.
+  - `guarded-perturb-03` (15 min, 12-bone multi-body): 7/8 survivals, 4.69 s mean survival,
+    263.49 return, 6.54 cm root error.
+  - `guarded-perturb-04` (30 min, 2.5 m/s curriculum, 20 N·s impulse): 4.29 s mean survival
+    under 2.5 m/s impacts, sub-4 cm root error on limb hits. Promoted as the active canonical
+    policy for `MimicPerturb.tscn` and `mujoco_rig/mimic/scripts/config.ps1`.
+
+## 2026-09-21: Physical-ball Perturb scaffold and experiment wrappers
+
+`MimicPerturb.tscn` now defaults to the physical projectile in
+`mujoco_rig/dummy_ball.xml`, targeting the Chest with the retained
+`guarded-finetune-01/export` Stand actor. Press F6 with that scene open, or press B
+to launch from the live viewer; F5 currently runs this Perturb scene because it is
+the configured project main scene. Open `MimicStand.tscn` and press F6 to view Stand.
+
+The ball bridge, native/Newton construction probe and C# build are complete, but no
+ball collision parity run or ball training result has been accepted yet. The next
+gate is a deterministic launch/contact/reset comparison across native MuJoCo,
+Newton and Godot. The generated projectile is currently 8 kg with a 9 cm radius;
+align it with the gameplay projectile before training.
+
+The isolated wrappers in `mujoco_rig/mimic/scripts/` now expose control and
+stability choices. `train.ps1 -Control torque|target_pd -Stability upstream|guarded`
+supports fresh upstream runs and guarded warm starts. `watch.ps1 -Run` validates the
+bundle contract and treats historical exports without `experiment.json` as Stand;
+new ball exports select Perturb from their manifest. These wrappers do not modify the
+legacy MuJoCo training scripts.
+
+## 2026-09-21: Controlled-force baseline (legacy diagnostic)
+
+This section records the historical force-mode configuration of
+`Scenes/RL/Isaac3/MuJoCo/MimicPerturb.tscn`. It used live physics with the retained
+`guarded-finetune-01/export` Stand policy, not a trained Perturb actor. At that time
+the main F5 scene was MimicStand; the current project main scene is MimicPerturb and
+defaults to the physical ball. The force diagnostic used 20 N at the Chest COM for
+six control intervals (0.100008 s, 2.00016 N·s), starting at interval 60 (1.00008 s).
 Direction buttons restart the trial; R repeats, P pauses. Force, timing, duration
 and reference phase are Inspector settings. Completion or falling holds the result.
 

@@ -12,12 +12,23 @@ if (-not $Experiment) { $Experiment = $settings.DefaultExperiment }
 if (-not $settings.Experiments.ContainsKey($Experiment)) { throw "Unknown experiment: $Experiment" }
 $preset = $settings.Experiments[$Experiment]
 $task = $preset.Task
-$bundle = Require-MimicPath $settings.WatchBundle
 if ($Run) {
     $bundle = Require-MimicPath (Join-Path (Resolve-MimicPath $Run) 'export')
-    $metadata = Get-Content -LiteralPath (Join-Path $bundle 'experiment.json') -Raw | ConvertFrom-Json
-    $task = $metadata.task
-    if ($task -eq 'ball' -and $BallSpeed -eq 0) { $BallSpeed = $metadata.horizontal_speed_max }
+    # Older Stand exports predate experiment.json. Validate the bundle contract first, then
+    # conservatively treat a missing experiment manifest as a Stand policy.
+    $task = 'stand'
+    $contractPath = Join-Path $bundle 'contract.json'
+    if (-not (Test-Path -LiteralPath $contractPath)) { throw 'Bundle has no contract.json.' }
+    try { $null = Get-Content -LiteralPath $contractPath -Raw | ConvertFrom-Json }
+    catch { throw "Bundle contract is not valid JSON: $contractPath" }
+    $metadataPath = Join-Path $bundle 'experiment.json'
+    if (Test-Path -LiteralPath $metadataPath) {
+        $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+        $task = $metadata.task
+        if ($task -eq 'ball' -and $BallSpeed -eq 0) { $BallSpeed = $metadata.horizontal_speed_max }
+    }
+} else {
+    $bundle = Require-MimicPath $settings.WatchBundle
 }
 if ($task -notin @('stand', 'ball')) { throw "Unsupported exported task: $task" }
 $scene = if ($task -eq 'ball') { 'MimicPerturb' } else { 'MimicStand' }

@@ -6,22 +6,26 @@ $Mimic = @{
     Godot = 'D:/Programas/Godot_v4.7.1-stable_mono_win64/Godot_v4.7.1-stable_mono_win64.exe'
     LogRoot = 'logs/mimickit-training'
     DefaultExperiment = 'perturb'
-    Minutes = 15
-    Envs = 128
-    Iterations = 10000
+    Minutes = 30
+    Envs = 2048
+    Iterations = 1000000
     Seed = 210921
     EvaluationInterval = 16
-    ActorMaxKl = 0.02
+    ActorMaxKl = 0.03
+    # Defaults preserve the current guarded target-PD fine-tuning path. Override them per run
+    # with train.ps1 -Control/-Stability without changing this file.
+    Control = 'target_pd'
+    Stability = 'guarded'
     # A warm start loads weights + normalization, not optimizer/RNG state.
-    InitializeFrom = 'logs/mimickit-stand/guarded-finetune-01/best.pt'
-    SourceContract = 'logs/mimickit-stand/guarded-finetune-01/export/contract.json'
-    WatchBundle = 'logs/mimickit-stand/guarded-finetune-01/export'
+    InitializeFrom = 'logs/mimickit-perturb/guarded-perturb-04/best.pt'
+    SourceContract = 'logs/mimickit-perturb/guarded-perturb-04/export/contract.json'
+    WatchBundle = 'logs/mimickit-perturb/guarded-perturb-04/export'
     Experiments = @{
         stand = @{ Task = 'stand' }
         perturb = @{
             Task = 'ball'
             BallSpeedMin = 1.0     # Horizontal m/s. Vertical speed compensates gravity at launch only.
-            BallSpeedMax = 2.0
+            BallSpeedMax = 2.5
             QuietFraction = 0.25 # Keep undisturbed standing episodes during training.
         }
     }

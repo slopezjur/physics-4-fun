@@ -10,18 +10,35 @@ from .ball_newton import BallNewtonEngine
 from .stand_task import StandTask
 
 
+TARGET_BODIES = (
+    "Head", "Chest", "Spine", "Pelvis",
+    "UpperArm_L", "Forearm_L", "UpperArm_R", "Forearm_R",
+    "Thigh_L", "Shin_L", "Thigh_R", "Shin_R",
+)
+
+
 class BallTask(StandTask):
     def __init__(self, rig, reference, num_envs=128, device="cuda:0", seed=210921,
                  engine_factory=None, control_mode="target_pd", speed_min=1., speed_max=2., quiet_fraction=.25):
         if control_mode != "target_pd" or not 1 <= speed_min <= speed_max <= 8 or not 0 <= quiet_fraction <= 1:
             raise ValueError("Ball task requires target PD, speeds 1–8 m/s and a valid quiet fraction")
-        self.speed_min, self.speed_max, self.quiet_fraction = speed_min, speed_max, quiet_fraction
+        # Keep the sampled schedule in the same dtype as the float shot-speed buffer.  The
+        # CLI passes floats, but callers and deterministic probes commonly pass integer
+        # literals; torch.where preserves that integer dtype and then rejects the assignment.
+        self.speed_min, self.speed_max, self.quiet_fraction = (
+            float(speed_min), float(speed_max), float(quiet_fraction))
+        self.target_bodies = TARGET_BODIES
+        self.target_indices = torch.tensor(
+            [rig.model.body(name).id - 1 for name in self.target_bodies],
+            device=device, dtype=torch.long
+        )
         super().__init__(rig, reference, num_envs, device, seed,
                          engine_factory or (BallNativeEngine if device == "cpu" else BallNewtonEngine), control_mode)
         self.episode_seconds = 5.
         self.shot_steps = torch.zeros(num_envs, device=device, dtype=torch.long)
         self.shot_speeds = torch.zeros(num_envs, device=device)
         self.directions = torch.zeros((num_envs, 3), device=device)
+        self.shot_target_body = torch.zeros(num_envs, device=device, dtype=torch.long)
         self.shot_enabled = torch.zeros(num_envs, device=device, dtype=torch.bool)
         self.reset()
 
@@ -34,11 +51,14 @@ class BallTask(StandTask):
             self.shot_steps[ids] = torch.randint(60, 121, (len(ids),), generator=self.rng, device=self.device)
             self.shot_speeds[ids] = self.speed_min + (self.speed_max - self.speed_min) * torch.rand(len(ids), generator=self.rng, device=self.device)
             angle = 2 * math.pi * torch.rand(len(ids), generator=self.rng, device=self.device)
+            target_pick = torch.randint(0, len(self.target_bodies), (len(ids),), generator=self.rng, device=self.device)
+            self.shot_target_body[ids] = self.target_indices[target_pick]
             self.shot_enabled[ids] = torch.rand(len(ids), generator=self.rng, device=self.device) >= self.quiet_fraction
         else:
             self.shot_steps[ids] = 60
             self.shot_speeds[ids] = torch.where(ids % 8 < 4, self.speed_min, self.speed_max)
             angle = (ids % 4) * math.pi / 2
+            self.shot_target_body[ids] = self.target_indices[ids % len(self.target_bodies)]
             self.shot_enabled[ids] = True
         self.directions[ids, 0] = torch.cos(angle)
         self.directions[ids, 1] = torch.sin(angle)
@@ -48,7 +68,7 @@ class BallTask(StandTask):
     def step(self, action):
         ids = torch.nonzero((self.steps == self.shot_steps) & self.shot_enabled).flatten()
         if len(ids):
-            target = self.engine.get_body_pos(0)[ids, self.rig.model.body("Chest").id - 1].cpu().numpy()
+            target = self.engine.get_body_pos(0)[ids, self.shot_target_body[ids]].cpu().numpy()
             position, velocity = launch_state(target, self.directions[ids].cpu().numpy(),
                                               self.shot_speeds[ids].cpu().numpy(), self.rig.model.opt.gravity)
             self.engine.launch_ball(ids, position, velocity)
@@ -64,6 +84,7 @@ class BallTask(StandTask):
                 "ball_solref": world.geom_solref[geom].tolist(), "gravity": world.opt.gravity.tolist(),
                 "horizontal_speed_min": self.speed_min, "horizontal_speed_max": self.speed_max,
                 "quiet_fraction": self.quiet_fraction, "launch_distance_m": .65,
-                "launch_steps_inclusive": [60, 120], "target_body": "Chest",
+                "launch_steps_inclusive": [60, 120], "target_body": "multi_body",
+                "target_bodies": list(self.target_bodies),
                 "flight": "ballistic; aim at launch-time target; no gravity cancellation",
                 "reward": "unchanged DeepMimic standing reference; experimental baseline objective"}

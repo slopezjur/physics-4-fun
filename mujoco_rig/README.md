@@ -10,27 +10,30 @@ says how the pieces work.
 
 The isolated motion-imitation experiment is documented in [mimic/README.md](mimic/README.md).
 It includes a licensed standing reference, raw-torque and reference-relative target/PD
-Stand experiments, and an isolated Godot replay adapter. The new 362-channel target/PD
-actor learned to pass eight of eight three- and five-second Stand trials during a
-30-minute run. Late updates regressed, so the selected minute-24 checkpoint is
-preserved separately. It passes Godot transfer checks and remains experimental.
+Stand experiments, a physical-ball Perturb scaffold, and isolated Godot replay paths.
+The new 362-channel target/PD actor learned to pass eight of eight three- and
+five-second Stand trials during a 30-minute run. Late updates regressed, so the
+selected minute-24 checkpoint is preserved separately. It passes Godot transfer
+checks and remains experimental.
 See its measured limitations and reproduction commands before training further.
 The trainer now supports guarded fine-tuning with frozen normalization and bounded
 actor updates. New runs retain and export their best evaluated checkpoint separately
 from the final training state; see the experiment README for the explicit warm-start command.
 
-Open `Scenes/RL/Isaac3/MuJoCo/MimicStand.tscn` with F6, or use F5 (the configured
-main scene), to view the selected checkpoint. It needs no environment variables.
+Open `Scenes/RL/Isaac3/MuJoCo/MimicStand.tscn` and press F6 to view the selected
+checkpoint. F5 runs the configured project main scene; in the current checkout that
+is `MimicPerturb.tscn`. It needs no environment variables.
 R restarts the five-second trial; P pauses/resumes. The result stays visible at the
 end rather than automatically resetting. Policy bundle and native library paths
 are configured on the root node in the Inspector. `MimicStandReplay.tscn` is for
 automated parity checks only.
 
-For controlled pushes, open `Scenes/RL/Isaac3/MuJoCo/MimicPerturb.tscn` with F6.
-It probes the retained Stand policy with timed chest forces; no Perturb actor has
-been trained yet. Direction buttons restart, R repeats and P pauses. Force and timing
-are Inspector settings. The 52-case baseline and its simulator comparison are in
-[mimic/README.md](mimic/README.md) and [STATUS.md](STATUS.md).
+For physical-ball Perturb viewing, open `Scenes/RL/Isaac3/MuJoCo/MimicPerturb.tscn`
+(or press F5). It defaults to the trained `guarded-perturb-04` policy with 12-bone
+multi-body targeting; direction buttons restart, Random picks a 360° azimuth and random
+limb, B launches immediately, AutoFire provides continuous fire, R repeats and P pauses.
+Ball speed, target and timing are Inspector settings. Detailed progression and benchmarks
+are in [mimic/README.md](mimic/README.md) and [STATUS.md](STATUS.md).
 
 ## The body
 

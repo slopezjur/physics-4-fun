@@ -1,10 +1,12 @@
-# MimicKit motion-guided Stand experiment
+# MimicKit motion-guided Stand and Perturb experiments
 
-This directory preserves the existing Godot/native MuJoCo bridge and trains an
-experimental motion-guided Stand task through MimicKit's Newton/MuJoCo-Warp engine
-with the same dummy. The raw-torque experiment uses 300 observations; the new
-reference-relative target/PD experiment uses 362. Both have a separate, versioned
-Godot replay path and are **not promoted to the production scenes**.
+This directory preserves the existing Godot/native MuJoCo bridge for two
+experimental tasks through MimicKit's Newton/MuJoCo-Warp engine: motion-guided
+**Stand** and physical-ball **Perturb**. Stand uses the reference-relative
+target/PD contract with 362 observations. Perturb reuses that Stand actor and
+adds a simulated ball in `dummy_ball.xml`; its training and cross-engine impact
+parity are still experimental. Both tasks have separate, versioned Godot replay
+paths and are **not promoted to the production scenes**.
 
 ## Reproduce
 
@@ -17,6 +19,36 @@ $env:MIMICKIT_PATH = 'D:/Proyectos/Juegos/Tools/MimicKit'
 ./mujoco_rig/mimic/.venv/Scripts/python.exe -m mujoco_rig.mimic.validate `
   --mimickit $env:MIMICKIT_PATH --out logs/mimickit-compat/validation
 ```
+
+The isolated wrapper scripts keep these commands reproducible without touching the
+legacy MuJoCo training scripts:
+
+```powershell
+# Show the resolved default Perturb command without starting training.
+./mujoco_rig/mimic/scripts/train.ps1 -DryRun
+
+# Start the default physical-ball experiment: guarded target-PD, warm-started from
+# the retained Stand checkpoint.
+./mujoco_rig/mimic/scripts/train.ps1 -Experiment perturb -Minutes 15
+
+# Select a fresh upstream Stand run or another supported control contract.
+./mujoco_rig/mimic/scripts/train.ps1 -Experiment stand -Stability upstream -Control torque
+./mujoco_rig/mimic/scripts/train.ps1 -Experiment stand -Stability guarded -Control target_pd `
+  -InitFrom logs/mimickit-stand/guarded-finetune-01/best.pt `
+  -SourceContract logs/mimickit-stand/guarded-finetune-01/export/contract.json
+
+# Watch the configured bundle, or infer the task from a completed run.
+./mujoco_rig/mimic/scripts/watch.ps1 -Experiment perturb
+./mujoco_rig/mimic/scripts/watch.ps1 -Run logs/mimickit-training/<run-name>
+```
+
+`train.ps1` exposes `-Control torque|target_pd` and `-Stability upstream|guarded`.
+Guarded mode requires a checkpoint and matching source contract; upstream mode may
+start fresh. The `perturb` preset is intentionally restricted by the Python runner
+to guarded target-PD because its ball task depends on that observation/action
+contract. `watch.ps1 -Run` validates `contract.json` and treats exports without the
+new `experiment.json` manifest as Stand exports, which keeps historical bundles
+usable. New ball exports contain the manifest and select `MimicPerturb` automatically.
 
 The setup uses a real virtual environment (`include-system-site-packages = false`),
 with pinned dependencies in `requirements.lock.txt`. The production Conda environment
@@ -183,8 +215,10 @@ outcomes and durations. The gates are 0.003 observation error, 1e-4 action/pose 
 identical outcomes and survival differences below 0.1 seconds. This is a bounded
 transfer check, not proof of long-horizon equivalence or recovery quality.
 
-For live viewing, open `Scenes/RL/Isaac3/MuJoCo/MimicStand.tscn` with F6, or run
-F5 (it is the configured main scene). The root node's Inspector selects the bundle,
+For live Stand viewing, open `Scenes/RL/Isaac3/MuJoCo/MimicStand.tscn` and press F6.
+F6 runs the scene currently open in the editor. F5 runs the project's configured
+main scene; in the current checkout that is `MimicPerturb.tscn`, not Stand. The root
+node's Inspector selects the bundle,
 MuJoCo library directory, trial duration and start phase. The scene defaults to the
 verified `target-pd-30min-01/selected-000833/export` bundle and the isolated Mimic
 Python environment's native library. It requires no environment variables and
@@ -402,7 +436,8 @@ Validate the selected actor through the batch harness:
 & $python -m mujoco_rig.mimic.godot_replay --mimickit $env:MIMICKIT_PATH --bundle logs/mimickit-stand/target-pd-30min-01/selected-000833/export
 ```
 
-For interactive viewing, run `MimicStand.tscn`; its Inspector already selects this bundle.
+For interactive viewing, run `MimicStand.tscn` with F6; its Inspector already selects
+this bundle.
 
 The selected checkpoint's provenance, native evaluations, and ONNX parity are in
 `selected-000833/report.json`; GPU evaluations are in `newton-evaluation.json`,
@@ -484,15 +519,37 @@ The scene's accepted policy remains unchanged. Prefer controlled push evaluation
 the retained candidate before a Perturb curriculum, rather than another unchanged
 Stand training run. These trials use the same finite reference and evaluation phases.
 
-## Controlled Perturb baseline (no new training)
+## Physical-ball Perturb scene
 
-Open `Scenes/RL/Isaac3/MuJoCo/MimicPerturb.tscn` and press F6. The scene uses the
-retained `guarded-finetune-01/export` Stand actor. Four direction buttons restart
-the same five-second trial with a different horizontal push. R repeats, P pauses;
-the finished/fallen pose is held. Inspector properties control force (default 20 N),
-onset (60 control steps), pulse length (6 steps), trial duration and reference phase.
-The HUD shows pulse timing/impulse, displacement, foot travel and contact switching.
-It is a live physics probe, not recorded animation. F5 still runs MimicStand.
+Open `Scenes/RL/Isaac3/MuJoCo/MimicPerturb.tscn` and press F6 (or press F5, as it is the
+configured project main scene). The scene defaults to the trained
+`logs/mimickit-perturb/guarded-perturb-04/export` policy with `dummy_ball.xml`. Four
+direction buttons restart the trial with ballistic shots from the cardinal directions,
+and the `Random` button selects a randomized 360° azimuth aiming dynamically at a
+randomly chosen limb from the 12-bone targeting pool (`Head`, `Chest`, `Spine`, `Pelvis`,
+`UpperArm_L/R`, `Forearm_L/R`, `Thigh_L/R`, `Shin_L/R`). `B` or the launch button fires
+immediately; `R` repeats, `P` pauses, and `AutoFire` enables continuous projectile
+disturbance at configurable `FireInterval`. Inspector properties control ball speed,
+target body, direction mode, and launch timing. The HUD reports active target body, launch
+status, contact detection, and recovery tracking.
+
+The scene also retains a force-pulse diagnostic mode for bridge checks. That mode is
+separate from physical-ball training and must not be treated as ball-impact parity.
+
+The projectile uses an 8 kg mass and 9 cm radius aligned with gameplay projectile dynamics.
+Active canonical model: `logs/mimickit-perturb/guarded-perturb-04/export` (30-minute 2.5 m/s
+curriculum under 20 N·s impulse). Multi-environment throughput scaling can be reproduced
+via `python -m mujoco_rig.mimic.benchmark_ball --envs 128,256,512,1024,2048,4096`.
+
+## Controlled-force baseline (legacy diagnostic)
+
+The controlled-force baseline remains useful for checking the bridge independently
+of projectile flight. It applies a horizontal pulse at the Chest center of mass and
+does not validate the physical-ball path. Four direction buttons restart the same
+five-second trial with a different force direction. Inspector properties control
+force (default 20 N), onset (60 control steps), pulse length (6 steps), trial
+duration and reference phase. The HUD shows pulse timing/impulse, displacement,
+foot travel and contact switching.
 
 Pushes act at the Chest center of mass, in MuJoCo world coordinates: +X forward,
 -X backward, -Y left, +Y right. They are physical external forces, independent of
