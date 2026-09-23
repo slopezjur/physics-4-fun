@@ -13,21 +13,27 @@ from .newton_adapter import DummyNewtonEngine
 from .reference import StandReference
 from .rig import Rig
 from .target_control import DelayedTargetControl
+from .contact_contract import LEGACY, SUPPORT_V2, SAMPLING, SUPPORT_BODIES
 
 
 class StandTask(BaseEnv):
     def __init__(self, rig: Rig, reference: Path, num_envs=128, device="cuda:0", seed=210921,
-                 engine_factory=DummyNewtonEngine, control_mode="torque"):
+                 engine_factory=DummyNewtonEngine, control_mode="torque", contact_mode=LEGACY):
         super().__init__(False)
         self.rig, self.device = rig, device
         self.reference = StandReference(reference, rig, device)
         if control_mode not in ("torque", "target_pd"):
             raise ValueError(f"Unknown control mode: {control_mode}")
         self.target_pd = control_mode == "target_pd"
+        if contact_mode not in (LEGACY, SUPPORT_V2) or contact_mode == SUPPORT_V2 and not self.target_pd:
+            raise ValueError("support_v2 contacts require target PD")
+        self.contact_mode = contact_mode
         if self.target_pd:
             self.engine = engine_factory(rig, num_envs, device, control_factory=DelayedTargetControl)
         else:
             self.engine = engine_factory(rig, num_envs, device)
+        if contact_mode == SUPPORT_V2:
+            self.engine.use_last_solve_contacts()
         self.mapper = DummyKinematics(rig, device)
         self.rng = torch.Generator(device=device).manual_seed(seed)
         self.dt = self.engine.get_timestep()
@@ -82,11 +88,16 @@ class StandTask(BaseEnv):
         control = self.engine.policy_control
         pending = torch.cat([control.pending[(control.cursor + i) % len(control.pending)] for i in range(len(control.pending))], dim=-1)
         loads = self.engine.get_ground_contact_forces(0)[:, self.feet, 2].abs() * 0.001
+        if self.contact_mode == SUPPORT_V2:
+            loads += self.engine.get_ground_contact_forces(0)[:, self.allowed_ground[2:], 2].abs() * 0.001
         return torch.cat([q[:, :3], quat_to_tan_norm(root_rot), self.engine.get_root_vel(0),
                           self.engine.get_root_ang_vel(0), q[:, 7:], self.engine.get_dof_vel(0) * 0.1,
                           loads, pending, future.flatten(1), (phase / self.reference.duration)[:, None]], dim=-1)
 
     def reward(self):
+        return self.reference_reward()
+
+    def reference_reward(self, *, track_root=True):
         q, v = self.reference.sample(self.offset + self.steps * self.dt)
         target_pos, target_rot = self.mapper.from_native_qpos(q)
         body_pos, body_rot = self.engine.get_body_pos(0), self.engine.get_body_rot(0)
@@ -95,7 +106,7 @@ class StandTask(BaseEnv):
             self.engine.get_root_ang_vel(0), self.joint_rotations(body_rot), self.engine.get_dof_vel(0),
             body_pos[:, self.key_bodies], q[:, :3], q[:, [4, 5, 6, 3]], v[:, :3],
             quat_rotate(q[:, [4, 5, 6, 3]], v[:, 3:6]), self.joint_rotations(target_rot), v[:, 6:],
-            target_pos[:, self.key_bodies], self.joint_weights, self.dof_weights, True, True,
+            target_pos[:, self.key_bodies], self.joint_weights, self.dof_weights, True, track_root,
             0.5, 0.1, 0.15, 0.1, 0.15, 0.25, 0.01, 5.0, 1.0, 10.0)
         self._diagnostics["root_tracking_error_m"] = torch.linalg.vector_norm(body_pos[:, 0] - q[:, :3], dim=-1).mean()
         return result
@@ -129,12 +140,16 @@ class StandTask(BaseEnv):
         offset, layout = 0, []
         if self.target_pd:
             groups[7] = ("pending_targets_q_v_valid_oldest_first", 122)
+        if self.contact_mode == SUPPORT_V2:
+            groups[6] = ("foot_and_toe_normal_load_kN_L_R", 2)
         for name, width in groups:
             layout.append({"name": name, "offset": offset, "width": width})
             offset += width
         control_contract = self.engine.policy_control.contract() if self.target_pd else {}
-        return {**self.rig.contract(), **control_contract,
-                "observation_contract": "mimic_stand_target_pd_v1" if self.target_pd else "mimic_stand_v1", "num_obs": offset,
+        contact_contract = dict(ground_contact_sampling=SAMPLING, support_bodies=SUPPORT_BODIES) if self.contact_mode == SUPPORT_V2 else {}
+        schema = "mimic_stand_target_pd_v2" if self.contact_mode == SUPPORT_V2 else "mimic_stand_target_pd_v1" if self.target_pd else "mimic_stand_v1"
+        return {**self.rig.contract(), **control_contract, **contact_contract,
+                "observation_contract": schema, "num_obs": offset,
                 "observation_layout": layout, "reference_sha256": self.reference.sha256,
                 "reference_duration": self.reference.duration,
                 "deployment_status": "Experimental contract; requires a matching Godot observation/reference adapter"}

@@ -21,6 +21,7 @@ internal sealed class MjMimicStandDriver : IDisposable
     private readonly double[] _targetQ = new double[46], _targetV = new double[45];
     private readonly Vector3[] _forces;
     private readonly int _left, _right;
+    private readonly bool _correctedContacts;
     private int _cursor, _steps;
     private float _offset;
     internal float ControlTime { get; }
@@ -34,14 +35,24 @@ internal sealed class MjMimicStandDriver : IDisposable
     internal bool Fallen { get; private set; }
     internal float TrackingError { get; private set; }
     internal bool BallHit { get; private set; }
+    internal float GroundNormalLoad(int body) => Math.Abs(_forces[body].Z);
+    // Observational only: never modifies the exported policy's targets or actions.
+    internal CapturePointResult Balance => MjCapturePoint.Evaluate(
+        _bridge.CenterOfMass(), _bridge.CenterOfMassVelocity(),
+        _bridge.BodyTransform(_left).Origin, _bridge.BodyTransform(_right).Origin,
+        Math.Abs(_forces[_left].Z) + Math.Abs(_forces[_allowedGround[2]].Z),
+        Math.Abs(_forces[_right].Z) + Math.Abs(_forces[_allowedGround[3]].Z));
 
     internal MjMimicStandDriver(MjBridge bridge, string modelPath, string bundle)
     {
         _bridge = bridge;
+        int ballId = bridge.BodyId("ball");
+        if (ballId >= 0) bridge.ExcludeFromCom = ballId;
         _world = new MjMimicWorld(bridge, modelPath);
         using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(bundle, "contract.json")));
         var c = json.RootElement;
-        bool targetPd = c.GetProperty("observation_contract").GetString() == "mimic_stand_target_pd_v1";
+        _correctedContacts = MjMimicContactContract.IsCorrected(c);
+        bool targetPd = _correctedContacts || c.GetProperty("observation_contract").GetString() == "mimic_stand_target_pd_v1";
         int numObs = targetPd ? 362 : 300;
         if ((!targetPd && c.GetProperty("observation_contract").GetString() != "mimic_stand_v1")
             || c.GetProperty("num_obs").GetInt32() != numObs || c.GetProperty("latency_steps").GetInt32() != 2
@@ -55,6 +66,7 @@ internal sealed class MjMimicStandDriver : IDisposable
             "foot_normal_load_kN_L_R", "pending_actions_oldest_first", "future_reference_poses_1_2_3", "reference_phase" };
         var widths = new[] { 3, 6, 3, 3, 39, 39, 2, 60, 144, 1 };
         if (targetPd) { names[7] = "pending_targets_q_v_valid_oldest_first"; widths[7] = 122; }
+        if (_correctedContacts) names[6] = "foot_and_toe_normal_load_kN_L_R";
         var layout = c.GetProperty("observation_layout");
         if (layout.GetArrayLength() != names.Length) throw new InvalidOperationException("Unknown observation layout");
         int offset = 0;
@@ -107,12 +119,13 @@ internal sealed class MjMimicStandDriver : IDisposable
         Array.Clear(Action);
         _reference.Sample(offset, _q, _v);
         _world.Reset(_q, _v);
+        _bridge.ReadNativeGroundForces(_forces);
     }
 
     internal void Observe()
     {
         _world.Read(_q, _v);
-        _bridge.ReadNativeGroundForces(_forces);
+        if (!_correctedContacts) _bridge.ReadNativeGroundForces(_forces);
         int index = 0;
         Put(_q, 0, 3, ref index);
         PutRotation(_q, ref index);
@@ -120,8 +133,10 @@ internal sealed class MjMimicStandDriver : IDisposable
         Put(MjMimicReference.Rotation(_q) * new Vector3((float)_v[3], (float)_v[4], (float)_v[5]), ref index);
         Put(_q, 7, 39, ref index);
         Put(_v, 6, 39, ref index, 0.1f);
-        Observation[index++] = Math.Abs(_forces[_left].Z) * 0.001f;
-        Observation[index++] = Math.Abs(_forces[_right].Z) * 0.001f;
+        Observation[index++] = Math.Abs(_forces[_left].Z) * 0.001f
+            + (_correctedContacts ? Math.Abs(_forces[_allowedGround[2]].Z) * 0.001f : 0);
+        Observation[index++] = Math.Abs(_forces[_right].Z) * 0.001f
+            + (_correctedContacts ? Math.Abs(_forces[_allowedGround[3]].Z) * 0.001f : 0);
         if (_targetControl != null) _targetControl.Observe(Observation, ref index);
         else
             for (int slot = 0; slot < 2; slot++)
@@ -138,7 +153,7 @@ internal sealed class MjMimicStandDriver : IDisposable
             throw new InvalidOperationException("Invalid Mimic observation");
     }
 
-    internal void Step()
+    internal void Step(System.Action? beforePhysics = null)
     {
         Observe();
         _policy.Predict(Observation, Action);
@@ -157,6 +172,9 @@ internal sealed class MjMimicStandDriver : IDisposable
             _targetControl.Enqueue(_targetQ, _targetV, Action);
         }
         _cursor = (_cursor + 1) % 2;
+        // Match Python: observe/predict first, then apply a scheduled disturbance.
+        // mj_forward during a ball launch can already change contact-load sensors.
+        beforePhysics?.Invoke();
         for (int substep = 0; substep < 4; substep++)
         {
             if (_targetControl != null)
@@ -168,10 +186,11 @@ internal sealed class MjMimicStandDriver : IDisposable
             int ball = _bridge.BodyId("ball");
             if (ball >= 0) BallHit |= _bridge.HasCharacterContact(ball, _world.CharacterBodyCount);
         }
+        if (_correctedContacts) _bridge.ReadNativeGroundForces(_forces);
         _bridge.Forward();
         _steps++;
         _world.Read(_q, _v);
-        _bridge.ReadNativeGroundForces(_forces);
+        if (!_correctedContacts) _bridge.ReadNativeGroundForces(_forces);
         Fallen = _q[2] < 0.65;
         for (int body = 1; body < _world.CharacterBodyCount; body++)
         {

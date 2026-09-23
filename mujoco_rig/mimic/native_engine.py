@@ -14,6 +14,11 @@ class NativeDummyEngine:
         self.datas = [mujoco.MjData(rig.model) for _ in range(num_envs)]
         self.policy_control = control_factory(rig, num_envs, device)
         self.native_ctrl = self.policy_control.ctrl
+        self._last_solve_contacts = False
+        self._ground_force_cache = np.zeros((num_envs, rig.model.nbody - 1, 3))
+
+    def use_last_solve_contacts(self):
+        self._last_solve_contacts = True
 
     def get_timestep(self):
         return self.rig.model.opt.timestep * self.rig.decimation
@@ -24,6 +29,7 @@ class NativeDummyEngine:
             mujoco.mj_resetData(self.rig.model, data)
             data.qpos[:], data.qvel[:] = q, v
             mujoco.mj_forward(self.rig.model, data)
+            self._ground_force_cache[i] = self._read_ground_forces(data)
         self.policy_control.reset(ids)
 
     def set_cmd(self, obj_id, command):
@@ -45,7 +51,9 @@ class NativeDummyEngine:
                     data.ctrl[:] = self.native_ctrl[i].numpy()
                     mujoco.mj_step(self.rig.model, data)
                     self._after_physics_step(i, data)
-            for data in self.datas:
+            for i, data in enumerate(self.datas):
+                if self._last_solve_contacts:
+                    self._ground_force_cache[i] = self._read_ground_forces(data)
                 mujoco.mj_forward(self.rig.model, data)
                 data.xfrc_applied[:] = 0
             return
@@ -54,6 +62,8 @@ class NativeDummyEngine:
             for _ in range(self.rig.decimation):
                 mujoco.mj_step(self.rig.model, data)
                 self._after_physics_step(i, data)
+            if self._last_solve_contacts:
+                self._ground_force_cache[i] = self._read_ground_forces(data)
             mujoco.mj_forward(self.rig.model, data)
             data.xfrc_applied[:] = 0
 
@@ -88,17 +98,21 @@ class NativeDummyEngine:
         return self._array("xquat")[:, 1:, [1, 2, 3, 0]]
 
     def get_ground_contact_forces(self, obj_id):
+        if self._last_solve_contacts:
+            return torch.tensor(self._ground_force_cache, dtype=torch.float32)
+        return torch.tensor(np.stack([self._read_ground_forces(d) for d in self.datas]), dtype=torch.float32)
+
+    def _read_ground_forces(self, data):
         model = self.rig.model
-        forces = np.zeros((len(self.datas), model.nbody - 1, 3))
+        forces = np.zeros((model.nbody - 1, 3))
         wrench = np.zeros(6)
-        for i, data in enumerate(self.datas):
-            for k, contact in enumerate(data.contact[:data.ncon]):
-                if 0 not in contact.geom:
-                    continue
-                mujoco.mj_contactForce(model, data, k, wrench)
-                world_force = contact.frame.reshape(3, 3).T @ wrench[:3]
-                for geom, sign in zip(contact.geom, (-1, 1)):
-                    body = model.geom_bodyid[geom]
-                    if body:
-                        forces[i, body - 1] += sign * world_force
-        return torch.tensor(forces, dtype=torch.float32)
+        for k, contact in enumerate(data.contact[:data.ncon]):
+            if 0 not in contact.geom:
+                continue
+            mujoco.mj_contactForce(model, data, k, wrench)
+            world_force = contact.frame.reshape(3, 3).T @ wrench[:3]
+            for geom, sign in zip(contact.geom, (-1, 1)):
+                body = model.geom_bodyid[geom]
+                if body:
+                    forces[body - 1] += sign * world_force
+        return forces

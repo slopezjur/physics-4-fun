@@ -11,12 +11,13 @@ from scipy.optimize import linprog, minimize, Bounds, LinearConstraint
 from .rig import Rig
 
 
-def solve_support(rig, qpos, actual_contacts=False, passive_tolerance=0.5, minimum_norm=False):
+def solve_support(rig, qpos, actual_contacts=False, passive_tolerance=0.5, minimum_norm=False,
+                  support_names=("Foot_L", "Foot_R", "Toe_L", "Toe_R")):
     model, data = rig.model, mujoco.MjData(rig.model)
     data.qpos[:] = qpos
     mujoco.mj_forward(model, data)
     weight = model.body_mass.sum() * abs(model.opt.gravity[2])
-    feet = {model.body(name).id for name in ("Foot_L", "Foot_R", "Toe_L", "Toe_R")}
+    feet = {model.body(name).id for name in support_names}
     contacts = []
     if actual_contacts:
         contacts = [(int(model.geom_bodyid[c.geom[1]]), c.pos.copy(), float(c.friction[0]))

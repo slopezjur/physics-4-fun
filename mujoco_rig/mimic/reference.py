@@ -5,6 +5,7 @@ import numpy as np
 import torch
 
 from .baseline import sha256
+from .motion_contacts import TOE_REFERENCE_SCHEMA, validate_sole_schedule
 
 
 class StandReference:
@@ -19,6 +20,12 @@ class StandReference:
             raise ValueError("This source license has not been reviewed for the experiment")
         self.sha256 = metadata["reference_sha256"]
         with np.load(path, allow_pickle=False) as data:
+            if metadata.get("schema") == TOE_REFERENCE_SCHEMA:
+                from .motion_protocol import validate_motion_reference
+                validate_motion_reference(metadata)
+                if "contact" not in data or "sole_contact" not in data or data["contact"].shape != (len(data["qpos"]), 2):
+                    raise ValueError("v6 references require foot/sole contact phases for every pose")
+                validate_sole_schedule(data["contact"], data["sole_contact"])
             self.qpos = torch.tensor(data["qpos"], dtype=torch.float32, device=device)
             self.qvel = torch.tensor(data["qvel"], dtype=torch.float32, device=device)
             self.dt = float(data["dt"])

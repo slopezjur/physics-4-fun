@@ -1,0 +1,81 @@
+{
+  "schema": "mimic_step_reference_v3",
+  "passed": true,
+  "checks": {
+    "finite": true,
+    "joint_limits": true,
+    "penetration": true,
+    "stance_slide": true,
+    "ground_support": true,
+    "stance_contact": true,
+    "foot_tracking": true,
+    "foot_lift": true,
+    "joint_speed": true,
+    "force_consistency": true
+  },
+  "metrics": {
+    "force_consistency": {
+      "passed": true,
+      "failing_frames": [],
+      "friction_coefficient": 1.0,
+      "max_horizontal_com_acceleration_m_s2": 4.260399264996061,
+      "min_normal_force_per_mass_m_s2": 8.100195536577305,
+      "max_friction_excess_per_mass_m_s2": -6.173954423500243,
+      "max_root_acceleration_m_s2": [
+        3.478067636369669,
+        2.4524678292614666,
+        8.714747252440025
+      ]
+    },
+    "max_penetration_m": 0.00012261157525133082,
+    "max_stance_slide_m_s": 0.05993060695391104,
+    "max_support_gap_m": 1.5959455978986625e-16,
+    "max_stance_gap_m": 0.0006264052185451924,
+    "max_foot_target_error_m": 0.016287979314612115,
+    "foot_lift_range_m": [
+      0.08059194463640779,
+      0.10031908309047588
+    ],
+    "max_joint_speed_rad_s": 4.88566223040295,
+    "root_displacement_m": [
+      -2.6034251432984576,
+      -0.4303949877426157,
+      -0.008461335792422142
+    ]
+  },
+  "source": {
+    "dataset": "100STYLE",
+    "author": "Ian Mason",
+    "source": "https://www.ianxmason.com/100style/",
+    "license": "CC-BY-4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "credit": "The 100STYLE Dataset - Ian Mason",
+    "verified_date": "2026-09-23",
+    "permission_basis": "Author explicitly permits creative/commercial use with attribution; CC BY 4.0 permits adaptation.",
+    "files": {
+      "Neutral_FW.bvh": {
+        "url": "https://drive.google.com/uc?export=download&id=1-TqZdIJvpr-QVvAmYJREUZkuAgpAQSfd",
+        "sha256": "2f28800baa299547c42c257d1c926172542a1e69b46a3d3e6aa0aded0e9b40f6"
+      },
+      "Neutral_BW.bvh": {
+        "url": "https://drive.google.com/uc?export=download&id=1pmJ3GAceoi04kCmXsHvC56TJzKDEHh02",
+        "sha256": "cfa225ff3a29a38d11ecd1b72fa0d917ca6c3dc3b24b3d09a4cb5c28ee9dc5b9"
+      },
+      "Frame_Cuts.csv": {
+        "url": "https://drive.google.com/uc?export=download&id=1d0VM8k4UjA4dDmaviuZMjAf-WQNLUwnZ",
+        "sha256": "e3c1d2beab6486e083622cef6a5402fe9b20edc75a9963ea30675c67ec29ee82"
+      }
+    }
+  },
+  "source_file": "Neutral_BW.bvh",
+  "source_frame_start": 520,
+  "source_frame_stop_exclusive": 760,
+  "source_stride": 2,
+  "model_sha256": "e2b9d6c1fabae13f1f7710cab0bcde65dc548b94699f480b5d299a208901b5b8",
+  "reference_sha256": "35eb1e45778fa545617e50d1b9dcda9d1320ee2fc87fcc16d0a08a1ee82fe45d",
+  "frames": 120,
+  "dt": 0.033334,
+  "direction": "backward",
+  "changes": "Cropped/resampled, semantic-axis retargeting, scale 0.9, grounded inferred stance locks, smoothed foot pitch, moving-foot collision-aware IK followed by trajectory-wide acceleration regularization, lowest-sole root-height projection (walking has no flight phase). No rig or motor changes.",
+  "scope": "Walking stepping prior; not a recorded impact recovery. Kinematic checks do not establish dynamic tracking."
+}

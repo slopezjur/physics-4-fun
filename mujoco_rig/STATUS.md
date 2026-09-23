@@ -1,49 +1,1004 @@
 # MuJoCo track — status
 
-## 2026-09-22: Physical-ball Perturb multi-body training and Godot F5 integration
+## 2026-09-23: Feasible slow transfer calibration; no policy promotion
 
-`Scenes/RL/Isaac3/MuJoCo/MimicPerturb.tscn` (the project's F5 default scene) now supports
-interactive multi-body physical ball perturbations across 12 target bones with live
-aiming, auto-firing, and the newly promoted `guarded-perturb-04` policy.
+`transfer-calibration-02` provides a 32-second stepping-in-place diagnostic on
+the unchanged rig: shift weight, unload one foot, lift it about 6 cm, return,
+then repeat on the other leg. All existing full-motion geometry, contact,
+root-support and actuation checks pass over 641 poses / 639 interior frames.
+There are zero root or delayed-PD failures, maximum penetration is 0.046 mm,
+and maximum foot-target error is 0.296 mm. All 21 static calibration solves
+also pass their necessary-condition checks (temporal foot lift is inapplicable
+to a stationary pose). These are offline feasibility results, not learned
+balance, forward walking, or closed-loop survival.
 
-- **F5 Crash Fix:** Resolved an unhandled `System.ArgumentException` in
-  `Source/RL/MuJoCo/MjMimicBallTrial.cs`. The previous check (`Math.Abs(direction.Z) > 1e-6`)
-  assumed a Z-up coordinate system; Godot uses Y-up, causing standard horizontal
-  directions (e.g. `Vector3.Forward = (0, 0, -1)`) to fail validation. Corrected to
-  `Math.Abs(direction.Y) > 1e-6`.
-- **Ball Parity & Parameter Alignment:** Confirmed ball collision and ballistic launch
-  parity across native MuJoCo, Newton, and Godot (`logs/mimickit-perturb/ball-parity-02/`).
-  Aligned physical parameters to 8 kg mass, 9 cm radius, and compliant contact pair dynamics.
-- **Throughput Scaling Benchmark:** Benchmarked Newton/MuJoCo-Warp GPU simulation
-  throughput across environment counts (`Envs = 128, 256, 512, 1024, 2048, 4096`).
-  Peak throughput was reached at `Envs = 2048` (~7,500 SPS), doubling training throughput
-  relative to the 128-env baseline (~2,800 SPS) without GPU VRAM exhaustion or numerical
-  degradation.
-- **12-Bone Multi-Body Random Targeting Architecture:**
-  - Expanded targeting from hardcoded single-bone `Chest` to a 12-bone pool matching
-    legacy `MujocoPerturb.tscn`: `Head`, `Chest`, `Spine`, `Pelvis`, `UpperArm_L`,
-    `UpperArm_R`, `Forearm_L`, `Forearm_R`, `Thigh_L`, `Thigh_R`, `Shin_L`, `Shin_R`.
-  - Dynamic limb aiming: `mujoco_rig/mimic/ball_task.py` queries live kinematic body
-    coordinates at the exact launch step (`engine.get_body_pos()`) to compute the
-    ballistic trajectory towards moving limbs.
-  - Evaluation protocol uses deterministic round-robin limb assignments ensuring equal
-    multi-body coverage across evaluation phases.
-- **Interactive Scene & Test Suite Isolation:**
-  - `MimicPerturb.cs` and `MimicPerturb.tscn` provide a `Random` direction button (360°
-    random azimuth and randomized limb selection), continuous `AutoFire`, and configurable
-    `FireInterval`.
-  - `MjMimicBallTrial.cs` replaced native Godot `RandomNumberGenerator` with managed
-    `System.Random` to prevent unmanaged engine crashes during headless `dotnet test`.
-- **Curriculum Progression & Policy Promotion:**
-  - `guarded-perturb-01` (15 min, single-body Chest): 4/8 survivals, 3.85 s mean survival,
-    212.03 return.
-  - `guarded-perturb-02` (45 min, single-body Chest): 4/8 survivals, 3.99 s mean survival,
-    218.67 return.
-  - `guarded-perturb-03` (15 min, 12-bone multi-body): 7/8 survivals, 4.69 s mean survival,
-    263.49 return, 6.54 cm root error.
-  - `guarded-perturb-04` (30 min, 2.5 m/s curriculum, 20 N·s impulse): 4.29 s mean survival
-    under 2.5 m/s impacts, sub-4 cm root error on limb hits. Promoted as the active canonical
-    policy for `MimicPerturb.tscn` and `mujoco_rig/mimic/scripts/config.ps1`.
+The new `transfer_calibration` command fits shared stationary coordinates so
+acceleration cannot manufacture static support. It uses the vetted CC-BY-4.0
+standing source, loads one leg before releasing the opposite contact, and joins
+knots with bounded quintic segments that stop at each knot. Stance anchors stay
+fixed. One bounded collision-repair pass inserts clearance poses; in this run,
+two poses at 2.5 and 13.5 seconds avoid a forearm/pelvis intersection. The final
+full-motion validator remains authoritative. Hashes bind the diagnostic and
+saved knots to the source and rig; attribution accompanies the result.
+
+This follows a failed direct reuse of the recorded-walk transfer. The new
+`window_retarget --seed-probe` verifies source, rig, timestep, pose shape and
+available content hashes, then uses probe poses only as initialization. Original
+targets, bounds, full-stance anchors and fixed context remain authoritative.
+Historical probes without a content hash are explicitly marked unverified.
+`window-seeded-transfer-01/forward` used editable [18, 37), context [14, 41),
+20 restoration evaluations / 332.828 seconds. The candidate had 96/118 root
+failures and 15 conditional PD failures and did not satisfy its optimizer
+constraints. It was rejected; saved source poses are byte-for-byte equal as
+arrays. The probe's independently shifted landing anchors were not imported.
+
+The initial static-to-dynamic calibration also failed at support switches and
+interpolated collisions. Explicit unloading and stopped interpolation removed
+root/PD failures; collision-aware intermediate poses resolved the remaining
+geometry failure. The maintained command reproduces the passing result.
+
+Next: native closed-loop tracking of this slow calibration, including reset
+and command-delay behavior, before a short transfer-learning experiment. Do not
+resume the failed recorded-walk reference or infer Perturb improvement from this
+result. Diagnostic artifacts remain explicitly unadmitted for training, with no
+training manifest. No PPO run, export, viewer selection, rig or control-limit
+change was made. Verification: 66 focused tests pass.
+
+## 2026-09-23: Frozen-root dependency bug fixed; transfer still unadmitted
+
+Found a concrete impossibility in the previous constrained window formulation.
+Editing source frames [20, 35) changes delayed motor bounds through frame 37,
+but root dynamics at frames 36–37 depend only on frozen poses. Both roots are
+already unsupported. The optimizer nevertheless had to repair them locally.
+`immutable-root-dependency-01.json` records a frame-34 perturbation: generalized
+force changes are exactly zero at 36–37 while motor bounds change. Independent
+HiGHS LPs certify both root problems infeasible in the unchanged fitting contact
+envelope. Their normalized residuals are 0.092082 and 0.076411.
+
+The fitter now separates central root-dynamics dependencies from delayed-command
+dependencies. Only LP-certified, immutable root failures are deferred; numerical
+solver failure is not a certificate. Supported fixed frames retain their delayed
+motor constraints. Deferred failures are explicit in the report and still fail
+full-reference admission. This fixes local problem construction without relaxing
+physical limits or silently admitting the source clip.
+
+A second correction preserves the best feasible incumbent when optimization ends
+on an infeasible trial. A static standing-reference test retains native root and
+PD feasibility after two SLSQP iterations; this is a necessary-condition fixture,
+not a closed-loop survival test. Returning an incumbent is not called convergence.
+
+Experimental `--solver direct-forces` exposes nonnegative friction-ray forces,
+uses exact force Jacobians, and starts with bounded feasibility restoration.
+It preserves the existing contact points, friction reserve and motor envelope.
+Direct-force and projected-force residuals agree on coupled/saturated-motor tests;
+independent differences verify both block and assembled force Jacobians.
+
+Final matched-source tests, same editable [20, 35) and fixed context [16, 39):
+- `window-direct-forces-04`: 20 restoration evaluations / 221.859 seconds,
+  8,661 combined residual calls, no polishing because restoration remains
+  infeasible. Maximum foot error 40.951 mm, 100/118 root failures, 14 conditional
+  PD failures; no root case changes. Rejected. Normalized placement/force
+  violations remain 0.023810 / 0.130212.
+- `window-constrained-02`: original projected-force SLSQP with the dependency
+  correction, 20 iterations / 306.016 seconds, 88 objective evaluations and
+  8,277 combined residual calls. Frame 25 becomes root-feasible but frame 28
+  regresses; total remains 100/118, with 14 conditional PD failures. Foot error
+  remains 40.116 mm; local placement/contact and force constraints still fail.
+  Aggregate force consistency passes. Rejected, not converged.
+
+Both saved references preserve the source poses exactly. No policy is trained,
+exported or selected; the rig, packaged references and Godot viewers are unchanged.
+The dependency bug was real, but removing it does not establish feasibility of
+the editable transfer or better recovery. Further PPO remains premature. The
+remaining investigation is a feasible transfer initialization/formulation, not
+additional reward, torque or admission-threshold tuning. All jobs have finished.
+
+Earlier diagnostic evidence is retained: `window-direct-forces-01` stopped in its
+first SLSQP subproblem; `-02` exposed tiny negative BVLS seed roundoff (now clamped
+to the nonnegative bound); `-03` tested restoration before the dependency fix.
+None was accepted. The direct-force solver remains opt-in rather than replacing
+the default based on these unsuccessful tests.
+
+Verification: 60 focused tests pass; the seven window tests also pass with final
+LP certification. Tests cover incumbent retention, mixed Jacobians, restoration,
+immutable root failures remaining full-clip failures, and boundary protection.
+`git diff --check` passes.
+
+## 2026-09-23: Explicit window constraints; placement passes, dynamics still rejected
+
+`window_retarget` now defaults to constrained SLSQP. The existing foot-placement,
+sole-height, penetration/clearance and stance-slide limits are explicit
+inequalities. Joint root/motor force residuals must also satisfy an explicit
+near-zero bound at every affected interior frame, including fixed neighboring
+poses whose accelerations or delayed commands depend on an edit. The inner force
+solve retains the existing inset footprint, friction reserve and delayed PD
+authority. No physical or admission limit changes. Immutable geometry outside
+the editable region is excluded from local constraints, but remains subject to
+full-reference admission. A proposal with unsatisfied optimizer constraints is
+rejected even if its aggregate regression checks otherwise pass.
+
+Shared reference-limit constants keep offline fitting and admission aligned.
+Objective/constraint finite differences share evaluations through public SciPy
+APIs. `--max-evaluations` means SLSQP iterations for this solver; residual-call
+counts are reported separately. `--solver least-squares` preserves the previous
+dense diagnostic path. Other force-fitting callers keep their original defaults.
+
+Bounded experiment: `logs/mimickit-steps/window-constrained-01/forward`, same source
+as the previous window tests, editable [20, 35), unchanged context [16, 39):
+- 20 SLSQP iterations, 54 objective evaluations, 7,381 combined residual calls,
+  285.484 seconds. Iteration limit reached; not converged.
+- All local placement/contact-geometry inequalities pass. Maximum foot error
+  inside the editable interval is 38.011 mm, below the unchanged 40 mm limit.
+- Force inequalities do not pass: maximum normalized affected-frame residual
+  violation is 0.102062. Full-clip root-support failures remain 100/118: frame 22
+  becomes feasible, but frame 28 regresses. Conditional PD failures remain 14.
+- Aggregate force consistency also fails at frame 29. Global foot error remains
+  40.116 mm, penetration 18.659 mm and stance slide 0.209463 m/s; remaining
+  immutable geometry still prevents full admission.
+- Rejected. Candidate poses outside [20, 35) are exactly unchanged. Saved
+  `step_reference.npz` poses equal the original source exactly; no promotion.
+
+This demonstrates enforced placement and reliable rejection, not improved learned
+behavior or physical infeasibility of the rig. The local force-feasibility solve
+is still unresolved. Before more optimizer budget or PPO, investigate feasibility
+restoration/direct contact-force variables on this same transfer; another reward,
+torque or acceptance-threshold adjustment is not supported by this experiment.
+Godot viewer selections, policy weights, the rig and packaged references remain
+unchanged. No training was run; all experiment jobs have finished.
+
+Verification: 53 focused tests pass, including conflicting objective/constraint
+cases, infeasible support, bounded finite differences, excluded immutable geometry,
+affected fixed-frame dynamics, full-clip regression protection and hash-bound
+output. `git diff --check` passes.
+
+## 2026-09-23: Overlapping intervals with preserved context
+
+`window_retarget.py` adds dense local fitting inside an unchanged full reference.
+It preserves every surrounding pose exactly and carries a context margin of
+`ceil(command_delay / reference_dt) + 2` frames on both sides (four for this clip).
+Full-stance world headings and landing offsets are inherited without adjustment;
+cropping cannot create a new anchor. Central derivatives and delayed-PD intervals
+in the affected region match the full clip. Subsequent overlapping windows start
+from the last accepted full reference.
+
+Acceptance uses full-clip validation. It protects passing gates and the identities
+of root-supported/combined root-PD-feasible frames, and rejects increased global
+penetration, stance-slide or foot-target-error maxima. Rejected proposals are
+archived separately; saved output receives a new hash and full admission results.
+No locally successful window can bypass reference admission.
+
+`window-retarget-01/forward` tests [22, 31) and [27, 36), twenty evaluations each:
+- First window: 114.968 seconds, 99/118 root-support failures versus the original
+  100/118. Frames 23 and 25 become feasible but frame 28 regresses. Foot error
+  increases to 48.806 mm. Rejected.
+- Second window: 95.640 seconds, 101/118 root-support failures and 46.986 mm foot
+  error. Rejected. Both proposals' largest foot error is the incoming right swing
+  foot at frame 27; this is not a reinterpretation of planted toe support.
+- No proposal is accepted; saved poses are exactly equal to the input reference.
+
+`window-retarget-02/forward` broadens the editable interval to [20, 35) and runs
+forty evaluations / 452.484 seconds. Root failures fall to 98/118: frames 22,
+24 and 25 improve, but the previously feasible transfer at frame 28 fails again.
+Foot error increases to 51.106 mm. Aggregate force consistency remains passing,
+unlike the earlier raw-splice experiment, but the candidate is rejected. Its
+saved output also preserves the input poses exactly. Neither bounded run is
+converged; failure does not establish that the rig is physically incapable.
+
+An additional support-only counterfactual (`heel-support-hypothesis-01.json`)
+allows the incoming right foot's near-floor corners to supply projected force.
+This removes the root failure at frame 23 but not 24–27. Those poses still
+penetrate the floor, so the intervention is diagnostic and cannot be admitted.
+The result does not support contact relabeling alone as a solution.
+
+The remaining issue is a coupled foot-placement/support tradeoff: fitting cost
+falls while required admission constraints are violated. Before more PPO, the
+next fitting experiment should enforce the existing placement/support limits
+explicitly within the solve rather than relying only on weighted residuals.
+No limit is relaxed, no reference is promoted and no training, export or viewer
+selection changes. All fitting jobs have finished.
+
+Verification: 49 focused tests pass, covering fixed poses, full-versus-window
+delayed dynamics, original stance headings, regression frame identities and
+hash-bound output. These changes affect offline fitting only.
+
+## 2026-09-23: Isolated forward transition and solver comparison
+
+The first forward transfer is isolated at source frames [20, 35) from
+`constrained-retarget-01/forward`. Its toe-only phase is at frames 26–28. The
+original interval has 12/13 root-support failures and 19.870 mm penetration;
+at frame 25 the swing foot penetrates while the planted left foot remains fixed.
+Support-moment failures also occur before and after toe-off. The production
+sparse Jacobian matches independent directional finite differences to approximately
+0.015% relative error on this interval; missing sparsity dependencies are not
+supported as the main explanation for poor progress in this test.
+
+Matched twenty-evaluation diagnostic fits use the same poses, contact schedule,
+targets and permitted landing offsets:
+- `transition-probe-01`: default sparse LSMR, 55.844 seconds, cost 139.845,
+  9/13 root-support failures, 5.927 mm penetration and 42.850 mm foot error.
+- `transition-tight-probe-01`: tighter iterative tolerances (1e-10, 5000 inner
+  iterations), 59.375 seconds, cost 80.241, 3/13 root-support failures. Penetration
+  and foot error still fail. This diagnostic does not change production defaults.
+- `transition-exact-public-01`: dense exact solve through SciPy's public interface,
+  142.219 seconds, cost 29.091, 0/13 root-support failures, 0.945 mm penetration
+  and 36.981 mm foot error. Every geometry check passes; delayed PD still fails
+  at source frame 22 (one of twelve evaluated post-delay frames). Full motor
+  authority has no failing frames. The exploratory colored-Jacobian dense probe
+  (`transition-dense-probe-01`) reproduces the same result in 56.422 seconds,
+  but that private-API experiment is not used in the maintained implementation.
+
+This establishes better local convergence with the dense solve, at higher runtime
+cost through the public interface. It does not establish a complete trackable
+motion or identify physical joint limits as the remaining cause. `transition_probe`
+records baseline/candidate metrics and source-frame failures, verifies source/rig
+hashes, preserves cropped landing identities and explicitly produces no training
+manifest. The sparse solver remains the full-clip default; exact mode is opt-in.
+
+The raw splice back into the original clip is also tested in memory
+(`transition-splice-probe-01.json`). It still fails full-reference admission:
+88/118 root-support failures remain, aggregate force consistency now fails, and
+the joins change root acceleration (frame 34 lateral acceleration changes from
+-3.985 to -8.083 m/s²). A free-endpoint local solution cannot simply replace the
+original frames. Next: optimize overlapping intervals with preserved surrounding
+poses and delayed-command context, then rerun full-reference gates. This is a
+reference-continuity task before any further PPO, not another reward adjustment.
+
+A separate audit defect is fixed: the `motion_dynamics` file entry point ignored
+`sole_contact`. On the full forward candidate this incorrectly reported 82 rather
+than 100 root-support failures by borrowing inactive/projected support. It now
+honors explicit soles in both root and actuator diagnostics; legacy files retain
+their original semantics. Admission validation already used explicit soles, so
+previous rejected manifests remain valid. Reproduction output is saved in
+`transition-contact-audit-01.json`.
+
+Verification: 44 focused tests pass, including exact-solver probing, cropped
+landing offsets, diagnostic-only output and explicit-versus-legacy file audits.
+No physical model, controller contract, reference admission threshold or selected
+Godot policy changed. No PPO run, export or background fitting job remains active.
+
+## 2026-09-23: Bound-aware IK and controlled landing adaptation
+
+`contact_projection.py` now redistributes an IK correction with bounded least
+squares when a hinge reaches its limit. Previously, clipping the unconstrained
+correction discarded motion that other hinges could supply. Regression fixtures
+cover redistribution, unchanged joint limits and fixed toe pivots.
+
+The stable box SAT query now applies to every force fit, including candidates
+without a positive clearance request. Positive clearance fitting aims 1 mm beyond
+the requested value, while independent admission retains the original threshold.
+Optional `--adjust-landings` optimizes an absolute XY correction per uninterrupted
+stance, bounded to 2 cm per axis and shared across flat/toe-only phases. Original
+foot targets remain the validation baseline; continuation preserves the saved
+offsets without accumulating them. These are reference-fitting changes only.
+
+The frame-64 backward diagnostic (`ankle-constraint-diagnosis-01.json`) identifies
+right ankle roll: its delayed-PD lower command bound was -0.417952; a feasible
+solution uses -0.429152 when that motor alone is diagnostically given full authority.
+No motor limit or action window was changed. The subsequent pose fit resolves the
+failure inside the existing command envelope.
+
+`constrained-retarget-01/backward` completes 25 evaluations / 887.484 seconds:
+all 118 root-support and 117 delayed-PD checks pass. Foot error is 37.850 mm,
+penetration 1.410 mm and stance sliding is numerical zero. Minimum self-clearance
+improves from 1.907 to 2.856 mm, still below 5 mm; the closest pair is now
+Shin_L/Toe_L at frame 116. It remains rejected. The fit is nonconverged, and these
+necessary-condition improvements do not demonstrate closed-loop recovery.
+
+`constrained-retarget-01/forward` completes 25 evaluations / 1103.281 seconds.
+It still fails 100/118 root-support checks and has 14 delayed-PD failures among
+the root-supported frames. Penetration is 19.870 mm, foot error 40.116 mm and
+stance sliding 0.20946 m/s. Sliding is worse than the source candidate's 0.08291
+m/s, despite a lower fitting cost. This is rejected evidence, not a forward-motion
+improvement. The remaining stance error cannot be explained solely by clipping
+the old unconstrained IK step.
+
+`landing-retarget-01/forward` tests the optional landing variables from the same
+parent: ten evaluations / 446.906 seconds. It fails 102/118 root-support checks
+and 12 conditional delayed-PD checks, matching the fixed-landing continuation at
+ten evaluations. Stance slide is 0.22730 m/s, penetration 21.394 mm and foot error
+40.506 mm. The largest landing correction is only 0.334 mm per axis; the optimizer
+has not approached its 20 mm bound. Source foot targets and explicit support
+phases are exactly preserved. The local frame-94 benefit from a 2 cm shift has
+not become a useful whole-trajectory solution within this budget. No claim of
+better tracking or inadequate landing range follows from this nonconverged fit.
+
+Next diagnostic boundary: isolate the forward stance-to-step failure and solve
+its contact/pose/dynamics compatibility before another full-clip optimization.
+Backward still needs clearance at the supporting left shin/toe pair. Neither
+candidate is admitted to PPO, and changing rewards cannot substitute for passing
+reference validation. No PPO was launched, no export/viewer was replaced and no
+fitting or training process remains running after these bounded experiments.
+
+Verification: 41 focused tests pass, including phase-constant landing offsets,
+toe-off anchoring, original-target preservation, continuation and invalid-seed
+rejection. Native model, motor authority and Godot viewer selections are unchanged.
+
+## 2026-09-23: Native failure diagnosis, explicit toe-off and stable clearance fitting
+
+Substep audit: `logs/mimickit-steps/tracking-audit-04/report.json`, using the admitted
+backward reference and the same eight native phases. Baseline zero-residual PD
+survives 1.661 seconds on average, with 0/8 completions. Prefilling the command
+queue gives 1.552 seconds and 0/8; startup delay alone does not explain the failure.
+The existing Stand actor gives 1.327 seconds and 0/8. Removing self-collision in a
+private diagnostic model gives 2.163 seconds, still 0/8, with greater mean root
+error. No-self-contact forces are exactly zero while floor forces remain active.
+Self-collision contributes to failure, but removing it does not establish tracking.
+
+In baseline phase 0, forearm/thigh contact exceeds 5 N at 0.0625 seconds, root error
+first exceeds 5 cm at 0.2834 seconds, and both feet first unload at 0.6459 seconds.
+No motor saturates before that first 5 cm error in this phase. Other phases first
+contact opposite feet/toes or shin/toe pairs. The reference itself leaves sub-mm
+clearances and small foot/toe overlaps. These observations localize a clearance
+problem and early root lag; they do not prove that actuator authority is adequate
+in every phase or that self-contact is the sole cause.
+
+Implementation:
+- `motion_tracking_audit.py` records actual physics-substep controls/contact forces,
+  acceleration and state, truncating each world at its first failure. Diagnostic
+  interventions never change production resets, model files or exports.
+- Optional `force_retarget --toe-off` produces a v6 reference with explicit
+  Foot_L/Foot_R/Toe_L/Toe_R contact phases. Toe-only IK fixes the toe anchor while
+  allowing heel lift. Support forces and sliding use the declared soles; raised
+  corners cannot contribute projected support. Existing v5 semantics are preserved.
+- `--self-clearance 0.005` fits and validates a declared 5 mm clearance between
+  collision-enabled body pairs, exempting the floor. Continuations inherit it.
+- Native `mj_geomDistance` was observed to jump from 6.2319 mm to zero for a 1e-8
+  radian perturbation of pose coordinate 41 at backward frame 86. This stalled
+  the first clearance fit with an artificial gradient near 1e8. Box clearance now
+  uses a conservative, stable separating-axis bound; other shapes retain the
+  native query. Actual MuJoCo penetration remains an independent gate.
+
+Forward candidate: `toe-retarget-01/forward`, ten evaluations / 382.297 seconds.
+Stance slide is 0.08291 m/s, passing the unchanged 0.15 m/s limit; the prior flat
+candidate measured 1.081 m/s. It remains rejected: penetration 21.05 mm, foot error
+40.52 mm, an active sole corner 2.395 mm from the floor, and 104/118 unsupported
+frames under the new explicit-phase test. The root count is not directly comparable
+to v5's optimistic support test. This is a contact-model improvement, not a usable
+walking controller. No PPO or viewer replacement follows a rejected reference.
+
+Backward clearance candidate: `clearance-retarget-02/backward`, ten evaluations /
+317.031 seconds after fixing the distance derivative. Minimum separation improves
+from a small overlap to 1.907 mm, below the requested 5 mm. All root-support and
+geometry checks pass, but delayed-PD feasibility fails at frame 64, also the
+closest Foot_L/Toe_R pair. The candidate is rejected and cannot replace the older
+admitted reference. Solver cost reduction does not establish tracking improvement.
+The earlier native-distance run (`clearance-retarget-01`) is retained as failure
+evidence. No optimizer or training job remains running after this investigation.
+
+Remaining work is localized: reconcile swing-foot clearance and actuator demand
+around backward frame 64, and complete forward stance geometry (worst active
+corner at frame 94) before another motion pilot. These bounded, nonconverged fits
+do not establish that the existing rig is incapable of the motion. No rig, runtime
+contact semantics, selected Godot policies or packaged references were changed.
+
+Verification: 37 focused tests pass, including toe-pivot anchoring, near-floor
+corner filtering, legacy admission/export compatibility, clearance gating and
+stable conservative box distances.
+
+## 2026-09-23: Joint contact/actuator fitting and bounded stance IK
+
+The offline reference fitter now solves root support and controlled-joint demand
+together inside the existing delayed target-PD envelope. It reconstructs stance
+legs with bounded six-hinge IK, keeps ankle yaw adjustable, and permits bounded
+pelvis orientation corrections. The runtime-derived PD bounds are shared with
+the independent validator; contact-independent motor rows are eliminated exactly
+from the inner bounded solve. Rig geometry, motor strength and action limits are
+unchanged. Fresh references start 2 cm lower for bent-knee IK initialization;
+continuations preserve the fitted height.
+
+`actuated-retarget-02/backward` removes the previous 9 full-motor failures and
+reduces delayed-PD failures from 22 to one across 117 evaluated frames. The next
+20-evaluation continuation (`actuated-retarget-03/backward`, 526.672 seconds)
+removes that last PD failure. Root support passes all 118 frames, planted-foot
+sliding is below 1e-12 m/s, and penetration is 0.734 mm. It still fails
+the swing-foot tracking threshold: 40.534 mm versus 40 mm. Necessary-condition
+improvements are not evidence of learned walking or better impact recovery.
+
+The final ten-evaluation continuation (`actuated-retarget-04/backward`, 293.985
+seconds) passes every unchanged v5 admission check: 0/118 root-support failures,
+0/117 motor/PD failures, 39.949 mm maximum foot error and 0.703 mm penetration.
+The validation callback stops at acceptance; optimizer convergence is not claimed.
+This is the first admitted moving reference under the full v5 criteria.
+
+Native tracking (`logs/mimickit-steps/actuated-probe-01/report.json`) still fails
+all eight trials for both diagnostic controllers. Mean survival is 1.661 seconds
+with zero-residual PD and 1.327 seconds with the unchanged Stand v2 actor, versus
+1.629/1.265 seconds on the prior root-only fit. These small diagnostic changes
+do not establish useful tracking; neither controller has learned this reference.
+
+A fresh, isolated upstream PPO motion pilot then ran on the RTX 4080 SUPER with
+2048 environments, `support_v2`, native evaluation every 16 updates and seed
+230923 (`logs/mimickit-steps/actuated-backward-pilot-01`). It completed 46 updates /
+3,014,656 transitions in 180.843 seconds. Native success stays 0/8; mean survival
+changes from 1.673 to 1.629 seconds and root error from 0.2281 to 0.2337 m.
+Newton also scores 0/8 (1.652 seconds). Checkpoint selection rejects every trained
+candidate and retains iteration 0, so the run's export uses the initial weights
+from `best.pt`. The final candidate is preserved as `model.pt`. ONNX action parity
+error is 1.86e-8. This short pilot does not establish that longer learning cannot
+help, but supplies no evidence for a longer Perturb run. Selected Godot Stand and
+Perturb bundles and packaged motion assets remain unchanged.
+
+Next: use the saved native traces to localize the first closed-loop contact/torque
+failure on the admitted backward reference, and replace forward's flat-foot
+contact-gap assumption with heel-lift/toe-only support. Do not claim a policy
+improvement from reference admission alone.
+
+Forward (`actuated-retarget-02/forward`, 30 evaluations, 1117.907 seconds) remains
+rejected: 83/118 root-support failures, 1.081 m/s stance sliding, 47.949 mm maximum
+foot-target error and 16.097 mm penetration. The largest slips are at frames
+28 (left), 47 (right) and 68 (left), where missing source contact labels were
+filled by extending flat-foot stance. At frames 28 and 68 the stance hip reaches
+its extension limit. This identifies the flat-foot transition assumption as a
+limitation of this fit; it does not justify changing the skeleton's joint limits.
+Forward needs a heel-lift/toe-support transition model rather than another PPO run.
+
+Verification: 27 targeted tests pass, including stance locking under pelvis
+translation/rotation, equivalence of reduced/full bounded force solves, and
+delayed-PD bounds against runtime output with moving targets and target velocities.
+
+## 2026-09-23: Force-aware retargeting implemented; actuator/contact constraints still block motion training
+
+`force_retarget.py` now refines the geometric references against unilateral
+foot-plus-toe contact forces, an inner friction pyramid and inset support points.
+Grounding is included in every optimization evaluation. It completes missing
+walking contact intervals, extends the existing landing anchors and reconstructs
+central tangent velocities. `retarget_steps.py` runs this phase after geometric
+fitting; the separate CLI can reuse hash-verified archived fits. No rig, torque,
+controller, policy weights or selected Godot exports were changed.
+
+Final candidates: `logs/mimickit-steps/force-retarget-04`. The forward fit used
+60 function evaluations (532.922 seconds). Backward used the preceding 60-evaluation
+root-only fit plus 20 further evaluations (153.594 seconds) with complete sole
+support. These bounded fits reached their evaluation budgets, not convergence.
+
+- Backward: root-support failures fall from 64/118 to 0/118; all geometry checks
+  pass. Maximum stance speed is 0.01874 m/s and foot-target error 0.01426 m.
+  On the 117 post-delay frames, 9 fail the full motor envelope and 22 fail the
+  existing +/-0.25-radian delayed PD window. Doubling it still leaves 20 failures.
+- Forward: 92/118 root-support failures remain (baseline 95). Maximum stance speed
+  is 1.094 m/s against the 0.15 limit; foot-target error is 0.0581 m against 0.04.
+  The fit reduces its objective but does not produce an acceptable trajectory.
+  Filling the source's 11 missing-support frames and re-anchoring the extended
+  stance targets is insufficient to make these transitions dynamically consistent.
+- Matched backward tracking: both zero-residual PD and the unchanged Stand v2 actor
+  still fail all eight trials. Zero-residual mean survival rises from 1.433 to
+  1.629 seconds; the Stand actor falls from 1.315 to 1.265 seconds. This is a
+  reference-support improvement, not learned walking or improved policy behavior.
+- Simply slowing the backward clip by factors 1.25/1.5/2 reintroduces 17/31/44
+  unsupported frames. Timing cannot be changed independently of support dynamics.
+
+New motion training now requires `mimic_step_reference_v5`: the final validation
+also gates on actuator feasibility within the existing delayed PD window. The
+v4 optimization outputs remain diagnostic archives. Byte-identical references
+with v5 manifests and the complete comparison are saved under
+`logs/mimickit-steps/force-retarget-review-01`; neither candidate is admitted.
+Other evidence: `force-probe-02/report.json`, `force-backward-dynamics-02.json`
+and `force-backward-timing-01.json` under `logs/mimickit-steps`.
+
+Verification: 21 targeted tests pass, covering friction, velocity reconstruction,
+stance extension, static support, reference admission and export compatibility.
+Next: jointly enforce contact-transition consistency and the existing actuator/PD
+limits during trajectory fitting, then repeat tracking. Do not compensate with
+stronger motors, wider action windows or a longer Perturb PPO run. No new training
+was started and the packaged references remain unchanged.
+
+## 2026-09-23: First Perturb v2 pilot learns settling but fails directional retention
+
+Run: `logs/mimickit-training/perturb-support-v2-15min-01`, initialized from
+`stand-support-v2-15min-01/best.pt` and its matching v2 contract. Guarded PPO,
+reference reward, 2048 CUDA worlds, 25% quiet episodes, speeds 1.0–2.5 m/s,
+seed 210921, native evaluation every 64 updates. The unchanged 15-minute budget
+completed 133 updates / 8,716,288 transitions in 900.188 seconds.
+
+- Fixed 96-case validation: starting Stand v2 survives 44 and settles after 25;
+  final candidate survives 40 and settles after 36. Update 128 scored 43/37.
+- All evaluated trained candidates failed directional retention. Final survival
+  fell from 16 to 14 in direction +Y (including torso 3 to 2), and from 4 to 2
+  in direction -X. Forward/back torso survival remains 0/6 in both directions.
+- The independent 120-case protocol was frozen before final scoring (seed
+  23092317). Start: 47 survived / 31 recovered. Final: 57 / 35. Existing legacy
+  Perturb: 100 / 21. These distinguish survival from final settling; the final
+  candidate has mixed strengths and is not a replacement for either baseline.
+- Final quiet standing retains 8/8 at three and five seconds. Five-second root
+  error is 2.44 cm; mean foot RMSE rises from 1.96 to 5.19 mm and reference-relative
+  foot velocity RMS from 0.00364 to 0.00646 m/s relative to its Stand v2 parent.
+- GPU/native final survival agrees at 40/96; recovery counts differ by one
+  (37 GPU, 36 native). Actual Godot/native replay passes all 96-case parity gates.
+  PPO accepted all 5320 actor steps; no KL update was rejected. The unsuccessful
+  promotion was a behavioral-retention decision, not a rejected optimizer update.
+
+`best.pt` / `export` retain the unchanged starting Stand v2 actor (iteration 0).
+The trainer's automatic viewer selection was rolled back to the previous legacy
+Perturb export. Stand v2 remains the selected Stand policy. The final trained
+candidate is retained separately as `model.pt` and `final-diagnostic/export`;
+the latter is explicitly diagnostic-only and cannot seed training or auto-selection.
+Use `watch.ps1 -Run logs/mimickit-training/perturb-support-v2-15min-01/final-diagnostic
+-BallSpeed 2.5` for explicit inspection without changing the default selection.
+
+Evidence: run `report.json` / `final-random-test.json`, and
+`logs/mimickit-contact-v2/perturb-pilot-random-baselines-01`,
+`perturb-final-godot-01`, `perturb-final-quiet-01`. The random suite is now observed
+regression evidence, not an untouched test for future decisions. No longer PPO
+run or reward/plant change was made. Next priority: force-aware stepping-reference
+retargeting and isolated forward/back tracking before another long Perturb run.
+
+## 2026-09-23: Fresh Stand v2 pilot passes standing and Godot parity
+
+Run: `logs/mimickit-training/stand-support-v2-15min-01`. Fresh upstream PPO with
+2048 CUDA worlds, seed 210921, corrected contact v2 and unchanged target-PD plant.
+The 15-minute budget completed in 901.797 seconds: 310 updates / 20,316,160 samples.
+Native evaluation every 16 updates selected checkpoint 240 (15,728,640 samples).
+
+- Initial actor: 0/8 three-second successes, mean survival 1.81 seconds.
+- Selected actor: 8/8 at three and five seconds, root error 1.85 / 2.36 cm.
+- Native/Newton three-second outcomes agree. Actual Godot standing replay passes
+  all gates; action error < 2.69e-6 and pose component error < 3.91e-7.
+- Matched five-second legacy Stand (`guarded-finetune-01`) also passes 8/8,
+  but has 3.32 cm root error. Mean foot tracking RMSE is 8.91 mm legacy versus
+  1.96 mm v2; reference-relative foot velocity RMS error is 0.03689 versus
+  0.00364 m/s. Action changes are also smaller. These are numerical movement
+  proxies, not perceptual realism or recovery scores.
+
+The new `stand_diagnostics.py` uses the existing native evaluator and each actor's
+own versioned contract on identical phases; reset frames after failure are excluded.
+Reports: `logs/mimickit-contact-v2/stand-baselines-01` and `stand-trained-v2-01`.
+This is one fresh seed compared with established legacy actors, not a controlled
+comparison proving the contact change alone caused the improvement.
+
+The export is automatically selected for `MimicStand.tscn` (F6). F5 remains
+`MimicPerturb.tscn` with its prior ball policy. Next: a bounded Perturb fine-tune
+from the new v2 checkpoint with quiet-standing retention. No ball or Walk training
+started here; walking still requires force-aware reference retargeting.
+
+## 2026-09-23: Versioned contact correction and validation
+
+Implemented `mimic_stand_target_pd_v2` / `ContactMode=support_v2`: last-solved-substep
+contacts, per-side foot-plus-toe normal loads, reset-forward snapshots and preserved
+snapshots on ball launch. Partial GPU resets now preserve non-reset worlds' contact
+readings in v2. Native and Godot cache before the post-step forward refresh.
+Legacy actor inputs/timing and weights/normalization are preserved; warm starts
+reject incompatible contracts. Current config remains legacy for existing checkpoints.
+
+Frozen-actor validation on identical 96-case impacts: legacy 72 survived/17 recovered,
+timing-only 73/18, full v2 67/17. All pass 8/8 quiet phases at both 3 and 5 seconds.
+The v2 diagnostic is not a trained v2 policy and cannot seed training or replace
+the viewer selection. No training or viewer promotion occurred.
+
+Native/Godot ball parity passes all 96 cases for both versions; standing parity
+passes both. GPU/native v2 contact fixtures, eight-shot launch/contact/reset parity
+and task preflight pass. Evidence: `logs/mimickit-contact-v2`.
+Final verification: all 87 Mimic Python tests and 145 managed tests pass (one
+opt-in native test skipped); the Godot C# project builds with its six existing warnings.
+
+New motion training requires a v4 retarget manifest with root-wrench support in
+addition to geometry and aggregate force. Archived v3 clips remain replayable but
+cannot start new motion training. The dynamic action-window diagnostic confirms
+95/118 forward and 64/118 backward root-support failures. Widening targets cannot
+repair those. All 177 tested standing frames after queue fill fit existing motor
+and +/-0.25 rad limits. See `dynamics-01.json` and the Mimic README for conditional
+moving-reference results and limitations.
+
+Remaining: generate dynamically supported walking references using force-aware
+trajectory optimization, then establish tracking success. A fresh v2 Stand policy
+is required before v2 Perturb training. Falling/bracing/get-up remain separate,
+deferred capabilities; no stronger motors or replacement skeleton was introduced.
+
+## 2026-09-23: Foundation audit identifies two contact-observation defects
+
+See [the full audit](mimic/FOUNDATION_AUDIT.md) for evidence, limits and reproduction.
+Diagnostics and reports are under `mimic/foundation_audit.py`,
+`mimic/foundation_sensor_parity.py`, and `logs/mimickit-foundation`.
+
+- Actual actor inputs omit toe loads on both GPU and native backends. In a toe-only
+  fixture, the inputs are zero while the toes carry approximately 41 N.
+- GPU contact forces come from the last solved substep; native and Godot recompute
+  them after integration. The fixtures show a maximum 50.004 N difference, falling
+  below 0.004 N when the same substep is compared. Poses stay closely matched.
+- All structural checks and all 30 motor transmission/sign probes pass. Fresh
+  65-pose Newton compatibility validation passes its existing gates.
+- Seven of nine fitted elementary poses admit conditional static support within
+  the available torque budget. Two in-place lift fits remain inconclusive. None
+  of the zero-residual fixed-target ten-second holds succeeds; this does not test
+  the trained actor or establish that the skeleton cannot learn balance.
+
+Prioritize a consistent contact sampling convention and a versioned foot-plus-toe
+observation before further PPO/retargeting tuning. Existing rig, reward, actor
+contract, policy weights and selected Godot export are unchanged by this audit.
+
+## 2026-09-23: Step-reference acceleration fix and remaining support-moment defect
+
+The prior `retarget-04` references passed geometry checks but contained large
+frame-to-frame acceleration spikes. The source pelvis motion is smooth; independent
+IK frames introduced the jumps. This is a reference-generation defect, not evidence
+that the rig requires stronger motors or a different simulator.
+
+`retarget_steps.py` now refines the full trajectory with sparse least squares,
+penalizing root/joint acceleration while retaining moving-foot fits, collisions and
+joint limits. Grounding and all validation run after refinement. The packaged
+references now come from `logs/mimickit-steps/retarget-05` and use
+`mimic_step_reference_v3`. New training rejects older contact-only manifests.
+
+- Both directions pass the nine geometry checks plus the new aggregate force check.
+- Frame-second-difference peak horizontal COM acceleration fell from 102.72 to
+  8.34 m/s² forward and 68.25 to 4.26 m/s² backward.
+- Old references exceeded the optimistic aggregate friction/normal-force envelope
+  on 69/118 and 43/118 interior frames; both new references pass every frame.
+- The new references retain foot lifts, with maximum stance sliding below 0.060 m/s
+  and inferred stance gaps below 0.63 mm. Physical rig/control contracts are unchanged.
+
+Native zero-residual mean survival improves from 0.821 to 0.988 s forward and
+1.402 to 1.433 s backward, still 0/8 full three-second trials. A zero-delay
+counterfactual yields 0.996/1.433 s, also 0/8: the two-step motor delay is not the
+main cause in this probe. Reports: `tracking-probe-03-forward`,
+`tracking-probe-03-backward`, and `control-delay-probe-01.json` under
+`logs/mimickit-steps`. The delay probe does not modify production control.
+
+A matched three-minute forward pilot (`forward-pilot-03`, 2048 CUDA environments,
+seed 230923, upstream PPO, evaluation interval 16) completed 44 updates and
+2,883,584 transitions. Its starting policy survived 0/8 (mean 0.990 s); the
+selected policy survived 1/8 (mean 1.219 s), compared with the previous reference's
+0/8 and 0.840 s. Root/foot tracking still fails. This is a limited improvement in
+one short, single-seed validation run, not a working step or Perturb recovery.
+
+`motion_dynamics.py` also provides a reproducible root-force/moment diagnostic.
+It uses central tangent differences and optimistically allows unlimited joint
+torque, projected sole footprints and a square outside the Coulomb friction cone.
+The regularized references still fail this approximate root-wrench test on 95/118
+forward and 64/118 backward frames (old references: 114/118 and 113/118).
+Hashes and frame indices are in `reference-dynamics-01.json`. The aggregate force
+gate alone cannot detect this support-moment defect. Root-wrench results are
+diagnostic, not a claim that RL cannot adapt an imperfect motion reference.
+
+Next work: incorporate support forces/moments into retargeting and validate dynamic
+tracking before another Perturb run. No additional backward PPO pilot was launched
+after this finding. The current Godot Perturb selection remains unchanged.
+
+Verification: 64 targeted Python tests cover force spikes, missing contact support,
+static wrench feasibility, legacy-manifest rejection, existing tracking/export
+contracts and Perturb regression tests. No C# or rig change in this investigation.
+
+## 2026-09-23: Licensed moving-foot references and isolated tracking pilots
+
+Added pinned 100STYLE `Neutral_FW.bvh` and `Neutral_BW.bvh` acquisition, using the
+author's CC BY 4.0 license and commercial-use attribution statement. These are
+walking priors, not recorded impact recoveries. `assets/steps` contains four-second,
+non-looping references from frames [480, 720) and [520, 760), stride 2, with complete
+source/derived hashes and attribution. The standing asset and physical rig are unchanged.
+
+The standing retargeter intentionally pins both feet and cannot produce stepping
+examples. New `retarget_steps.py` instead fits moving feet and segment directions,
+locks inferred stance intervals, limits frame-to-frame joint discontinuities, and
+checks collisions, joint limits/speeds, foot lift and tracking. A subsequent contact
+audit caught a missing condition: avoiding penetration did not prevent floating
+support. The superseded `retarget-03` backward clip had both soles over 1 mm above
+the floor on 89/120 frames. Stance targets are now grounded, walking root height is
+projected onto the lowest sole, and explicit support/stance-contact checks reject
+floating references. This changes reference data, not motor strength or physics.
+
+References at this stage came from `logs/mimickit-steps/retarget-04`
+(superseded by the acceleration-regularized assets above):
+
+- Both pass all nine kinematic checks and maintain a supporting sole on every frame.
+- Maximum inferred stance gaps: 0.21 mm forward, 0.13 mm backward.
+- Maximum penetration: 0.24 mm forward, 0.08 mm backward.
+- Foot lift ranges: 13.1/13.7 cm forward, 8.1/10.1 cm backward.
+- Maximum stance sliding: 0.032 m/s forward, 0.0066 m/s backward.
+
+`probe_steps.py` measures three-second native tracking over eight start phases and
+compares zero-residual PD with the old standing actor under an explicit, contract-
+checked reference substitution. With the corrected references, neither survives
+any full trial. Mean survival is 0.821/1.402 s for zero residual forward/backward and
+0.827/1.175 s for the standing actor (`tracking-probe-02`). This establishes a failed
+tracking gate, not that learning the motion is physically impossible.
+
+The old standing normalizer clips over half of future-reference components on these
+new motions. Initial learning therefore uses separate fresh policies with adaptive
+upstream PPO normalization, rather than silently bypassing warm-start contracts or
+reusing frozen standing statistics. `train_stand --task motion` keeps the existing
+Newton/MuJoCo-Warp GPU physics, 362 observations and target-PD action contract. It
+requires `--no-select-viewer`, retains checkpoints by native tracking metrics, and
+does not run a five-second test beyond these four-second clips. Shared motion gates
+require survival, root/foot/joint tracking and at least 3 cm lift range on each foot.
+The motion trackers are independent; an impact-conditioned policy is not implemented.
+
+The first three-minute-per-direction pilots (`*-pilot-01`) used superseded retarget-03
+and failed all eight tracking trials. They are retained as diagnostics, not evidence
+for the corrected references. The forward run completed 44 updates before hitting
+an export filename/attribution assumption. Export now validates inputs before training
+and writes canonical Godot bundle names for any reference filename. Its saved best
+checkpoint was recovered without retraining into `forward-pilot-01/recovered-export`;
+the interrupted run's partial export and missing final training report are preserved.
+`export_motion_checkpoint.py` supports this recovery with strict checkpoint/reference
+hash checks and its own reevaluation report.
+
+Corrected-reference runs `forward-pilot-02` and `backward-pilot-02` each completed
+42 PPO updates and 2,752,512 transitions, with budgets of 183.81 and 180.86 seconds.
+Both used 2048 CUDA environments, upstream PPO, seed 230923, fresh policies/adaptive
+normalizers and evaluation interval 16. Their final checkpoints were retained:
+
+- Forward mean native survival: 0.831 -> 0.840 s; 0/8 full three-second trials.
+- Backward mean native survival: 1.411 -> 1.431 s; 0/8 full three-second trials.
+- Both fail root/foot tracking gates. Neither is a learned recovery step or a
+  candidate for Perturb integration. These short runs do not establish whether
+  longer training will solve tracking; survival is essentially flat so far.
+- ONNX action errors: 5.22e-8 and 4.66e-8. A separate headless Godot motion scene
+  loads the forward bundle with a three-second trial and reproduces native's
+  phase-zero fall at 0.383 s. This is a runtime smoke test, not a full parity sweep.
+
+Grounded references use `mimic_step_reference_v2`; new motion training rejects
+older validation or missing support-contact gates before GPU setup. Pilot-02
+exports' reference manifests carry this corrected validation version; their actor
+and reference-array hashes are unchanged. Older pilot assets remain archived and
+must not be substituted for the current references in future training.
+
+Verification: 58 targeted Python tests pass, covering source/reference integrity,
+ground support, stance-lock isolation, tracking selection, contract substitution and
+ONNX/canonical-name export. No Godot scene, Perturb reward, rig or viewer selection
+was changed. Reproduction commands are in `mimic/README.md`.
+
+## 2026-09-23: Directional retention and matched torso diagnosis
+
+The user's forward/back visual concern was confirmed. The previous aggregate
+summary hid a backward regression between `perturb-recovery-v1-15min-01` and the
+currently selected `perturb-recovery-v1-30min-02` export:
+
+- Forward (+X): 12 -> 17/24 survived, 0 -> 5 recovered. All five new recoveries
+  were arm/leg shots; none were Chest/Spine/Pelvis impacts.
+- Backward (-X): 16 -> 12/24 survived, 1 -> 0 recovered.
+- Backward torso: 2 -> 0/6 survived. Neither export settles after any forward/back
+  torso case in the fixed selection suite.
+
+`checkpoints.py` now applies `directional_retention_v1`: compared with the incumbent,
+confirmed-hit, survival and final-settling counts cannot decrease in any cardinal
+direction or its torso subgroup. Only eligible candidates enter the existing ranking.
+It requires consistent per-case evidence and identical case definitions/recovery
+criteria; it does not claim individual-case retention or statistical generalization.
+The retained metadata stores subgroup floors. Learning-curve rows and the final
+report expose rejection reasons. Replaying the new rule against the previous run's
+saved metrics rejects updates 64, 128, 192 and 247; it would retain the starting actor.
+Historical checkpoints, reports and current viewer selection were not rewritten.
+
+Added `ball_diagnostics.py`, recording original delayed PD commands at every physics
+substep and post-step feet, loads, pelvis state and termination evidence. It compares
+the two exported ONNX policies under identical impacts and matched quiet trials,
+excluding reset frames after a scored episode ends. No dynamics or actor changes
+are applied. Outputs:
+
+- `logs/mimickit-training/torso-diagnostics-01`: original 1/2.5 m/s suite; both actors
+  reproduce every original case's hit, survival, recovery and first-contact result.
+  All matched quiet torso trials survive. Every failed torso trial terminates at
+  pelvis height < 0.65 m, before a non-foot ground-contact termination.
+- In the selected actor's six backward torso trials, no hip/knee/ankle command
+  reaches 95% of its configured motor limit and no leg residual reaches its action
+  bound. Maximum change in front/back foot separation is only 0.9-1.7 cm. At
+  termination the pelvis is roughly 0.67-0.70 m behind the foot origins, tilted
+  52-55 degrees. The roughly 8 cm foot-origin rise is not evidence of a recovery step.
+  Forward failures sometimes saturate toe commands; hip/knee/ankle saturation is
+  negligible (at most 0.16% of joint/substep samples in one selected-policy case).
+- `logs/mimickit-training/torso-diagnostics-2mps-01`: at 2 m/s and phase 0.8, both
+  policies fail all six forward/back torso shots.
+- `logs/mimickit-training/torso-diagnostics-f5-01`: at F5's default 2 m/s, phase 0
+  and launch step 60, with each torso target fixed in turn, the old actor survives
+  0/6 and the current actor 1/6 (forward pelvis). Both settle 0/6. F5 normally
+  randomizes the target body, so these are controlled comparisons of its settings.
+
+This supports a missing learned recovery step as the next hypothesis to test.
+Increasing torque or the residual range is not justified by the backward traces.
+The next experiment should establish forward/back recovery-step motion tracking
+under the existing rig/bridge, then test impact fine-tuning with directional retention.
+Standing-only imitation and another unchanged training extension have not established
+torso recovery. The probe does not prove that all control/observation choices are optimal.
+
+Verification: 46 targeted Python tests pass. New tests cover directional/torso/settling
+regressions, inconsistent or changed case evidence, unchanged delayed substep controls,
+and exclusion of pre-impact/post-termination frames. No training was launched; reward,
+rig, action/observation contracts, config defaults and F5 selection remain unchanged.
+
+## 2026-09-23: Thirty-minute recovery continuation and independent impact test
+
+`logs/mimickit-training/perturb-recovery-v1-30min-02` warm-started weights and
+normalization from `perturb-recovery-v1-15min-01/best.pt`, with a fresh optimizer.
+Reward `recovery_v1`, physics, 2048 environments, seed 210921, interval 64 and the
+1.0–2.5 m/s curriculum were held fixed. Training completed 1803.09 seconds,
+247 updates and 16,187,392 transitions. No reward or control-contract adjustment
+was made during the experiment.
+
+The unchanged 96-case native selection suite reports:
+
+- Starting policy: 70 survivals / 6 final settled recoveries.
+- Update 64: 70 / 12; update 128: 72 / 17; update 192: 64 / 18.
+- Final update 247: 65 / 16. The existing survival-first selector retains update 128.
+- All these checks pass quiet standing. The selected policy additionally passes
+  8/8 five-second standing cases, with 0.0413 m mean root error.
+- Selected Newton results are 73 survivals / 19 recoveries versus native's 72 / 17;
+  the report preserves these backend differences.
+
+Added `ball_generalization.py`, a standalone evaluation runner with no training,
+checkpoint-selection or viewer-selection writes. Before the first periodic candidate
+score, it froze `random-test-protocol.json`: seed 230923, 120 cases (ten per body),
+continuous random angles/speeds/phases and randomized launch steps from 60 through 120.
+The cases stay within the training disturbance family and finite five-second reference
+window. The protocol binds model/reference hashes and was not supplied to training.
+
+After training, the two exported actors were evaluated on that same independent suite:
+
+- Starting export: 120 confirmed hits, 99 survivals, 8 settled recoveries.
+- Selected continuation: 120 confirmed hits, 100 survivals, 14 settled recoveries.
+- Mean survival: 4.7175 -> 4.7247 seconds. Root tracking error: 0.0620 -> 0.0632 m.
+
+These results support modest settling improvement on unfamiliar cases; survival is
+nearly unchanged there. They are one training seed and one finite test suite, not
+broad or long-horizon robustness. Further training was not monotonically beneficial:
+the final policy lost seven survivals relative to the retained checkpoint. Preserve
+the current objective/candidate rather than assuming a longer run is automatically
+better. No plateau-triggered motion-reference change was made in this experiment.
+After using this test to guide another change, reserve a new seed for independent
+testing and retain these cases for regression checks.
+
+Verification: 40 targeted Python tests pass, including randomized schedule coverage,
+reference bounds and partial-reset isolation. All eight actual Godot/native ball
+parity checks pass for the selected export, with maximum action error 9.75e-6 and
+pose-coordinate error 1.37e-6. ONNX maximum action error is 3.58e-7. All 9880 actor
+steps were accepted. Rollout/optimization consumed 1488.43/115.31 seconds; periodic
+native validation consumed 194.67 seconds within the budget. Initial/final native
+work added 67.05/67.77 seconds outside it.
+
+F5 now selects this run's export automatically. The previous viewer selection remains
+the 15-minute export and is available through `select.ps1 -Previous`. Detailed results
+are in the run's `report.json`, `random-test/report.json`, and `godot-validation/report.json`.
+
+## 2026-09-23: Automatic F5/F6 export selection
+
+At the user's request, completed Mimic training now selects its exported best actor
+for the matching interactive Godot scene. `logs/mimickit-viewer/{ball,stand}.json`
+stores an atomic current/previous selection; all original run exports are preserved.
+These files are already Git-ignored by `logs/`, and project-local bundle paths use
+`res://`. Selection occurs after the completed report and ONNX export checks, even
+when the experimental recovery gate fails, so candidates can be reviewed directly.
+Training initialization remains separately configured.
+
+The current ball selection is `perturb-recovery-v1-15min-01/export`; the previous
+selection is `guarded-perturb-04/export`. F5 launches MimicPerturb with the new policy.
+`scripts/select.ps1 -Previous -Experiment perturb` swaps them for rollback; `-Run`
+selects another completed run. `train.ps1 -NoSelectViewer` opts out per run.
+Explicit launch bundle arguments take precedence, and scenes expose `UseLatestExport`
+to retain a manually pinned Inspector bundle. Stand and ball selections are separate.
+
+Verification: four selector tests cover rollback/idempotence, task isolation,
+incomplete/corrupt outputs, and review selection despite a failed behavioral gate.
+Godot builds without errors or warnings. A headless project-main launch with no bundle
+argument loads the new export; an explicit override still loads guarded-perturb-04.
+No policy weights, rewards or training initialization were changed for this workflow.
+
+## 2026-09-23: Post-contact recovery reward experiment
+
+Added opt-in `train.ps1 -BallReward recovery_v1` / Python `--ball-reward recovery_v1`.
+Quiet, pre-contact and missed-shot worlds retain the exact standing reward. After a
+reported ball/character contact, 25% retains root-relative motion imitation and 75%
+rewards upright posture at reference height, low root velocities and supported
+settling. Support is a small bonus, allowing a foot to lift. The reward parameters
+and schema are recorded in the experiment manifest. The physical plant, 362 actor
+inputs, +/-0.25-radian target residual, terminal conditions, 96-case validation and
+checkpoint selection order are unchanged. The external MimicKit checkout is untouched.
+
+The baseline puts 65% of reward weight on standing joint poses and root-relative
+hand/foot positions, which can conflict with stepping. Existing baseline traces also
+show that 57 of 58 survivors exceed the horizontal-speed threshold during the final
+window; none exceed tilt/angular-speed limits there. The reference's maximum root
+horizontal speed is only 0.009 m/s, so the 0.2 m/s settling requirement is not asking
+the actor to suppress a fast reference motion. These observations motivate the
+experiment; they do not prove that reward shaping alone can produce realistic steps.
+
+`logs/mimickit-training/perturb-recovery-v1-15min-01` starts from the configured
+`guarded-perturb-04/best.pt`, with seed 210921, 2048 environments, interval 64 and the
+same 1.0–2.5 m/s ball curriculum. It completed 904.14 seconds, 123 updates and
+8,060,928 transitions. Initial/final native scores on the same validation cases:
+
+- Confirmed impact survival: 58/96 -> 70/96.
+- Final uninterrupted settling: 1/96 -> 6/96.
+- Mean survival: 4.270 -> 4.479 seconds; mean root tracking error: 0.0912 -> 0.0796 m.
+- Quiet standing passes 8/8 at three seconds, and the selected candidate also passes
+  8/8 at five seconds (0.0381 m mean root error).
+- Update 64 has 66 survivals and 10 recoveries. It remains saved as
+  `evaluation_000064.pt`. The unchanged survival-first selector exports update 123.
+  Longer training improved survival but reduced settling relative to update 64.
+- Final Newton scoring gives 69 survivals and eight recoveries, versus native's
+  70/six. These near-threshold backend differences remain visible in the report.
+- 33 targeted Python tests pass, including contact gating, reset isolation,
+  translation invariance, quiet-reward equivalence and recovery incentives.
+  ONNX maximum action error is 3.58e-7; all 4920 actor steps were accepted.
+- The selected export passes all eight actual Godot/native ball parity checks in
+  `godot-validation/report.json`: 96 matched hits and 70 matched survivals, with
+  maximum action error 1.07e-5 and pose-coordinate error 1.14e-6. Its native ONNX
+  replay also reproduces six settled recoveries.
+
+Rollout/optimization used 771.80/61.78 seconds; periodic native validation used
+68.00 seconds within the training budget. Initial/final native work used another
+69.69/62.56 seconds outside it. The configured reward remains `reference`, with the
+new objective available explicitly for controlled comparisons; the viewer bundle
+is unchanged. This is one seed on checkpoint-selection cases, not evidence of broad
+generalization, long-horizon recovery, or improved visual realism. The strict recovery
+gate still fails. Do not read the intermediate/final tradeoff as monotonic progress.
+
+## 2026-09-22: Reduce repeated validation work
+
+The working default is now `Envs = 2048`, `EvaluationInterval = 64`. Full native
+validation runs after 64 completed updates, with mandatory initial and final-candidate
+checks. The previous update-1 evaluation was an upstream zero-based scheduling artifact.
+The PowerShell wrapper accepts `-EvaluationInterval` for a per-run override.
+
+A bounded, run-local evaluation cache keys actor weights, normalization buffers,
+physics/reference contracts, backend, case settings and duration. It pins the selected
+best checkpoint and reuses its native metrics and traces when exporting; unchanged
+final candidates also reuse their last validation. Matching selected/final actors
+share their final Newton result. Full quiet-standing checks and the independent Godot
+replay workflow remain available; no promotion is performed by the training wrapper.
+No cases or recovery thresholds were removed. Less frequent validation trades fewer
+CPU interruptions for fewer opportunities to retain a short-lived policy improvement.
+
+Verification: 29 targeted Python tests pass. The eight-update, 128-world integration
+run `logs/mimickit-training/perturb-evaluation-cache-smoke-01` used interval 8 and
+recorded exactly one periodic validation at update 8. Cache statistics show two
+misses (initial and update 8) and two hits (final and selected). Initial/periodic
+native validation took 59.83/59.89 seconds; cached final native work took 0.031 seconds.
+The matching final/selected Newton result was reused. Quiet standing passed 8/8 and
+ONNX maximum action error was 2.98e-7. The candidate's recovery gate failed and the
+viewer checkpoint was not changed. This verifies reuse and scheduling, not learning
+quality or sustained throughput at the default 2048 environments.
+
+## 2026-09-22: Perturb control parity and validation corrections
+
+The active experimental viewer still uses `guarded-perturb-04`. It is not a validated
+recovery policy. No checkpoint was promoted during these corrections.
+
+- Removed the Godot-only scripted stepping controller. The shared Stand/Perturb driver
+  again applies the exported reference-relative PD policy without extra target offsets.
+  Capture-point information is diagnostic only, counts loaded feet (including toes),
+  and reports no support when airborne.
+- Fixed scheduled launch order: both Python and Godot observe and predict before
+  launching the ball. Launch-time `mj_forward` can change contact-load observations
+  when the projectile initially intersects a limb. The previous order produced
+  action differences up to 0.0026 despite matching survival outcomes.
+- `ball-validation-v2-02/report.json` under `logs/mimickit-perturb/` passes actual
+  native/Godot ball parity across 96 cases: 12 bodies x 4 directions x 2 speeds.
+  All hit times and survival outcomes match; maximum action error is 1.09e-5,
+  pose-coordinate error 1.48e-6, and ball-position error 2.87e-7 m.
+- On this five-second validation suite, the retained actor confirms 96/96 impacts,
+  survives 58/96, and meets the final uninterrupted 0.5-second settling criterion in
+  1/96. Settling requires sufficient pelvis height, low tilt and velocity, and support
+  on both feet. This is a diagnostic of short-window recovery, not delayed-fall proof.
+  Stand replay also passes all five parity checks and survives all eight phases.
+- Previous eight-world multi-body evaluations never aimed at the four leg bodies.
+  Historical 4/8 Chest, 7/8 multi-body, and 5/8 higher-speed results used different
+  scenarios and cannot be read as a continuous learning curve. `guarded-perturb-04`
+  started and finished selection at 5/8; its mean root error was 8.8 cm, not under 4 cm.
+- `Envs = 2048` and `EvaluationInterval = 16` remain provisional defaults. The old
+  15-minute comparison measured about 7,473 versus 4,507 samples/s for 2048 versus
+  1024 worlds, with one additional successful case. The one-minute 4096 run spent
+  59.36 of 62.47 seconds reaching its first evaluation; it did not establish a
+  sustained optimization-throughput cliff or a CUDA cache-thrashing diagnosis.
+- Removed duplicate periodic GPU evaluation, which ran at least one episode in every
+  training world. Checkpoint output now follows the configured native-validation
+  cadence. Timing separates rollout, optimization, and initial/training/final native
+  evaluations. Old throughput numbers are not measurements of this revised runner.
+
+Verification: 139 managed tests passed (one optional native fixture skipped), and
+22 targeted Python tests passed. `logs/mimickit-training/perturb-validation-v2-smoke-01`
+completed one 128-world update (4,096 transitions), checkpoint selection and export;
+ONNX maximum action error was 3.58e-7 and five-second quiet standing was 8/8. The
+smoke candidate survived 61/96 versus the starting 58/96 but settled in 0/96 versus
+1/96; its recovery gate failed and it was not promoted. This is pipeline verification,
+not evidence of improved recovery learning. The profiled periodic CPU validation
+took 66.2 seconds; the one-update run is not a steady-state throughput benchmark.
+
+`ball-parity-02` remains a native/Newton transport report, not Godot evidence. The
+new native/Godot report is separate. The rig, motion, observation/action contract,
+reward, and selected viewer checkpoint are preserved. The reward still imitates
+standing joint poses and velocities, root pose, and root-relative key-body positions;
+recovery steps depart from those targets. A controlled recovery-objective or stepping
+reference experiment is the next learning question, not another unmeasured increase
+in environment count. Longer evaluation requires an explicitly validated reference
+extension: the current clip is finite and less than six seconds long.
 
 ## 2026-09-21: Physical-ball Perturb scaffold and experiment wrappers
 

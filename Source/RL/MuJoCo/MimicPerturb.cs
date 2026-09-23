@@ -29,6 +29,7 @@ public partial class MimicPerturb : MimicTrial
     private static readonly Vector3[] Directions = { Vector3.Forward, Vector3.Back, Vector3.Right, Vector3.Left };
     private static readonly string[] DirectionNames = { "Forward (+X)", "Backward (-X)", "Left (-Y)", "Right (+Y)" };
     protected override string TrialName => "MimicPerturb";
+    protected override string ViewerTask => "ball";
     protected override void ConfigureLaunch()
     {
         base.ConfigureLaunch();
@@ -53,8 +54,11 @@ public partial class MimicPerturb : MimicTrial
 
     public override void _UnhandledKeyInput(InputEvent @event)
     {
-        if (@event is InputEventKey { Pressed: true, Echo: false, PhysicalKeycode: Key.B })
-        { FireBall(); GetViewport().SetInputAsHandled(); }
+        if (@event is InputEventKey { Pressed: true, Echo: false } key)
+        {
+            if (key.PhysicalKeycode == Key.B) { FireBall(); GetViewport().SetInputAsHandled(); }
+            else base._UnhandledKeyInput(@event);
+        }
         else base._UnhandledKeyInput(@event);
     }
 
@@ -124,8 +128,11 @@ public partial class MimicPerturb : MimicTrial
             if (_ballTrial != null)
             {
                 string targetDesc = string.IsNullOrEmpty(_ballTrial.ActiveTargetName) ? BallTarget : _ballTrial.ActiveTargetName;
+                var cp = Driver.Balance;
+                string marginText = cp.StabilityMargin is float margin ? $"{margin * 100:F1} cm" : "no ground support";
                 return $"\nBall · {_directionName} · {BallSpeed:F1} m/s horizontal · target {targetDesc}"
                     + $"\n{(_ballTrial.Launched ? Driver.BallHit ? "Impact confirmed" : "Launched — in flight" : "Waiting to launch · B: launch now")}"
+                    + $"\nApprox. capture-point margin: {marginText} (diagnostic only)"
                     + "\n8 kg · radius 9 cm · ballistic flight, gravity enabled";
             }
             if (_trial == null) return string.Empty;

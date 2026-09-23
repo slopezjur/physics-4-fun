@@ -4,13 +4,18 @@
 dotnet test Physics4Fun.sln
 ```
 
-133 managed tests, ~40 ms. No Godot install, no scene tree, no display required — they run anywhere the .NET
+145 managed tests. No Godot install, no scene tree, no display required — they run anywhere the .NET
 SDK does, including CI.
 
 One additional native foundation test is opt-in through `P4F_FOUNDATION_FIXTURES`.
 `MjMimicReferenceTests` covers non-looping reference interpolation and hash rejection.
 `MjMimicTargetControlTests` covers delayed targets, fresh physics feedback, queue
 observations, reset clearing and rejection of incompatible actuation contracts.
+`MjMimicContactContractTests` rejects unknown or inconsistent contact semantics and
+preserves legacy contracts. Python's `mujoco_rig.mimic.test_contact_contract` covers
+toe-only observations, last-solve snapshots, reset isolation and rejection of implicit
+weight/normalization migration. The GPU contact and ball probes additionally exercise
+toe-off, launch preservation and non-reset peer contact preservation.
 `MjMimicPushTests` covers force-window boundaries, coordinate conversion, invalid
 pulse rejection and the uninterrupted post-push settling window. Python's
 `mujoco_rig.mimic.test_perturb` additionally checks native force expiry and partial
@@ -19,6 +24,14 @@ validates the actual Godot force schedule, survival and recovery measurements.
 The experimental Stand actor's full observation/control boundary is checked in the
 actual Godot scene by `python -m mujoco_rig.mimic.godot_replay`; see
 `mujoco_rig/mimic/README.md` for setup and commands.
+
+`MjCapturePointTests` checks contact-dependent support, airborne states and yaw
+invariance of the diagnostic. `python -m unittest mujoco_rig.mimic.test_ball_validation`
+checks the 96-case Cartesian target coverage, reset observations, checkpoint suite
+consistency, final settled-recovery semantics and rejection of corrupt replay traces.
+Set `MIMICKIT_PATH` to the pinned checkout to include its native task integration.
+`python -m mujoco_rig.mimic.godot_ball` runs the same physical-ball validation suite
+through Python and the actual Godot scene, including launch/impact action timing.
 
 `MjPolicyTests` exercises the MuJoCo deployment loop through managed simulation/inference fakes:
 contract validation, reordered observation channels, zero perturb commands, action clipping and

@@ -13,6 +13,7 @@ import torch
 from .runtime import activate
 from .rig import Rig
 from .godot_bundle import prepare
+from .contact_contract import mode_from_contract
 
 
 def replay(args):
@@ -42,7 +43,8 @@ def replay(args):
     rig = Rig.load(root / "mujoco_rig/dummy.xml")
     contract = json.loads((bundle / "contract.json").read_text())
     mode = "target_pd" if contract["action_mode"] == "reference_relative_target_pd" else "torque"
-    task = StandTask(rig, bundle / "stand_reference.npz", 1, "cpu", engine_factory=NativeDummyEngine, control_mode=mode)
+    task = StandTask(rig, bundle / "stand_reference.npz", 1, "cpu", engine_factory=NativeDummyEngine,
+                     control_mode=mode, contact_mode=mode_from_contract(contract))
     expected_contract = task.observation_contract()
     if any(contract.get(key) != value for key, value in expected_contract.items() if key != "deployment_status"):
         raise ValueError("Replay implementation does not match bundle control/observation contract")
@@ -90,5 +92,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mimickit", type=Path, required=True)
     parser.add_argument("--bundle", type=Path, required=True)
-    parser.add_argument("--godot", type=Path, default=Path("D:/Programas/Godot_v4.7.1-stable_mono_win64/Godot_v4.7.1-stable_mono_win64.exe"))
+    parser.add_argument("--godot", type=Path,
+                        default=Path(os.environ.get("P4F_GODOT_EXE") or
+                                     Path(__file__).resolve().parents[2] / "tools/Godot/Godot.exe"))
     raise SystemExit(0 if replay(parser.parse_args()) else 1)

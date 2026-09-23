@@ -9,14 +9,15 @@ from .runtime import activate
 from .rig import Rig
 
 
-def preflight(checkout: Path, reference: Path, out: Path, control_mode="torque"):
+def preflight(checkout: Path, reference: Path, out: Path, control_mode="torque", contact_mode="legacy"):
     activate(checkout)
     from envs.base_env import EnvMode
     from .stand_task import StandTask
     from .native_engine import NativeDummyEngine
     rig = Rig.load(Path(__file__).resolve().parents[1] / "dummy.xml")
-    gpu = StandTask(rig, reference, 2, control_mode=control_mode)
-    cpu = StandTask(rig, reference, 2, "cpu", engine_factory=NativeDummyEngine, control_mode=control_mode)
+    gpu = StandTask(rig, reference, 2, control_mode=control_mode, contact_mode=contact_mode)
+    cpu = StandTask(rig, reference, 2, "cpu", engine_factory=NativeDummyEngine,
+                    control_mode=control_mode, contact_mode=contact_mode)
     for task in (gpu, cpu):
         task.set_mode(EnvMode.TEST)
         task.reset()
@@ -57,6 +58,7 @@ def preflight(checkout: Path, reference: Path, out: Path, control_mode="torque")
     report = {"passed": all(checks.values()), "checks": checks, "control_mode": control_mode,
               "initial_channel_errors": channel_errors, "reward_error": reward_error, "pose_error": pose_error,
               "torque_error_nm": torque_error}
+    report["contact_mode"] = contact_mode
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps(report, indent=2))
@@ -69,6 +71,7 @@ if __name__ == "__main__":
     parser.add_argument("--reference", type=Path, default=Path(__file__).parent / "assets/stand_reference.npz")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--control", choices=("torque", "target_pd"), default="torque")
+    parser.add_argument("--contact-mode", choices=("legacy", "support_v2"), default="legacy")
     args = parser.parse_args()
-    result = preflight(args.mimickit, args.reference, args.out, args.control)
+    result = preflight(args.mimickit, args.reference, args.out, args.control, args.contact_mode)
     raise SystemExit(0 if result["passed"] else 1)

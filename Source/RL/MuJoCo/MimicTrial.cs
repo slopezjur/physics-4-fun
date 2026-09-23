@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text.Json;
 using Godot;
 
 namespace Physics4Fun.RL.MuJoCo;
@@ -11,6 +12,7 @@ public abstract partial class MimicTrial : Node3D
     [ExportGroup("Simulation")]
     [Export(PropertyHint.File, "*.xml")] public string ModelPath { get; set; } = "res://mujoco_rig/dummy.xml";
     [Export(PropertyHint.Dir)] public string BundleDirectory { get; set; } = string.Empty;
+    [Export] public bool UseLatestExport { get; set; } = true;
     [Export(PropertyHint.Dir)] public string MujocoLibraryDirectory { get; set; } = string.Empty;
     [Export(PropertyHint.Range, "3,6,0.1")] public float TrialSeconds { get; set; } = 5;
     [Export(PropertyHint.Range, "0,3,0.01")] public float StartPhaseSeconds { get; set; }
@@ -29,6 +31,7 @@ public abstract partial class MimicTrial : Node3D
     protected float ConfiguredDuration => _trialSeconds;
     protected bool CanAdvance => _driver != null && !_paused && !_finished;
     protected virtual string TrialName => "MimicStand";
+    protected virtual string ViewerTask => "stand";
     private protected virtual void ResetTrial() => Driver.Reset(ConfiguredPhase);
     private protected virtual void StepTrial() => Driver.Step();
     protected virtual string TrialDetails => string.Empty;
@@ -43,7 +46,17 @@ public abstract partial class MimicTrial : Node3D
     }
     protected virtual void ConfigureLaunch()
     {
-        BundleDirectory = LaunchOption("--mimic-bundle") ?? BundleDirectory;
+        string? requested = LaunchOption("--mimic-bundle");
+        if (requested != null) { BundleDirectory = requested; return; }
+        string selection = ProjectSettings.GlobalizePath($"res://logs/mimickit-viewer/{ViewerTask}.json");
+        if (!UseLatestExport || !File.Exists(selection)) return;
+        using var document = JsonDocument.Parse(File.ReadAllText(selection));
+        var state = document.RootElement;
+        if (state.GetProperty("schema").GetString() != "mimic_viewer_selection_v1"
+            || state.GetProperty("task").GetString() != ViewerTask)
+            throw new InvalidOperationException($"Invalid {ViewerTask} viewer selection: {selection}");
+        BundleDirectory = state.GetProperty("bundle").GetString()
+            ?? throw new InvalidOperationException("Viewer selection has no bundle.");
     }
 
     public override void _Ready()

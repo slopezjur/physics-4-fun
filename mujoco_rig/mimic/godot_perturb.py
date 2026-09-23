@@ -71,5 +71,7 @@ def replay(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", type=Path, required=True)
-    parser.add_argument("--godot", type=Path, default=Path("D:/Programas/Godot_v4.7.1-stable_mono_win64/Godot_v4.7.1-stable_mono_win64.exe"))
+    parser.add_argument("--godot", type=Path,
+                        default=Path(os.environ.get("P4F_GODOT_EXE") or
+                                     Path(__file__).resolve().parents[2] / "tools/Godot/Godot.exe"))
     raise SystemExit(0 if replay(parser.parse_args()) else 1)

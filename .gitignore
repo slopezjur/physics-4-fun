@@ -113,3 +113,8 @@ MUJOCO_LOG.TXT
 mujoco_rig/dummy_g*.xml
 mujoco_rig/dummy_soft*.xml
 mujoco_rig/*.onnx.data
+
+# Machine-local Mimic tool paths and optional repository-local installations.
+/mujoco_rig/mimic/scripts/config.local.ps1
+/tools/MimicKit/
+/tools/Godot/

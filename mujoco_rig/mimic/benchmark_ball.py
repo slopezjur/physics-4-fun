@@ -15,6 +15,7 @@ import torch
 
 from .baseline import sha256
 from .checkpoints import validate_contract
+from .contact_contract import mode_from_contract
 from .runtime import activate
 from .rig import Rig
 
@@ -76,6 +77,9 @@ def run_backend(task, session, cases):
     configure_cases(task, cases)
     initial_observation = task.observations().detach().cpu().numpy()
     initial_ball = _numpy(task.engine.ball_position()).copy()
+    before_launch = _numpy(task.engine.get_ground_contact_forces(0)).copy()
+    task.engine.launch_ball(task.ids[:1], initial_ball[:1], np.zeros((1, 3)))
+    launch_contact_error = float(np.abs(_numpy(task.engine.get_ground_contact_forces(0)) - before_launch).max())
     active = np.ones(len(cases), dtype=bool)
     fallen = np.zeros(len(cases), dtype=bool)
     first_fall = np.full(len(cases), -1, dtype=int)
@@ -105,6 +109,7 @@ def run_backend(task, session, cases):
             task.shot_enabled[ids] = False
 
     before_peer = _numpy(task.engine.ball_position()[1]).copy()
+    before_peer_forces = _numpy(task.engine.get_ground_contact_forces(0))[1:].copy()
     q, v = task.reference.sample(task.offset[:1])
     task.engine.reset_envs(torch.tensor([0], device=task.device), q[:1], v[:1])
     after_reset = _numpy(task.engine.ball_position()).copy()
@@ -119,11 +124,13 @@ def run_backend(task, session, cases):
         "first_fall_step": first_fall.tolist(),
         "survived": (first_fall < 0).tolist(),
         "hit": (first_hit >= 0).tolist(),
+        "launch_contact_error_n": launch_contact_error,
         "reset": {
             "park_error_m": float(np.max(np.abs(after_reset[0] - expected_park))),
             "peer_ball_error_m": peer_unchanged,
             "reset_hit_flag": bool(reset_hit[0]),
             "peer_hit_preserved": bool(reset_hit[1] == (first_hit[1] >= 0)),
+            "peer_contact_error_n": float(np.abs(_numpy(task.engine.get_ground_contact_forces(0))[1:] - before_peer_forces).max()),
         },
     }
 
@@ -174,17 +181,27 @@ def run(args):
     contract = json.loads((bundle / "contract.json").read_text())
     reference = bundle / "stand_reference.npz"
     cases = make_cases()
-    native_task = BallTask(rig, reference, len(cases), "cpu", speed_min=1.0, speed_max=2.0, quiet_fraction=0.0)
+    contact_mode = mode_from_contract(contract)
+    native_task = BallTask(rig, reference, len(cases), "cpu", speed_min=1.0, speed_max=2.0, quiet_fraction=0.0,
+                           contact_mode=contact_mode)
     validate_contract(contract, native_task.observation_contract())
     actor_path = bundle / "stand.onnx"
     if sha256(actor_path) != contract["actor_sha256"]:
         raise ValueError("Actor hash mismatch")
-    session = ort.InferenceSession(str(actor_path), providers=["CPUExecutionProvider"])
+    options = ort.SessionOptions()
+    options.intra_op_num_threads = 1
+    session = ort.InferenceSession(str(actor_path), options, providers=["CPUExecutionProvider"])
     args.out.mkdir(parents=True, exist_ok=False)
     native = run_backend(native_task, session, cases)
-    newton_task = BallTask(rig, reference, len(cases), "cuda:0", speed_min=1.0, speed_max=2.0, quiet_fraction=0.0)
+    newton_task = BallTask(rig, reference, len(cases), "cuda:0", speed_min=1.0, speed_max=2.0, quiet_fraction=0.0,
+                           contact_mode=contact_mode)
     newton = run_backend(newton_task, session, cases)
     comparison = compare(native, newton)
+    if contact_mode == "support_v2":
+        for name, result in (("native", native), ("newton", newton)):
+            comparison["checks"][name + "_launch_preserves_contacts"] = result["launch_contact_error_n"] == 0
+            comparison["checks"][name + "_reset_preserves_peer_contacts"] = result["reset"]["peer_contact_error_n"] == 0
+        comparison["passed"] = all(comparison["checks"].values())
     protocol = {
         "schema": "mimic_ball_parity_v1",
         "model_sha256": contract["model_sha256"],

@@ -34,8 +34,14 @@ def target_pd(q: wp.array(dtype=float), v: wp.array(dtype=float),
 
 
 class DummyNewtonEngine(NewtonEngine):
+    def use_last_solve_contacts(self):
+        # SensorContact already reports the final solved substep. Partial resets
+        # must preserve that snapshot for worlds which did not reset.
+        self._last_solve_contacts = True
+
     def __init__(self, rig: Rig, num_envs: int, device="cuda:0", control_factory=DelayedTorqueControl):
         self.rig = rig
+        self._last_solve_contacts = False
         super().__init__({"env_spacing": 5, "sim_freq": 240, "control_freq": 60,
                           "control_mode": "torque"}, num_envs, device, False)
         self._sim_timestep = rig.model.opt.timestep
@@ -183,6 +189,9 @@ class DummyNewtonEngine(NewtonEngine):
         ids = torch.as_tensor(env_ids, device=self._device, dtype=torch.long)
         if ids.numel() == 0:
             return
+        saved_contacts = None
+        if self._last_solve_contacts and ids.numel() < self.get_num_envs():
+            saved_contacts = [value.clone() for value in (self._contact_forces[0], self._ground_contact_forces[0])]
         q = torch.as_tensor(qpos, dtype=torch.float32, device=self._device).clone()
         v = torch.as_tensor(qvel, dtype=torch.float32, device=self._device).clone()
         if q.shape != (len(ids), self.rig.model.nq) or v.shape != (len(ids), self.rig.model.nv):
@@ -216,3 +225,6 @@ class DummyNewtonEngine(NewtonEngine):
         mujoco_warp.forward(self._solver.mjw_model, self._solver.mjw_data)
         self._solver.update_contacts(self._contacts, state)
         self._update_contact_sensors()
+        if saved_contacts is not None:
+            for current, saved in zip((self._contact_forces[0], self._ground_contact_forces[0]), saved_contacts):
+                current[~mask] = saved[~mask]

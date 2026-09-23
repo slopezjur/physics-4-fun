@@ -10,7 +10,16 @@ import onnxruntime as ort
 from .godot_bundle import prepare
 
 
+def validate_export_reference(reference):
+    sources = (reference, reference.with_suffix(".json"), reference.parent / "ATTRIBUTION.md")
+    for source in sources:
+        if not source.is_file():
+            raise FileNotFoundError(f"Missing reference export input: {source}")
+    return sources
+
+
 def export_policy(actor, observations, reference: Path, contract, bundle: Path):
+    sources = validate_export_reference(reference)
     bundle.mkdir(parents=True, exist_ok=False)
     sample = torch.tensor(observations.reshape(-1, contract["num_obs"]))
     torch.onnx.export(actor, sample[:1], str(bundle / "stand.onnx"),
@@ -22,8 +31,9 @@ def export_policy(actor, observations, reference: Path, contract, bundle: Path):
         error = float(np.abs(session.run(None, {"observation": sample.numpy()})[0] - actor(sample).numpy()).max())
     if not np.isfinite(error) or error > 1e-5:
         raise RuntimeError(f"ONNX action mismatch: {error}")
-    for source in (reference, reference.with_suffix(".json"), reference.parent / "ATTRIBUTION.md"):
-        shutil.copy2(source, bundle / source.name)
+    # Keep the bridge's canonical bundle filenames independent of the source clip name.
+    for source, name in zip(sources, ("stand_reference.npz", "stand_reference.json", "ATTRIBUTION.md")):
+        shutil.copy2(source, bundle / name)
     (bundle / "contract.json").write_text(json.dumps(contract, indent=2), encoding="utf-8")
     prepare(bundle)
     return error

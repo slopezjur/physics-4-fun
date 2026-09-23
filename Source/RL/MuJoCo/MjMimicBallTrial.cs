@@ -78,7 +78,6 @@ internal sealed class MjMimicBallTrial
 
     internal void Step()
     {
-        if (_driver.StepCount == _launchStep) Launch();
-        _driver.Step();
+        _driver.Step(_driver.StepCount == _launchStep ? () => Launch() : null);
     }
 }

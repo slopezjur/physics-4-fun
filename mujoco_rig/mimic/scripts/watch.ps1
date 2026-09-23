@@ -28,7 +28,18 @@ if ($Run) {
         if ($task -eq 'ball' -and $BallSpeed -eq 0) { $BallSpeed = $metadata.horizontal_speed_max }
     }
 } else {
-    $bundle = Require-MimicPath $settings.WatchBundle
+    $selectionPath = Resolve-MimicPath "logs/mimickit-viewer/$task.json"
+    if (Test-Path -LiteralPath $selectionPath) {
+        $selection = Get-Content -LiteralPath $selectionPath -Raw | ConvertFrom-Json
+        if ($selection.schema -ne 'mimic_viewer_selection_v1' -or $selection.task -ne $task) {
+            throw "Invalid viewer selection: $selectionPath"
+        }
+        $selectedPath = $selection.bundle
+        if ($selectedPath.StartsWith('res://')) { $selectedPath = $selectedPath.Substring(6) }
+        $bundle = Require-MimicPath $selectedPath
+    } else {
+        $bundle = Require-MimicPath $settings.WatchBundle
+    }
 }
 if ($task -notin @('stand', 'ball')) { throw "Unsupported exported task: $task" }
 $scene = if ($task -eq 'ball') { 'MimicPerturb' } else { 'MimicStand' }
