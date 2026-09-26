@@ -8,6 +8,796 @@ adds a simulated ball in `dummy_ball.xml`; its training and cross-engine impact
 parity are still experimental. Both tasks have separate, versioned Godot replay
 paths and are **not promoted to the production scenes**.
 
+## Single-leg support PPO pilot (2026-09-25)
+
+`train_single_support.py` initializes from the retained Stand actor and
+trains against the physically valid, static right-leg-only pose at source
+8 s. It keeps the existing observation contract and frozen normalization,
+and selects only checkpoints that pass native quiet standing and a three-second
+one-leg hold. The three-minute GPU pilot reached 72 iterations and 2,359,296
+transitions. Quiet standing passed in the selected checkpoint, but the hold
+never improved beyond 0.93 s. A one-minute update audit recorded 335 accepted
+and 17 rejected actor steps, with the same hold outcome. See
+`logs/mimickit-steps/single-support-train-3min-01/report.json` and
+`logs/mimickit-steps/single-support-update-audit-1min-01/report.json`.
+These are diagnostic checkpoints only; no export or Godot selection changed.
+The present result does not justify another identical PPO run. A separate
+closed-loop weight-transfer entry and measured one-leg retention are needed
+before adding swing/landing or further Perturb training.
+
+## Single-leg support gate (2026-09-25)
+
+`probe_single_support.py` rechecks three static poses from the physically
+validated forward placed step, then asks reference PD, the retained Stand
+actor, and observation-COM feedback to hold each for three seconds. The
+7/8/9-second poses are statically feasible; 8 and 9 seconds require the left
+foot unloaded and the right foot supported. All controllers fall before three
+seconds. Reference PD survives 1.42–2.05 s, the actor 0.90–1.07 s, and COM
+feedback 0.95–1.23 s. See
+`logs/mimickit-steps/single-support-holds-03/report.json`. Passing also
+requires the correct foot-load pattern and a continuous final 0.5 s upright,
+slow window.
+
+The next capability is controlled weight transfer into right-leg support.
+It needs a versioned one-leg observation/reward/retention contract; the
+existing Stand and Perturb checkpoints must keep their original meaning.
+Only after support passes should a swing-and-landing expert be trained.
+
+## Short-step prerequisite check (2026-09-25)
+
+`short_step.py` retimes the physically checked 15 cm forward placed step,
+preserves its contact schedule, recomputes velocities, and reruns the full
+physical gate. In a fixed 2/4/6/8/10/12/14-second bracket, only 14 seconds
+passed the single-step physical checks. A sparse-pose cubic 2/4-second variant
+failed additional stance and floor checks. These references are diagnostic
+and are never marked as admitted training examples. See the
+`logs/mimickit-steps/short-step-forward-*s-01/report.json` reports.
+
+`evaluate_short_step.py` tested the 14-second passing candidate in native
+MuJoCo. Reference PD fell at 1.87 s, the frozen Stand actor at 2.25 s, and
+observation-COM feedback at 2.62 s. The swing phase begins at 3.98 s, so the
+controller fails during weight transfer, before the foot can step. See
+`logs/mimickit-steps/short-step-forward-14s-native-02/report.json`.
+
+The next task is an independent, closed-loop single-leg weight-transfer gate.
+Only a controller that survives that gate should supply starting states for a
+short swing-and-landing task. Retiming the old clip is not a recovery-motion
+shortcut; do not feed these candidates to Perturb training.
+
+## Ball-hit stepping diagnostic (2026-09-25)
+
+`evaluate_com_ball.py --reflex-sweep` compares the observation-COM ankle
+teacher with bounded ankle/hip variants on the same eight original-reference
+ball hits. Each recovered 4/8 and passed the short quiet-standing gate; none
+showed a recovery step. See
+`logs/mimickit-steps/com-ball-original-reflex-sweep-01/report.json`.
+
+`capture_step_reflex.py` is a native-only capture-point trigger and one-foot
+Jacobian placement probe. On the four shots the balance teacher failed, it
+requested a 10 cm step. It lifted the foot on three shots but never completed
+a supported landing at least 5 cm from its start, so recovery stayed 4/8.
+The original 0.25 rad target envelope saturated on 88–94% of swing samples.
+An isolated 0.5 rad diagnostic preserved the source actor's original joint
+targets but still failed every placement and left 78–83% saturation. These
+are diagnostic action-contract interventions, not compatible exports or
+trained policies. See `com-ball-original-capture-step-03` and
+`com-ball-original-capture-step-wide-01` under `logs/mimickit-steps/`.
+
+The next training prerequisite is a short, native-trackable weight-transfer,
+swing and loaded-landing task. The existing 22-second placed-step diagnostic
+does not supply that reflex. Keep this probe and the mixed residual out of
+Godot policy selection.
+
+## Mixed-reference COM residual pilot (2026-09-25)
+
+The observation-derived COM feedback teacher recovered 4/8 confirmed
+original-reference ball hits over a 33-second test; native COM feedback
+recovered the same four. The frozen source actor and earlier pre-lift residual
+recovered 0/8. See
+`logs/mimickit-steps/com-ball-original-teacher-33s-01/report.json`.
+
+`distill_mixed_com.py` trained one unselected residual from support pushes,
+original-reference physical-ball shots and quiet-standing rehearsal. Its eight
+training shots use different angles, speeds, launch times, targets and phases
+from the fixed eight-shot evaluation. The mixed artifact recovered 3/8
+pre-lift hits but 0/8 original-reference hits, despite retaining 8/8 short
+quiet-standing phases and the 33-second pre-lift no-ball hold. This is a
+failed transfer pilot, not a Perturb checkpoint. See
+`logs/mimickit-steps/com-residual-mixed-01/report.json` and the paired
+`com-residual-mixed-ball-{support,original}-01` reports. No export or selected
+Godot viewer policy was changed. Longer PPO or export from this
+residual is blocked pending a teacher/controller that produces stable recovery
+and a genuine step on the original reference.
+
+Reproduce the mixed pilot from the project root with a new output directory:
+
+```powershell
+$python = "mujoco_rig/mimic/.venv/Scripts/python.exe"
+& $python -m mujoco_rig.mimic.distill_mixed_com `
+  --mimickit $env:MIMICKIT_PATH `
+  --reference logs/mimickit-steps/placed-step-forward-09 `
+  --initialize-from logs/mimickit-steps/support-entry-5min-01/best.pt `
+  --source-contract logs/mimickit-training/stand-support-v2-15min-01/export/contract.json `
+  --agent-config logs/mimickit-steps/support-entry-5min-01/agent.yaml `
+  --out logs/mimickit-steps/com-residual-mixed-new
+```
+
+## Physical-ball stress for the COM residual (2026-09-25)
+
+`evaluate_com_ball.py` compares the unchanged support-entry actor and the
+experimental COM residual under eight real ballistic hits: front, back and
+two diagonal headings at 1.5/2.0 m/s with the 8 kg, 9 cm ball. All eight
+shots hit in both runs. The 33-second window leaves over 30 seconds after
+impact and requires a final uninterrupted half-second upright, slow,
+two-foot-supported state. On the pre-lift reference, the source actor
+recovered 0/8; the residual recovered 3/8. Those three contacts imparted
+26.7–41.2 N·s normal impulse, but the feet moved at most 3.6–6.9 mm, so this
+is balance without a demonstrated step. The residual survived a 33-second
+no-ball hold, versus 7.067 seconds for the source actor. See
+`logs/mimickit-steps/com-residual-ball-33s-02/report.json`.
+
+The same paired test on the original standing reference recovered 0/8 for
+both controllers (`com-residual-ball-original-33s-01/report.json`). These
+stress tests clamp reference phase after the clip endpoint as in residual
+training; current Godot long-run inference does not. The result blocks
+export/promotion and longer Perturb training from this residual. It does not
+test the selected Godot Perturb checkpoint.
+
+Run from the project root with a new output directory; add
+`--ball-reference original_stand` for the transfer check:
+
+```powershell
+$python = "mujoco_rig/mimic/.venv/Scripts/python.exe"
+& $python -m mujoco_rig.mimic.evaluate_com_ball `
+  --mimickit $env:MIMICKIT_PATH `
+  --reference logs/mimickit-steps/placed-step-forward-09 `
+  --initialize-from logs/mimickit-steps/support-entry-5min-01/best.pt `
+  --source-contract logs/mimickit-training/stand-support-v2-15min-01/export/contract.json `
+  --agent-config logs/mimickit-steps/support-entry-5min-01/agent.yaml `
+  --residual logs/mimickit-steps/com-residual-distill-02/experimental-residual.pt `
+  --out logs/mimickit-steps/com-residual-ball-new
+```
+
+## Cross-engine COM parity and residual distillation (2026-09-25)
+
+`godot_com_parity.py` compares the existing support-v2 observation decoder,
+native MuJoCo, and Godot's `MjBridge` on 24 matching pose/velocity fixtures.
+Godot COM X and velocity differ by at most 5.08e-9 m and 2.32e-10 m/s in
+these reset-state character-only cases. See
+`logs/mimickit-steps/godot-com-parity-01/report.json`.
+
+`distill_com_feedback.py` trains an experimental 362-input ankle residual
+around the frozen Stand actor, supervised by the observation-driven COM
+teacher. The training set has ±80/160 N pushes at 2 s; the held-out set has
+±120 N pushes at 1.75/2.25 s. The first pilot failed quiet retention (7/8)
+despite passing 8/8 pushes. A single revision with fourfold quiet rehearsal
+weight and a 0.2 action cap passed 8/8 held-out 12-second settled-root gates
+and 8/8 original quiet-standing phases. Its hash-bound diagnostic artifact is
+`logs/mimickit-steps/com-residual-distill-02/experimental-residual.pt`.
+`com_residual_policy.py` reloads that artifact without selecting it for Godot.
+These cases do not validate ball impacts, stepping, longer quiet retention,
+multiple training seeds, or live Godot control.
+
+Run either diagnostic from the project root with new output directories:
+
+```powershell
+$python = "mujoco_rig/mimic/.venv/Scripts/python.exe"
+& $python -m mujoco_rig.mimic.godot_com_parity `
+  --mimickit $env:MIMICKIT_PATH `
+  --reference logs/mimickit-steps/placed-step-forward-09 `
+  --source-contract logs/mimickit-training/stand-support-v2-15min-01/export/contract.json `
+  --godot $env:P4F_GODOT_EXE --out logs/mimickit-steps/godot-com-parity-new
+& $python -m mujoco_rig.mimic.distill_com_feedback `
+  --mimickit $env:MIMICKIT_PATH `
+  --reference logs/mimickit-steps/placed-step-forward-09 `
+  --initialize-from logs/mimickit-steps/support-entry-5min-01/best.pt `
+  --source-contract logs/mimickit-training/stand-support-v2-15min-01/export/contract.json `
+  --agent-config logs/mimickit-steps/support-entry-5min-01/agent.yaml `
+  --out logs/mimickit-steps/com-residual-new
+```
+
+## Observation-derived COM feedback (2026-09-25)
+
+`observation_com.py` defines `mimic_com_from_stand_observation_v1`, a derived
+state computed from the existing support-v2 observation and the hash-checked
+rig. It does not change the actor's 362 inputs or saved normalization. On
+four native ±120 N pelvis-pulse cases covering static and entry holds, the
+retained actor passed 0/4 12-second settled-root gates; both the native-oracle
+and observation-driven feedback passed 4/4. The maximum observed COM X and
+velocity reconstruction errors were below 3e-8 m and 6.5e-8 m/s. See
+`logs/mimickit-steps/com-observation-validation-01/report.json`. These cases
+validate native signal parity and feedback only. Godot parity, ball impacts,
+stepping, and a learned actor remain untested.
+
+Run the native pulse comparison from the project root with a new output path:
+
+```powershell
+$python = "mujoco_rig/mimic/.venv/Scripts/python.exe"
+& $python -m mujoco_rig.mimic.evaluate_com_observation `
+  --mimickit $env:MIMICKIT_PATH `
+  --reference logs/mimickit-steps/placed-step-forward-09 `
+  --initialize-from logs/mimickit-steps/support-entry-5min-01/best.pt `
+  --source-contract logs/mimickit-training/stand-support-v2-15min-01/export/contract.json `
+  --agent-config logs/mimickit-steps/support-entry-5min-01/agent.yaml `
+  --out logs/mimickit-steps/com-observation-new
+```
+
+## Native COM feedback teacher (2026-09-25)
+
+`com_feedback_teacher.py` adds bounded paired ankle-pitch feedback from
+reference-relative whole-body COM X and velocity to the retained Stand actor.
+This is a native MuJoCo oracle diagnostic; the actor and Godot observation
+contract do not yet contain equivalent COM signals. On the isolated pre-lift
+entry and 12-second terminal-pose hold, the actor alone fell at 7.067 s;
+four feedback variants completed the hold and passed the settled-root gate.
+The 1.5/1.5 gains used at most 0.113 normalized ankle action, also passed a
+static 12-second hold, and retained 8/8 original quiet-standing cases. See
+`logs/mimickit-steps/com-teacher-feasibility-01/report.json` and
+`com-teacher-gates-01/report.json`. No training, export, or Godot selection
+resulted from this test. Independent support shifts and an observation-parity
+check are required before treating this controller as a distillation target.
+
+Run the native feasibility check from the project root with a new output
+directory:
+
+```powershell
+$python = "mujoco_rig/mimic/.venv/Scripts/python.exe"
+& $python -m mujoco_rig.mimic.evaluate_com_teacher `
+  --mimickit $env:MIMICKIT_PATH `
+  --reference logs/mimickit-steps/placed-step-forward-09 `
+  --initialize-from logs/mimickit-steps/support-entry-5min-01/best.pt `
+  --source-contract logs/mimickit-training/stand-support-v2-15min-01/export/contract.json `
+  --agent-config logs/mimickit-steps/support-entry-5min-01/agent.yaml `
+  --out logs/mimickit-steps/com-teacher-new
+```
+
+## Pre-lift support-transition gate (2026-09-24)
+
+`support_transition.py` builds two six-second local tasks from the validated
+forward placed-step reference: hold its 3.5-second pose, or enter that pose
+from the stable 3.25-second pose over one second and then hold. The training
+actor keeps the support-v2 observation/action contract. Native evaluation
+requires six-second survival and settled root motion on both tasks, plus the
+original quiet-standing check. These references diagnose the first failing
+support transition; they are not full steps or impact-recovery demonstrations.
+
+The five-minute, 2,048-world static stage improved native pose-hold survival
+from 1.933 to 6.000 seconds and entry survival from 2.500 to 4.267 seconds.
+Quiet standing stayed intact. The pose hold missed the final-root-error gate
+by 3.5 mm, and the entry still fell. See
+`logs/mimickit-steps/support-transition-5min-01/report.json`. No policy was
+exported or selected for Godot.
+
+An entry-targeted continuation reached six-second survival in both cases at
+update 32 and passed the static settling gate, but its entry endpoint was
+13.6 cm from target (limit 5 cm). Later weights regressed; the final actor
+failed both survival checks. The validated update-32 `best.pt` is retained as
+an isolated partial result, not a deployable step controller. See
+`logs/mimickit-steps/support-entry-5min-01/{report.json,best.json}`. Diagnose
+root/support trajectory and action behavior before further PPO on this task.
+
+The paired native audit in `logs/mimickit-steps/support-entry-audit-02` found
+a fore-aft oscillation with planted, loaded feet and no saturated motors. The
+retained actor is still moving forward at six seconds and falls at 7.067 s in
+the 12-second terminal-pose hold
+(`support-entry-retention-12s-01`). The original reward's horizontal-root
+position and velocity terms are very weak at the measured error. A versioned
+support-only tracking reward can be selected with
+`--reward-mode mimic_support_tracking_v1`; the default remains `reference`.
+Its 128-world, 16-update smoke test lost one of eight quiet-standing cases and
+worsened entry endpoint error. The unchanged starting checkpoint was retained;
+`support-tracking-smoke-01` was not exported or selected. Do not extend this
+entry-only reward run; the rehearsal and longer gate below test that change.
+
+`support_rehearsal_task.py` now provides that isolated design: fixed quiet
+worlds train on the original reference reward, while entry worlds practice
+the terminal pose for 12 seconds. Native selection checks original quiet
+standing, static hold, entry and a 12-second hold with the reference phase
+clamped after six seconds. Two short integration controls kept quiet 8/8 but
+did not improve support. A 2,048-world five-minute pilot likewise kept quiet
+8/8 while entry and longer-hold survival regressed to 2.567 s from 6.000 and
+7.067 s respectively. Its `best.pt` is unchanged iteration zero. See
+`logs/mimickit-steps/support-rehearsal-5min-01/{report.json,best.json}`.
+Do not extend this PPO configuration or promote it to Godot; diagnose the
+support policy update/critic signal or introduce explicit COM/support control.
+
+The read-only `audit_support_critic.py` now checks the value head against
+discounted native return to failure. On the retained actor's delayed-fall
+trajectory, the critic overpredicts the return at six seconds by about 31.
+Critic-only fitting with `probe_support_calibration.py` improves aggregate
+quiet/support validation RMSE, but worsens error on the critical 2–4-second
+native interval. The actor is unchanged. See
+`logs/mimickit-steps/support-critic-audit-02.json`,
+`support-critic-calibration-01/critic_calibration.json` and
+`support-critic-audit-calibrated-01.json`. The calibrated weights are
+diagnostic only; they do not justify another actor-training run.
+
+The bounded rehearsal command uses new output directories:
+
+```powershell
+$python = "mujoco_rig/mimic/.venv/Scripts/python.exe"
+& $python -m mujoco_rig.mimic.train_support_transition `
+  --mimickit $env:MIMICKIT_PATH `
+  --reference logs/mimickit-steps/placed-step-forward-09 `
+  --initialize-from logs/mimickit-steps/support-entry-5min-01/best.pt `
+  --source-contract logs/mimickit-training/stand-support-v2-15min-01/export/contract.json `
+  --out logs/mimickit-steps/support-rehearsal-new `
+  --training-mode transition --reward-mode mimic_support_tracking_v1 `
+  --quiet-fraction 0.25 --support-seconds 12 --retention-seconds 12 `
+  --envs 2048 --seconds 300
+```
+
+For repeatable read-only root, contact, action and motor traces, run:
+
+```powershell
+$python = "mujoco_rig/mimic/.venv/Scripts/python.exe"
+& $python -m mujoco_rig.mimic.audit_support_entry `
+  --mimickit $env:MIMICKIT_PATH `
+  --reference logs/mimickit-steps/placed-step-forward-09 `
+  --source-contract logs/mimickit-training/stand-support-v2-15min-01/export/contract.json `
+  --agent-config logs/mimickit-steps/support-entry-5min-01/agent.yaml `
+  --checkpoint entry logs/mimickit-steps/support-entry-5min-01/best.pt `
+  --episode-seconds 12 --out logs/mimickit-steps/support-entry-audit-new
+```
+
+Run an isolated pilot from the project root with a new output directory:
+
+```powershell
+$python = "mujoco_rig/mimic/.venv/Scripts/python.exe"
+& $python -m mujoco_rig.mimic.train_support_transition `
+  --mimickit $env:MIMICKIT_PATH `
+  --reference logs/mimickit-steps/placed-step-forward-09 `
+  --initialize-from logs/mimickit-training/stand-support-v2-15min-01/best.pt `
+  --source-contract logs/mimickit-training/stand-support-v2-15min-01/export/contract.json `
+  --out logs/mimickit-steps/support-transition-new `
+  --training-mode static --envs 2048 --seconds 300
+```
+
+`--training-mode transition` targets the entry motion directly. A continuation
+can use a prior pilot's `best.pt`; the `best.json` file binds that checkpoint
+to its contract and hash. Outputs remain isolated and do not update the
+viewer selection.
+
+## AMP placed-step pilot (2026-09-24)
+
+`amp_step.py` implements MimicKit's motion-discriminator interface on the
+existing Newton/MuJoCo dummy. It uses consecutive native pose/velocity states
+and validated CC-BY-4.0 standing and forward/back stepping demonstrations.
+The actor still uses the 362-input support-v2 contract; no Godot adapter or
+viewer selection changes are needed for this isolated experiment. The task
+reward targets an upright body, support COM transfer and placed left foot while
+the discriminator provides a whole-body motion prior.
+
+The initial 2,048-world pilot completed 19 GPU updates and 1,245,184
+transitions, but inherited three-second training episodes. The corrected
+eight-second connected-episode pilot completed 21 updates and 1,376,256
+transitions. Quiet standing remained 8/8; complete native step survival only
+changed from 4.667 to 4.717 seconds, before the planned 7-second lift. Its
+final discriminator gave every sampled demonstration a negative logit, although
+demonstrations still scored above generated motion on average. This pilot does
+not support promoting the actor or merely extending training. Results and
+source hashes are in `logs/mimickit-steps/amp-step-connected-01`.
+
+The corrected task reward includes pre-lift COM transfer and waits until after
+landing to reward low root speed. A matched three-minute pilot retained quiet
+standing but reached only 4.700 seconds of native survival, again without a
+step (`amp-step-transfer-reward-01`). The repeatable native `audit_prelift.py`
+localizes the control boundary between reference poses at 3.25 seconds
+(sustained standing) and 3.5 seconds (falling). Removing self-collisions and
+rescaling the actor's phase do not fix it; stronger PD is worse. See
+`prelift-audit-01/report.json`. The separate support-transition experiment
+above now measures that boundary directly.
+
+Run a new isolated pilot from the project root with new output directories:
+
+```powershell
+$python = "mujoco_rig/mimic/.venv/Scripts/python.exe"
+& $python -m mujoco_rig.mimic.train_amp_step `
+  --mimickit $env:MIMICKIT_PATH `
+  --reference logs/mimickit-steps/placed-step-forward-09 `
+  --demonstration mujoco_rig/mimic/assets/stand_reference.npz `
+  --demonstration mujoco_rig/mimic/assets/steps/forward_reference.npz `
+  --demonstration mujoco_rig/mimic/assets/steps/backward_reference.npz `
+  --demonstration logs/mimickit-steps/placed-step-forward-09 `
+  --demonstration logs/mimickit-steps/placed-step-backward-09 `
+  --initialize-from logs/mimickit-training/stand-support-v2-15min-01/best.pt `
+  --source-contract logs/mimickit-training/stand-support-v2-15min-01/export/contract.json `
+  --out logs/mimickit-steps/amp-step-new --envs 2048 --seconds 180
+```
+
+The native complete-step and original quiet-standing tests are recorded before,
+during and after training. No export is performed. The discriminator's motion
+examples do not include recorded ball-impact recovery; this pilot does not
+establish Perturb behavior.
+
+Run the native pre-lift audit with a new output directory:
+
+```powershell
+& $python -m mujoco_rig.mimic.audit_prelift `
+  --mimickit $env:MIMICKIT_PATH `
+  --reference logs/mimickit-steps/placed-step-forward-09 `
+  --bundle logs/mimickit-training/stand-support-v2-15min-01/export `
+  --out logs/mimickit-steps/prelift-audit-new
+```
+
+## Single placed-step diagnostic (2026-09-24)
+
+`placed_step.py` builds a forward or backward 15 cm left-foot placement from the
+existing licensed standing pose, static step audit and calibrated support-transfer
+poses. Both 22-second references pass the one-foot placement, contact, penetration,
+root-support and delayed motor feasibility gates. This is a procedural reference,
+not a motion-captured human recovery or a trained skill. The generic walking
+validator expects *both* feet to lift, so its `foot_lift` flag is intentionally
+false; `single_step_checks` instead requires the swing foot to lift at least 3 cm
+and finish within 2 cm of the requested 15 cm placement.
+
+The native Stand v2 actor falls at 4.667 seconds on either complete reference,
+before the planned lift at 7 seconds. Two isolated five-minute guarded PPO pilots
+on the forward reference completed 27 / 39 updates and 1,769,472 / 2,555,904
+transitions. The second used connected eight-second episodes beginning at rest,
+weight shift or toe-off. Both kept quiet standing at 8/8 but only extended native
+full-step survival to 4.700 / 4.784 seconds; neither placed the foot. Further
+runs with the same PPO imitation setup are not supported by these results. No
+policy was exported to Godot. Reports are under
+`logs/mimickit-steps/placed-step-{forward,backward}-09`,
+`placed-step-{forward,backward}-native-01`, `placed-step-forward-pilot-01` and
+`placed-step-forward-staged-01`.
+The Godot Perturb selection is independent; inspect `logs/mimickit-viewer/ball.json`
+for the current user-selected bundle.
+
+Reproduce with the configured Mimic virtual environment and pinned MimicKit
+checkout, choosing new output directories:
+
+```powershell
+& $python -m mujoco_rig.mimic.placed_step `
+  --calibration logs/mimickit-steps/transfer-calibration-02 `
+  --audit logs/mimickit-foundation/audit-04 `
+  --direction forward --out logs/mimickit-steps/placed-step-forward-new
+& $python -m mujoco_rig.mimic.track_transfer `
+  --mimickit $env:MIMICKIT_PATH `
+  --calibration logs/mimickit-steps/placed-step-forward-new `
+  --bundle logs/mimickit-training/stand-support-v2-15min-01/export `
+  --out logs/mimickit-steps/placed-step-native-new
+```
+
+## Current milestone: front/back impact recovery
+
+The mixed follow-up (`perturb-mixed-30min-01`) is complete and **rejected as a
+replacement**. It ran 223 updates in 1805.453 seconds. Relative to the reviewed
+candidate, focused survival fell 6/12 -> 3/12 (forward 2/6 -> 1/6, backward
+4/6 -> 2/6), and full-suite settled recovery fell 25/96 -> 5/96. Quiet survival
+remained 8/8 at five and 30 seconds. Godot/native parity passes. The final export
+was created and selected automatically, then rolled back to the reviewed
+`perturb-front-back-15min-01/final-export` at run completion. The user later
+selected the mixed final export for visual review; see `ball.json` above for the
+current viewer choice. No further run is queued.
+`perturb_mixed` remains available to reproduce the experiment, not as a recommended
+automatic continuation. See `logs/mimickit-training/perturb-mixed-30min-01/comparison.json`.
+
+After visual review of the first candidate, we tested mixed recovery training.
+To reproduce that bounded experiment:
+
+```powershell
+./mujoco_rig/mimic/scripts/train.ps1 -Experiment perturb_mixed
+```
+
+This 30-minute preset starts from `perturb-front-back-15min-01/model.pt` and its
+`final-export/contract.json`, not the retained original actor in `best.pt`.
+`mixed_recovery_v1` samples mutually exclusive episode categories: 50% focused
+front/back torso shots, 25% full-angle/all-body shots, and 25% quiet episodes.
+These are probabilities at reset, not guaranteed proportions of transitions:
+episodes can have different lengths. The broad component can naturally include
+front/back torso shots too. This version requires `QuietFraction = 0.25`.
+Ball speeds remain 1–2 m/s, and physics, reward, observation contract and optimizer
+settings are unchanged. All 96 validation cases remain active.
+
+The fixed comparison targets are at least 4/6 backward survivals (reviewed
+candidate), 3/6 forward survivals (original baseline), one focused settled
+recovery, and 8/8 quiet survivals. Report the full suite against both policies
+as well; the original baseline had 76/96 survivals and 26 settled recoveries.
+Repeat the 30-second runtime stress with the same finite-reference limitation
+described below. Export the final candidate for Godot review, preserve rollback,
+and stop after the paired comparison rather than chaining further runs.
+
+The first run (`perturb-front-back-15min-01`) completed 110 updates in 900.407
+seconds. Focused five-second survival improved 3/12 -> 6/12 and settled recovery
+0/12 -> 1/12; backward survival improved 0/6 -> 4/6 but forward survival fell
+3/6 -> 2/6. Full-suite survival fell 76/96 -> 72/96. Quiet survival remained 8/8
+at five and 30 seconds; all six surviving candidate impact cases also settled by
+the end of the long runtime stress. Godot/native parity passes. The candidate is
+selected for review, with the baseline available for rollback. This is partial
+progress with trade-offs, not a successful overall replacement or authorization
+to automatically extend training. See `logs/mimickit-training/perturb-front-back-15min-01/comparison.json`.
+
+The continuous-standing/optimizer investigation below is paused. It is not a
+prerequisite for this gameplay experiment. Preserve the current Perturb export,
+then run one bounded curriculum before deciding whether to train longer:
+
+```powershell
+./mujoco_rig/mimic/scripts/train.ps1 -Experiment perturb_front_back
+```
+
+This preset runs 15 minutes with the configured 2,048 GPU worlds, 25% quiet
+episodes, and 8 kg physical balls at 1–2 m/s. Training targets Chest, Spine and
+Pelvis from world +/-X with +/-10 degrees of angular variation. The existing
+`recovery_v1` reward permits displaced, single-support recovery; no new stepping
+reference, observation migration, rig change or optimizer adjustment is implied.
+The pinned starting checkpoint is the previously selected
+`perturb-resume-15min-01/best.pt`, using its original legacy contact contract.
+Override both `-InitFrom` and `-SourceContract` together to use another matching
+checkpoint. Do not substitute support_v2 semantics into these weights.
+
+Full 96-case native checkpoint selection remains unchanged. Review the 12
+front/back torso cases separately: all confirmed hits, survival, final settled
+recovery, and quiet-standing retention. `review_ball_recovery` runs those cases
+plus eight quiet phases for five seconds and for 30-second runtime stress. The
+long test preserves Godot's existing endpoint sampling and out-of-range phase;
+it is not proof of an in-distribution continuous-standing capability.
+
+`-ViewerPolicy final` (enabled by this preset) exports the actual final trained
+candidate to `final-export` and selects it for F5/F6 review. `best.pt` and `export`
+still contain the policy retained by validation, possibly the unchanged starting
+actor. The final export is explicitly for review, not a claim that it passed
+retention. Stand's viewer selection is independent. Existing presets continue to
+select `best` by default. After training, run `MimicPerturb.tscn`; choose Chest,
+Spine or Pelvis in the Inspector, 1–2 m/s, and use the Forward/Backward buttons
+for the focused comparison. Random targets include untrained curriculum cases.
+
+```powershell
+# Review the current selection, or a particular run's final candidate.
+./mujoco_rig/mimic/scripts/watch.ps1 -Experiment perturb_front_back
+./mujoco_rig/mimic/scripts/watch.ps1 -Run logs/mimickit-training/YOUR_RUN -Policy final
+# Select an already exported final candidate or restore the previous viewer.
+./mujoco_rig/mimic/scripts/select.ps1 -Run logs/mimickit-training/YOUR_RUN -Policy final
+./mujoco_rig/mimic/scripts/select.ps1 -Experiment perturb -Previous
+```
+
+Stopping rule: complete one 15-minute run and the paired review. More settled
+front/back recoveries without directional survival or quiet-standing regression
+justify considering continuation. Otherwise, record that the focused curriculum
+did not meet the milestone and decide explicitly whether to supply a usable
+recovery-step motion prior or change the control approach. Do not automatically
+chain reward/optimizer adjustments or increase projectile difficulty.
+
+## Continuous-standing reference and retention gate (paused investigation)
+
+`continuous_stand` prepares eight independent stationary targets from fixed postures
+of the physically admitted small weight-shift reference. Each target holds its pose
+for unlimited time, has exactly zero reference velocity/acceleration, and exposes
+zero in the phase channel. Cases never interpolate into one another. Root height
+is lowered by an explicit 0.1 mm contact seating depth before repeating the existing
+geometry, foot/toe support, root-wrench and actuator-window checks. This avoids
+CPU/GPU contact-set disagreement at exactly tangent float32 reset poses; it does
+not change the rig, solver, contact parameters, action authority, or delayed PD.
+
+The versioned reference is `mimic_stationary_stand_reference_v1`; the policy contract
+is `mimic_stationary_stand_target_pd_v1`. Its 362 observations have the existing
+physical/control groups, but its last channel means stationary phase zero and its
+reference duration is null. `ContinuousStandTask` explicitly selects this reference
+and resets every world to its assigned posture with zero velocity. The ordinary
+finite-clip loader rejects these files. Legacy exports, normalization statistics,
+training commands and Godot adapters keep their existing semantics.
+
+`probe_continuous_stand` evaluates saved policies without training, exporting or
+selecting them. Substituting this new contract into an existing actor is an explicit
+**transfer diagnostic**, not a claim that the actor was trained for these targets.
+The first supplied checkpoint is the teacher; each checkpoint's parent must contain
+its matching `agent.yaml`. The fixed anchor bank measures teacher-to-candidate KL on
+the same states used by the preceding safeguard experiment.
+
+```powershell
+python -m mujoco_rig.mimic.continuous_stand `
+  --source logs/mimickit-steps/weight-shift-small-01/weight_shift_reference.npz `
+  --out logs/mimickit-steps/continuous-stand-new
+
+python -m mujoco_rig.mimic.probe_continuous_stand --mimickit $env:MIMICKIT_PATH `
+  --reference logs/mimickit-steps/continuous-stand-new/stationary_reference.npz `
+  --anchor-bank logs/mimickit-training/shift-precision-5min-01/quiet_anchor.npz `
+  --checkpoint logs/mimickit-training/small-shift-15min-01/best.pt `
+  --checkpoint logs/mimickit-training/stand-support-v2-15min-01/best.pt `
+  --out logs/mimickit-training/continuous-stand-comparison-new
+```
+
+Use the experiment virtual environment and previously configured `MIMICKIT_PATH`.
+Output directories must be new. The 30-second gate counts only each world's first
+episode and requires all eight to survive, each mean root error to stay at or below
+5 cm, and the final two seconds to remain settled. Settled means pelvis height at
+least 0.75 m, tilt at most 15 degrees, horizontal speed at most 0.2 m/s, angular speed
+at most 1 rad/s, at least 5 N support per foot including toes, and foot-position
+error at most 3 cm. Timeouts alone do not pass; maintenance resets cannot replace
+failed episodes. Thresholds are versioned in `continuous_stand.GATES`.
+
+The report includes per-case measurements, trace/checkpoint/source hashes and a
+safeguard calibration outcome. A teacher failing this gate yields
+`no_passing_teacher` and no proposed KL limit: even zero deviation cannot certify
+the missing behavior. A sampled separation between passing/failing policies is
+also not a universal safe radius. This gate is not silently added to selection for
+legacy tasks. Train/admit the new contract explicitly before using it for promotion.
+
+### Bounded continuous-Stand training
+
+`train_continuous_stand` is a separate entry point for this contract. It reuses the
+existing GuardedPPO updates, target PD, contact observations and DeepMimic reward;
+the finite-clip Stand/Perturb commands are unchanged. Initialization must match
+the checkpoint hash and contract in its source `best.json`. A finite-clip
+`support_v2` source additionally requires `--allow-reference-migration`. All
+physical/control fields and observation groups except the explicitly changed
+phase/reference semantics must match. Weights and normalization statistics load
+unchanged; the destination receives its own contract and provenance.
+
+```powershell
+python -m mujoco_rig.mimic.train_continuous_stand --mimickit $env:MIMICKIT_PATH `
+  --reference logs/mimickit-steps/continuous-stand-02/stationary_reference.npz `
+  --initialize-from logs/mimickit-training/small-shift-15min-01/best.pt `
+  --source-contract logs/mimickit-training/small-shift-15min-01/export/contract.json `
+  --allow-reference-migration --envs 2048 --seconds 300 --iterations 64 `
+  --evaluation-interval 16 --calibration-steps 200 --actor-max-kl .02 `
+  --out logs/mimickit-training/continuous-stand-pilot-new
+```
+
+Each world keeps one of the eight postures for a 30-second episode. The local
+outer loop uses upstream rollout/update methods but does **not** inherit upstream's
+all-world reset at logging checkpoints: only initial setup, actual per-world
+failure and the 30-second timeout reset training episodes. Separate native
+validation never resets the GPU training worlds. `updates.jsonl` records each
+iteration; `learning_curve.json` records native evaluations and selection decisions.
+
+Before PPO, the frozen actor generates critic-calibration episodes. Every posture
+gets equal loss weight and whole-world training/validation separation. Validation
+uses `(world_index // 8) % 4 == 3`, so all eight postures appear in both partitions;
+plain `world_index % 4` would omit whole postures from one partition. Calibration
+must reduce balanced validation MSE by at least 10%, without increasing any
+posture's RMSE, while preserving actor/normalization fingerprints.
+
+The existing rollout KL limit remains active. There is no fixed-teacher distance
+anchor or new optimizer search. Selection refuses to lose **any** incumbent
+passing 30-second case, even if total successes increase. Otherwise it ranks the
+complete gate, passed cases, survival count, worst/mean duration and root error.
+The pilot stops at the first measured native retention regression, the iteration
+limit or the time budget. `--seconds` includes periodic native checks; startup,
+initial validation, calibration and final native/GPU validation are additional.
+
+Artifacts include `initial.pt`, `calibrated.pt`, `model.pt`, `best.pt`, `best.json`,
+the resolved `agent.yaml`, `contract.json`, `protocol.json`, calibration results,
+and a final report. The config comes from the source run's `agent.yaml`, with the
+documented guard, clipping and evaluation overrides recorded in the new run.
+The current runner saves checkpoints only: the stationary contract still needs a
+matching Godot viewer/export adapter. It does not select a legacy viewer bundle.
+
+The first pilot (`continuous-stand-5min-01`) stopped at iteration 16 after losing
+all three baseline 30-second successes (3/8 to 0/8). The selector retained the
+initial checkpoint; native and GPU rechecks both retain 3/8. The five-minute PPO
+ceiling was cut short after 71.86 seconds. Critic calibration passed, but neither
+that result nor rollout KL below 0.02 established behavioral improvement. PPO
+rollouts had reached only 8.534 seconds of episode age before this check; delayed
+failures of previously stable cases occurred at 17.55–21.54 seconds. Investigate
+long-horizon collection and value/advantage coverage before extending training.
+
+#### Temporal readiness and the sustained-standing objective
+
+The opt-in `--objective retention_30s_v1 --temporal-ready` experiment addresses
+the credit audit findings without changing the rig, actor inputs or native gate.
+It defines a continuing tracking objective in physical time:
+`discount = exp(-control_timestep / 30)` and
+`reward = (1 - discount) * existing_tracking_reward`. Failure still returns zero
+and terminates with zero value; the 30-second collection timeout bootstraps the
+critic. Thirty seconds is the discount's e-folding time, not a finite terminal
+horizon. Normalization keeps the ideal continuing value near one without changing
+the ordering of policies under that discount. This objective still requires the
+separate per-case settled-retention gate; it does not guarantee safe behavior.
+
+```powershell
+python -m mujoco_rig.mimic.train_continuous_stand --mimickit $env:MIMICKIT_PATH `
+  --reference logs/mimickit-steps/continuous-stand-02/stationary_reference.npz `
+  --initialize-from logs/mimickit-training/continuous-stand-5min-01/best.pt `
+  --source-contract logs/mimickit-training/continuous-stand-5min-01/contract.json `
+  --objective retention_30s_v1 --temporal-ready --calibration-steps 1000 `
+  --envs 2048 --seconds 300 --iterations 64 --evaluation-interval 8 `
+  --out logs/mimickit-training/continuous-stand-temporal-new
+```
+
+`agent.yaml` and `protocol.json` record the objective. `value_initialization.json`
+records the critic-head unit scaling; actor and normalization are untouched.
+Scaling supplies only an initialization prior, not a valid conversion between
+discount horizons. Mandatory frozen-actor calibration must fit the new targets.
+Its v2 gate retains every posture check and adds age bands 0–5, 5–15 and 15+ seconds
+and 0.5/2/5-second windows preceding failures. Each slice needs at least 32 training
+and 32 validation samples. No slice RMSE may increase, and balanced posture MSE
+must improve at least 10%. All measured groups receive equal calibration loss
+weight. Rejection saves a report and starts no PPO; no gate is relaxed automatically.
+
+After successful calibration, a frozen-policy preparation pass simulates 30
+seconds with staggered per-world resets. It generates real live states at different
+episode ages; it does not set arbitrary clocks on fresh poses or replay old PPO
+samples. Every incumbent passing posture must have at least four early (<5 s) and
+four late (>=15 s) live worlds. Training preserves these states, discards preparation
+samples and collects a fresh on-policy batch. The first actual batch is checked
+again before any update. `preparation.json`, `first_rollout_coverage.json` and
+`samples_age_15_plus` in each update record make coverage inspectable. Preparation,
+calibration and final checks are outside the bounded PPO-stage budget.
+
+The first combined experiment (`continuous-stand-temporal-01`) passed calibration
+and preparation, including 8,891 late-state samples in its first 65,536-sample PPO
+batch. It still regressed from 3/8 to 0/8 at iteration eight, on both native and GPU
+retention checks, and stopped after 57.42 seconds of its five-minute PPO ceiling.
+The baseline actor remains selected. Treat these options as a verified experimental
+pipeline, not an established improved controller; isolate actor-update direction
+before extending training or changing additional parameters.
+
+### Frozen standing credit audit
+
+`probe_standing_credit` compares the initial, calibrated and final checkpoints of
+a stationary pilot without updating parameters. It uses stochastic GPU first
+episodes through failure or 30 seconds, the same actor trajectories for the two
+baseline critics, and the candidate's own trajectories for its critic. It saves
+scalar traces and reports value errors/advantages by episode age and time to fall.
+
+```powershell
+python -m mujoco_rig.mimic.probe_standing_credit --mimickit $env:MIMICKIT_PATH `
+  --reference logs/mimickit-steps/continuous-stand-02/stationary_reference.npz `
+  --run logs/mimickit-training/continuous-stand-5min-01 `
+  --envs 256 --seed 210922 --out logs/mimickit-training/standing-credit-audit-new
+```
+
+The source run must use the stationary contract and contain `initial.pt`,
+`calibrated.pt`, `model.pt`, `agent.yaml` and `contract.json`. Reports include
+checkpoint, source and trace hashes. Raw 32-step TD-lambda targets use upstream
+MimicKit code; failure values are zero and timeouts bootstrap the evaluated critic.
+Full sampled returns also bootstrap timeouts, and are noisy estimates rather than
+ground-truth action advantages. Only first-episode masks enter reported metrics.
+These stochastic timeouts do not substitute for native settled-retention passes.
+
+The first audit (`standing-credit-audit-01`) found that calibration improved overall
+value RMSE while worsening the five-second pre-failure slice. The rejected actor
+also achieved a slightly higher short-discount return despite fewer 30-second
+survivors. Its independent `verification.json` records a finite-horizon comparison:
+merely correcting discount to the upstream 30-Hz timebase still favors that actor,
+whereas the undiscounted 30-second reward sum does not. This is diagnostic evidence,
+not a trained replacement objective. Keep existing weights and Godot selections
+until temporal coverage and behavioral validation support a replacement.
+
+### Isolated actor-update direction
+
+`probe_actor_update` starts from a temporally calibrated stationary checkpoint,
+prepares live episode ages, and collects one fresh 32-step batch. It compares an
+unchanged actor, one optimizer step and one normal actor phase (40 optimizer steps
+with the current config). Both updated branches independently start from the same
+weights, fresh optimizer state, sampler permutation and random-generator states.
+The critic is never updated. Whole-batch actor loss is measured before/after;
+critic, normalization and fixed-distribution tensors must remain bitwise unchanged.
+
+```powershell
+python -m mujoco_rig.mimic.probe_actor_update --mimickit $env:MIMICKIT_PATH `
+  --reference logs/mimickit-steps/continuous-stand-02/stationary_reference.npz `
+  --run logs/mimickit-training/continuous-stand-temporal-01 `
+  --envs 2048 --trials 256 --seed 210923 `
+  --out logs/mimickit-training/actor-direction-new
+```
+
+GPU validation advances all branches together, including an unchanged-policy
+repeat, with identical Gaussian noise for each paired trial. Only the first
+episode counts. Measured discounted 30-second reward prefixes have zero tails;
+a separately labeled estimate bootstraps surviving timeouts with the same frozen
+critic. Prefix return is not the full continuing objective. Reported uncertainty
+resamples paired replicas within each posture and is conditional on the one
+training batch; it does not measure variation across training seeds. Native
+deterministic 30-second settled-retention checks accompany these stochastic trials.
+
+Artifacts include diagnostic branch weights, the exact rollout/advantage batch and
+sampler permutation (`batch.pt`), preparation coverage, shared evaluation noise,
+scalar first-episode traces, native retention traces, provenance and comparisons.
+The source run and Godot selections are never modified. This is a direction probe,
+not a replacement training loop or an automatic policy-selection path.
+
+The first probe (`actor-direction-01`) preserved the same three native standing
+cases for both updated branches. Whole-batch PPO loss improved, but matched
+stochastic return/survival comparisons remained inconclusive: the normal actor
+phase survived 19/256 trials versus 16/256 for baseline, with paired return
+uncertainty including zero. Independent CPU arithmetic reproduced the first SGD
+step. This does not identify a wrong-sign gradient or establish a better controller;
+the remaining question concerns successive updates and critic feedback. Source
+weights and Godot selections remain unchanged.
+
 ## Contact contract v2 (2026-09-23)
 
 `-ContactMode support_v2` selects `mimic_stand_target_pd_v2`. It retains the
@@ -501,6 +1291,301 @@ inapplicable temporal foot-lift test; the final motion checks include it. The
 32-second `transfer-calibration-02` passes every full-motion check with zero root
 or delayed-PD failures. It is a procedural calibration with pauses, not recorded
 human walking or evidence of closed-loop balance. Native tracking is the next gate.
+
+Use `track_transfer` for that native diagnostic without admitting the calibration
+to training. It verifies the saved source/rig/content hashes and reruns physical
+checks, then compares reference-only PD, the existing Stand actor, and a diagnostic
+prefilled command queue. It includes the actor's original standing baseline,
+eight three-second transfer phases, and a full-duration attempt from frame zero.
+Tracking errors use post-integration reference times and exclude subsequent resets.
+Full motion requires both foot lifts; short phase probes do not. All results
+remain diagnostic and cannot select a Godot policy.
+
+```powershell
+& $python -m mujoco_rig.mimic.track_transfer --mimickit $env:MIMICKIT_PATH `
+  --calibration logs/mimickit-steps/transfer-calibration-02 `
+  --bundle logs/mimickit-training/stand-support-v2-15min-01/export `
+  --out logs/mimickit-steps/<new-tracking>
+```
+
+`--interventions-only` runs three separate three-second initial-phase diagnostics:
+hold the first pose, use the old actor's original phase scaling, or disable
+self-collisions in a private model. These interventions cannot qualify a reference
+or controller for promotion. `transfer-tracking-01` fails native transfer tracking:
+the actor falls at 1.650 s, reference PD at 1.883 s, before the first planned lift.
+The original standing actor still passes 8/8 baseline trials. Holding the initial
+calibration pose passes; phase scaling and collision interventions do not fix the
+moving transfer. See `STATUS.md` for the interpretation and next experiment.
+
+### Isolated weight-shift learning pilot
+
+`weight_shift` extracts the calibration's two double-support weight shifts and
+reverses them back to standing, recomputing velocities and physical checks. Its
+separate `mimic_weight_shift_reference_v1` schema requires both feet/toes planted
+and measurable horizontal movement. It does not require foot lift; the stepping
+schemas and their admission requirements are unchanged. The parent calibration
+remains diagnostic. No generated references are silently substituted into Stand
+or Perturb training.
+
+`train_stand --task weight_shift` uses the same target-PD controller and guarded
+PPO, with an explicit reference-only warm start from the compatible Stand actor
+or a continuation from a checkpoint using the exact same motion reference.
+All other contract fields, including contact semantics, must match. Reference
+hashes/durations and unchanged frozen normalization are recorded in provenance.
+Native selection evaluates eight motion phases and both three- and five-second
+quiet standing trials. Quiet retention takes priority over motion progress. Motion
+gates include horizontal displacement error, so survival without following the
+weight shift is insufficient. `--no-select-viewer` is mandatory.
+
+```powershell
+& $python -m mujoco_rig.mimic.weight_shift `
+  --calibration logs/mimickit-steps/transfer-calibration-02 `
+  --out logs/mimickit-steps/<new-weight-shift-reference>
+
+& $python -m mujoco_rig.mimic.train_stand --mimickit $env:MIMICKIT_PATH `
+  --reference logs/mimickit-steps/<new-weight-shift-reference>/weight_shift_reference.npz `
+  --task weight_shift --control target_pd --contact-mode support_v2 --stability guarded `
+  --initialize-from logs/mimickit-training/stand-support-v2-15min-01/best.pt `
+  --source-contract logs/mimickit-training/stand-support-v2-15min-01/export/contract.json `
+  --envs 2048 --seconds 300 --iterations 1000000 --evaluation-interval 16 `
+  --actor-max-kl .02 --critic-grad-clip 1 --seed 210921 --no-select-viewer `
+  --out logs/mimickit-training/<new-weight-shift-pilot>
+```
+
+The critic clip is an explicit optimizer option, defaulting to zero (unchanged
+upstream behavior) for existing experiments. The first weight-shift attempt failed
+numerically: finite rollout data entered critic SGD, whose loss/weights diverged
+within seven minibatches. The bounded reproduction is saved in
+`logs/mimickit-training/weight-shift-critic-probe.json`. The retry uses the existing
+MimicKit gradient clipping implementation at norm 1.0 without changing rewards,
+physics, actor KL, or normalization. A generic nonfinite-parameter stop now records
+parameter names and metrics in `numerical_failure.json`; it does not export a
+failed policy. Pilot outcomes are recorded in [`../STATUS.md`](../STATUS.md).
+
+To diagnose the early fall, `audit_weight_shift` accepts repeated `--bundle`
+arguments and compares each actor on quiet standing, a held start pose, quarter,
+half and full motion amplitude. It records the first episode's actions, physics
+substeps, contact loads and normalization coverage. Reduced amplitudes exist only
+in memory and are not admitted training references. `--normalizer-unclipped`
+instead runs quiet/full-shift cases with only the ONNX observation clip bypassed
+in memory; learned statistics, weights and action clipping remain unchanged.
+
+```powershell
+& $python -m mujoco_rig.mimic.audit_weight_shift --mimickit $env:MIMICKIT_PATH `
+  --bundle logs/mimickit-training/stand-support-v2-15min-01/export `
+  --bundle logs/mimickit-training/weight-shift-5min-02/export `
+  --reference logs/mimickit-steps/weight-shift-reference-01/weight_shift_reference.npz `
+  --out logs/mimickit-steps/<new-weight-shift-audit>
+```
+
+Reports distinguish original and intervened cases. Neither mode trains, writes
+policy exports or selects a Godot viewer bundle.
+
+### Smaller-shift curriculum and motion features
+
+`prepare_shift_curriculum` creates stopped, retimed prefixes of the two admitted
+weight shifts, recomputes velocities and reruns all physical gates. The one-second
+and 1.5-second prefixes each become a 16-second two-sided shift/return cycle. Foot
+lift remains inapplicable to this separate task; neither curriculum stage weakens
+the existing physical limits.
+
+```powershell
+& $python -m mujoco_rig.mimic.prepare_shift_curriculum `
+  --source logs/mimickit-steps/weight-shift-reference-01/weight_shift_reference.npz `
+  --prefix-seconds 1 --out logs/mimickit-steps/<new-small-reference>
+```
+
+Repeat with `--prefix-seconds 1.5` and a different output directory for the next
+stage. Weight-shift evaluation v2 adds a relative displacement gate so small motions
+cannot pass by remaining stationary. V1 selection reports are rejected by the v2
+ranker rather than reinterpreted.
+
+`prepare_motion_normalization` defaults to `additive_features`: it keeps the entire
+pretrained normalization path and appends separately normalized pending-target and
+future-reference features. New actor/critic input weights start at zero, preserving
+the old policy while allowing broader motion features to learn. External input
+width stays 362; internal normalized width becomes 628. Both paths remain frozen
+during guarded PPO. Direct scale replacement and compensated migration are retained
+as explicit diagnostic modes; the tested candidates failed retention and cannot be
+used as approved initializations.
+
+```powershell
+& $python -m mujoco_rig.mimic.prepare_motion_normalization --mimickit $env:MIMICKIT_PATH `
+  --bundle logs/mimickit-training/stand-support-v2-15min-01/export `
+  --checkpoint logs/mimickit-training/stand-support-v2-15min-01/best.pt `
+  --reference logs/mimickit-steps/weight-shift-small-01/weight_shift_reference.npz `
+  --reference logs/mimickit-steps/weight-shift-medium-01/weight_shift_reference.npz `
+  --migration-mode additive_features --out logs/mimickit-steps/<new-normalization-preparation>
+```
+
+The preparation must pass quiet retention, retain motion baseline survival, cover
+the new inputs without clipping in its validation cases, and preserve calibration
+actions within export tolerance. Training checks the manifest, checkpoint and
+reference hashes and records the feature architecture in export lineage. A rejected
+candidate has `diagnostic_only: true`. Preparation artifacts are not viewer bundles.
+
+The admitted `shift-normalization-03` package can initialize this first learning
+pilot (the command starts training; preparation alone does not):
+
+```powershell
+& $python -m mujoco_rig.mimic.train_stand --mimickit $env:MIMICKIT_PATH `
+  --reference logs/mimickit-steps/weight-shift-small-01/weight_shift_reference.npz `
+  --task weight_shift --control target_pd --contact-mode support_v2 --stability guarded `
+  --initialize-from logs/mimickit-steps/shift-normalization-03/candidate.pt `
+  --source-contract logs/mimickit-steps/shift-normalization-03/contract.json `
+  --envs 2048 --seconds 900 --iterations 1000000 --evaluation-interval 16 `
+  --actor-max-kl .02 --critic-grad-clip 1 --seed 210921 --no-select-viewer `
+  --out logs/mimickit-training/<new-small-shift-pilot>
+```
+
+### Quiet-standing rehearsal and longer motion episodes
+
+The rehearsal configuration uses `--weight-shift-seconds 8` and
+`--weight-shift-quiet-fraction .5`. Half the training worlds practice the original
+standing reference for five seconds, while half practice the motion for eight
+seconds. World groups are fixed, ensuring the requested transition mixture even
+when motion episodes fail more frequently. Each reset samples a new phase within
+its own reference's valid interval. Reset poses, reference observations, phase,
+reward targets, delayed PD targets and timeouts all use that world's reference.
+
+The flags are opt-in; existing Stand/Ball and three-second motion runs retain
+their defaults. Rehearsal TEST mode uses motion only, preserving the existing
+native/GPU comparison. Native selection keeps the eight three-second motion cases
+and three-/five-second standing checks, and adds eight motion cases spanning the
+configured longer horizon. The longer suite has its own phase grid. Selection
+uses `mimic_weight_shift_rehearsal_v1`, prioritizes standing retention and complete
+tracking, then longer-horizon survival before short-horizon survival. Different
+evaluation horizons cannot be compared in the same selection history.
+
+Continuation restores the additive feature architecture from the source export's
+validated normalization lineage before optimizer construction and checkpoint
+loading. It does not replace statistics or expand the observation interface.
+Use the retained checkpoint from the previous 15-minute pilot, rather than its
+regressed final weights or the two-update integration smoke checkpoint:
+
+```powershell
+& $python -m mujoco_rig.mimic.train_stand --mimickit $env:MIMICKIT_PATH `
+  --reference logs/mimickit-steps/weight-shift-small-01/weight_shift_reference.npz `
+  --task weight_shift --control target_pd --contact-mode support_v2 --stability guarded `
+  --initialize-from logs/mimickit-training/small-shift-15min-01/best.pt `
+  --source-contract logs/mimickit-training/small-shift-15min-01/export/contract.json `
+  --weight-shift-seconds 8 --weight-shift-quiet-fraction .5 `
+  --envs 2048 --seconds 900 --iterations 1000000 --evaluation-interval 16 `
+  --actor-max-kl .02 --critic-grad-clip 1 --seed 210921 --no-select-viewer `
+  --out logs/mimickit-training/<new-rehearsal-pilot>
+```
+
+The completed rehearsal run regressed; do not extend that configuration unchanged.
+See `STATUS.md` for its measured result and subsequent diagnostics.
+
+### Precision reward, fixed standing anchor and critic calibration
+
+Three opt-in controls address the observed weak movement incentive and cumulative
+standing-policy drift. Existing Stand, Ball and reference-reward defaults are unchanged.
+
+- `--weight-shift-reward precision_v1` selects `mimic_weight_shift_precision_v1`.
+  Motion reward is 0.5 times the original reward, plus 0.4 times a horizontal
+  position Gaussian (5 mm scale), plus 0.1 times a horizontal velocity Gaussian
+  (0.05 m/s scale). Quiet worlds retain the original reward. Native and CUDA
+  motion evaluation use the same objective. Tracking/survival gates are unchanged.
+- `--quiet-anchor-max-kl .02` protects fixed states from the starting policy's
+  eight five-second standing trajectories. The teacher must pass standing retention.
+  Every actor optimizer step must satisfy both the usual rollout KL bound and
+  the maximum per-state KL against this frozen teacher. Rejection restores weights
+  and optimizer momentum. The state bank, source checkpoint hash and limit are
+  recorded; each new run anchors its explicitly loaded starting policy. This is
+  not a guarantee for states outside the bank, so native retention gates remain.
+- `--critic-calibration-steps 200` samples complete first episodes with the actor
+  and normalization frozen, then fits only the critic. Failures use zero terminal
+  bootstrap; timeouts bootstrap from the initial critic. Every fourth world is
+  reserved for validation, with both tasks represented. Admission requires at
+  least 10% reduction in balanced validation MSE and no task RMSE regression.
+  Failure restores the original critic and stops before actor updates. The best
+  admitted critic is saved; calibration momentum is discarded before PPO.
+
+Precision reward requires mixed rehearsal and explicit critic calibration. Use
+`--calibrate-critic-only` to stop after validation and save `calibrated.pt` without
+PPO or export. Calibration is preparation outside the `--seconds` PPO budget.
+The reward version appears in experiment and evaluation metadata; selection
+rejects comparisons across reward identities. Observation/actuator contracts and
+legacy normalization retain their original meaning.
+
+```powershell
+& $python -m mujoco_rig.mimic.train_stand --mimickit $env:MIMICKIT_PATH `
+  --reference logs/mimickit-steps/weight-shift-small-01/weight_shift_reference.npz `
+  --task weight_shift --control target_pd --contact-mode support_v2 --stability guarded `
+  --initialize-from logs/mimickit-training/small-shift-15min-01/best.pt `
+  --source-contract logs/mimickit-training/small-shift-15min-01/export/contract.json `
+  --weight-shift-seconds 8 --weight-shift-quiet-fraction .5 `
+  --weight-shift-reward precision_v1 --quiet-anchor-max-kl .02 `
+  --critic-calibration-steps 200 --calibrate-critic-only `
+  --envs 2048 --critic-grad-clip 1 --no-select-viewer `
+  --out logs/mimickit-training/<new-precision-calibration>
+```
+
+For an integration smoke run, omit `--calibrate-critic-only` and add
+`--iterations 2 --seconds 120 --evaluation-interval 16`. A longer actor-training
+budget is a separate experiment; neither calibration nor a smoke test establishes
+learned full-motion tracking. Godot selection stays unchanged.
+
+### Backtracking within the standing constraint
+
+The first five-minute precision run stalled: only three of 75 iterations changed
+the actor. `--actor-backtracks 8` enables an opt-in bounded search in guarded PPO.
+Each proposal can try its original learning rate and up to eight halvings. Each
+trial starts from the same pre-proposal weights, gradients and optimizer state;
+momentum/Adam counters never accumulate across rejected trials. The configured
+base learning rate is restored after acceptance or exhaustion.
+
+Acceptance requires the existing rollout KL and fixed standing KL limits, plus
+a decrease in the **same minibatch** PPO actor loss greater than
+`1e-7 * max(1, abs(previous_loss))`. A feasible but uphill or numerically unchanged
+proposal is rejected. This is local surrogate descent, not a behavioral guarantee.
+No bounds are relaxed. The default `--actor-backtracks 0` keeps the original
+single-proposal behavior.
+
+`updates.jsonl` and the final `actor_search_summary` record trial counts, accepted
+backtracked steps, sum of accepted learning-rate fractions, local loss decreases,
+constraint rejections and loss rejections. Acceptance counts alone can conceal
+negligibly small steps, so inspect the fractions and actual native behavior too.
+Add `--actor-backtracks 8 --iterations 16 --seconds 300 --evaluation-interval 16`
+to the precision command above and omit `--calibrate-critic-only` for a bounded
+integration check. Exhausting all trials still stops that actor minibatch loop;
+backtracking cannot guarantee progress for a direction outside the feasible region.
+
+`--actor-project-anchor` adds a second, bounded direction search after ordinary
+backtracking is exhausted. It projects the full optimizer displacement onto the
+linearized constraint at the currently worst protected state, aiming 0.1% inside
+the unchanged KL limit. Every projected trial still checks all protected states,
+rollout KL and actual same-batch loss decrease. A local linear approximation never
+overrides those checks. The optimizer records one gradient update on acceptance;
+its displacement is projected, while rejected trials restore all state.
+
+This option requires a positive fixed anchor and enabled backtracking. It records
+`mimic_actor_anchor_projection_v1`, projected trial counts and accepted projected
+steps. Both direction searches share the configured halving budget separately
+(at most 18 trials with eight backtracks). The default remains disabled. Passing
+these optimizer checks does not establish motion tracking or long-term standing.
+
+The paired `anchor-retention-audit-01` diagnostic confirms that this fixed KL is
+not a calibrated standing-stability metric. On the same 600 protected states,
+unanchored update 16 passes all eight five-second standing cases at maximum KL
+0.404095, while update 32 fails three at 1.583010. The original Stand actor passes
+all eight at 1.787167 relative to the motion teacher. These comparisons do not
+justify a new numeric limit; they show that distance alone does not rank stability.
+
+The quiet reference is finite (5.966786 seconds). Do not obtain a longer standing
+benchmark simply by increasing the standard evaluator's `episode_seconds` beyond
+the reference duration: its phase-grid formula then produces negative starts.
+The audit preserves valid five-second starts and separately labels two 30-second
+stress tests: existing endpoint clamping with increasing phase, and a diagnostic
+final-pose hold with zero reference velocity and phase clamped to one. Neither is
+a trained long-standing contract. Original Stand survives 1/8 and 2/8 respectively;
+the motion teacher and guarded finals survive 0/8. All delayed failures from
+short-suite survivors occur after the clip ends. Establish physically validated,
+explicit continuous-standing reference semantics before using such a long-horizon
+gate to calibrate the safeguard. Current training bounds and viewer bundles remain
+unchanged. See `../STATUS.md` and the audit's `report.json` / `verification.json`.
 
 The first force-aware fits (`force-retarget-04`) remove the backward clip's 64/118
 root-support failures, but 22/117 post-delay frames still fail the current PD

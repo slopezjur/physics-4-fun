@@ -34,6 +34,32 @@ $Mimic = @{
             QuietFraction = 0.25 # Keep undisturbed standing episodes during training.
             BallReward = 'reference' # Opt in per run with -BallReward recovery_v1 until validated.
         }
+        perturb_front_back = @{
+            Task = 'ball'
+            Minutes = 15
+            BallSpeedMin = 1.0
+            BallSpeedMax = 2.0
+            QuietFraction = 0.25
+            BallReward = 'recovery_v1'
+            BallCurriculum = 'front_back_torso_v1'
+            # Review the actual trained candidate; best.pt remains separately retained.
+            ViewerPolicy = 'final'
+            InitializeFrom = 'logs/mimickit-training/perturb-resume-15min-01/best.pt'
+            SourceContract = 'logs/mimickit-training/perturb-resume-15min-01/export/contract.json'
+        }
+        perturb_mixed = @{
+            Task = 'ball'
+            Minutes = 30
+            BallSpeedMin = 1.0
+            BallSpeedMax = 2.0
+            QuietFraction = 0.25
+            BallReward = 'recovery_v1'
+            BallCurriculum = 'mixed_recovery_v1' # 50% focused, 25% broad impacts, 25% quiet.
+            ViewerPolicy = 'final'
+            # Continue the reviewed final candidate, not its unchanged retained best.pt.
+            InitializeFrom = 'logs/mimickit-training/perturb-front-back-15min-01/model.pt'
+            SourceContract = 'logs/mimickit-training/perturb-front-back-15min-01/final-export/contract.json'
+        }
     }
 }
 # Ball mass/radius/friction/contact stiffness come from generated dummy_ball.xml.

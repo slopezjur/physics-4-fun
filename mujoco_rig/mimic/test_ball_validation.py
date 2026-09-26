@@ -89,6 +89,118 @@ class BallValidationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "different suites"):
                 best.consider(save, {**measured, "evaluation_schema": "old"}, iteration=1, samples=1)
 
+    def test_focused_training_keeps_full_validation_and_partial_reset_isolation(self):
+        self.activate()
+        from envs.base_env import EnvMode
+        from .ball_task import BallTask
+        root = Path(__file__).resolve().parent
+        rig = Rig.load(root.parent / "dummy.xml")
+        task = BallTask(rig, root / "assets/stand_reference.npz", 96, "cpu",
+                        curriculum="front_back_torso_v1", reward_mode="recovery_v1")
+        task.set_mode(EnvMode.TRAIN)
+        task.reset()
+        torso = {rig.model.body(n).id - 1 for n in ("Chest", "Spine", "Pelvis")}
+        self.assertEqual(set(task.shot_target_body.tolist()), torso)
+        self.assertTrue(bool((task.directions[:, 0].abs() >= np.cos(np.deg2rad(10))).all()))
+        self.assertTrue(bool((task.directions[:, 0] > 0).any()))
+        self.assertTrue(bool((task.directions[:, 0] < 0).any()))
+        self.assertTrue(bool(task.shot_enabled.any() & ~task.shot_enabled.all()))
+        peer = task.directions[1:].clone()
+        task.steps[1] = 17
+        task.reset(torch.tensor([0]))
+        torch.testing.assert_close(task.directions[1:], peer, rtol=0, atol=0)
+        self.assertEqual(int(task.steps[1]), 17)
+        task.set_mode(EnvMode.TEST)
+        task.reset()
+        self.assertEqual(task.validation_cases, validation_cases(1., 2.))
+        for i, case in enumerate(task.validation_cases):
+            self.assertEqual(int(task.shot_target_body[i]), rig.model.body(case["target_body"]).id - 1)
+            np.testing.assert_allclose(task.directions[i].numpy(),
+                [np.cos(case["direction"] * np.pi / 2), np.sin(case["direction"] * np.pi / 2), 0], atol=2e-7)
+        self.assertEqual(task.experiment_contract()["training_curriculum"]["schema"], "front_back_torso_v1")
+
+    def test_front_back_review_excludes_misses_and_separates_quiet_and_delayed_falls(self):
+        from .review_ball_recovery import review_cases, summarize
+        cases = [dict(c, hit=False, survived=False, recovered=False, survival_seconds=1.)
+                 for c in review_cases(30., 1 / 60)]
+        self.assertEqual(len(cases), 20)
+        self.assertEqual(sum(c["quiet"] for c in cases), 8)
+        self.assertTrue(all(c["trial_steps"] == 1800 for c in cases))
+        cases[0].update(hit=True, survived=True, recovered=True, survival_seconds=30.)
+        cases[1].update(hit=True, survival_seconds=10.)
+        cases[2].update(survived=True, survival_seconds=30.)  # A miss is not recovery.
+        cases[-1].update(survived=True, survival_seconds=30.)
+        summary = summarize(dict(cases=cases))
+        self.assertEqual(summary["confirmed_hits"], 2)
+        self.assertEqual(summary["survived_hits"], 1)
+        self.assertEqual(summary["recovered_hits"], 1)
+        self.assertEqual(summary["delayed_falls_after_5s"], 1)
+        self.assertEqual(summary["quiet_survived"], 1)
+        self.assertEqual(summary["directions"]["forward"]["recovered"], 1)
+        for seconds in (float("nan"), 4.):
+            with self.assertRaises(ValueError):
+                review_cases(seconds, 1 / 60)
+
+    def test_mixed_curriculum_distribution_geometry_and_validation_isolation(self):
+        self.activate()
+        from envs.base_env import EnvMode
+        from .ball_task import BallTask
+        root = Path(__file__).resolve().parent
+        rig = Rig.load(root.parent / "dummy.xml")
+        with self.assertRaisesRegex(ValueError, "25% quiet"):
+            BallTask(rig, root / "assets/stand_reference.npz", 96, "cpu",
+                     curriculum="mixed_recovery_v1", quiet_fraction=.5)
+        task = BallTask(rig, root / "assets/stand_reference.npz", 96, "cpu",
+                        curriculum="mixed_recovery_v1", reward_mode="recovery_v1")
+        task.set_mode(EnvMode.TRAIN)
+        totals = torch.zeros(3)
+        broad_targets = set()
+        torso = {rig.model.body(n).id - 1 for n in ("Chest", "Spine", "Pelvis")}
+        broad_side_shots = 0
+        for _ in range(20):
+            task.reset()
+            focused, broad, quiet = task.focused_shot, task.shot_enabled & ~task.focused_shot, ~task.shot_enabled
+            totals += torch.tensor([focused.sum(), broad.sum(), quiet.sum()])
+            self.assertFalse(bool((focused & quiet).any()))
+            self.assertTrue(set(task.shot_target_body[focused].tolist()) <= torso)
+            self.assertTrue(bool((task.directions[focused, 0].abs() >= np.cos(np.deg2rad(10))).all()))
+            broad_targets.update(task.shot_target_body[broad].tolist())
+            broad_side_shots += int((task.directions[broad, 1].abs() > .8).sum())
+        torch.testing.assert_close(totals / totals.sum(), torch.tensor([.5, .25, .25]), atol=.05, rtol=0)
+        self.assertEqual(broad_targets, set(task.target_indices.tolist()))
+        self.assertGreater(broad_side_shots, 0)
+        peer = torch.stack((task.shot_enabled[1:], task.focused_shot[1:])).clone()
+        task.reset(torch.tensor([0]))
+        torch.testing.assert_close(torch.stack((task.shot_enabled[1:], task.focused_shot[1:])), peer)
+        task.set_mode(EnvMode.TEST)
+        task.reset()
+        self.assertEqual(task.validation_cases, validation_cases(1., 2.))
+        self.assertTrue(bool(task.shot_enabled.all()))
+        self.assertFalse(bool(task.focused_shot.any()))
+        for i, case in enumerate(task.validation_cases):
+            self.assertEqual(int(task.shot_target_body[i]), rig.model.body(case["target_body"]).id - 1)
+            np.testing.assert_allclose(task.directions[i].numpy(),
+                [np.cos(case["direction"] * np.pi / 2), np.sin(case["direction"] * np.pi / 2), 0], atol=2e-7)
+        self.assertEqual(task.experiment_contract()["training_curriculum"]["episode_probabilities"],
+                         dict(focused_torso=.5, all_directions=.25, quiet=.25))
+
+    def test_front_back_review_reset_applies_quiet_and_long_horizon(self):
+        self.activate()
+        from envs.base_env import EnvMode
+        from .ball_task import BallTask
+        from .review_ball_recovery import make_task
+        root = Path(__file__).resolve().parent
+        rig = Rig.load(root.parent / "dummy.xml")
+        contract = BallTask(rig, root / "assets/stand_reference.npz", 8, "cpu").observation_contract()
+        task = make_task(rig, root / "assets", contract, 30., 1., 2.)
+        task.set_mode(EnvMode.TEST)
+        obs, _ = task.reset()
+        torch.testing.assert_close(obs, task.observations())
+        self.assertEqual(task.episode_seconds, 30.)
+        self.assertTrue(bool(task.shot_enabled[:12].all()))
+        self.assertFalse(bool(task.shot_enabled[12:].any()))
+        self.assertAlmostEqual(float(task.offset[-1]), .9)
+
     def test_directional_losses_cannot_be_hidden_by_aggregate_gains(self):
         initial = self.metrics()
         initial["cases"][25].update(survived=True, recovered=True)  # Backward chest.

@@ -58,18 +58,33 @@ def _write(state, root):
     return state
 
 
-def select_run(run, root=ROOT):
+def select_run(run, root=ROOT, *, policy="best"):
     run, root = Path(run).resolve(), Path(root).resolve()
     report = json.loads((run / "report.json").read_text(encoding="utf-8"))
-    error = report["onnx_max_action_error"]
+    if policy not in ("best", "final"):
+        raise ValueError(f"Unknown viewer policy: {policy}")
+    if policy == "final":
+        final = report.get("final_review_export")
+        if not final or final.get("checkpoint") != "model.pt" or final.get("bundle") != "final-export":
+            raise ValueError("Run has no final candidate export")
+        error = final["onnx_max_action_error"]
+        bundle = run / "final-export"
+        checkpoint, expected_hash = "model.pt", final["checkpoint_sha256"]
+    else:
+        error = report["onnx_max_action_error"]
+        bundle = run / "export"
+        checkpoint = report["export_source"]
+        if checkpoint != "best.pt":
+            raise ValueError("Run has no retained best checkpoint")
+        expected_hash = report["selected_checkpoint"]["checkpoint_sha256"]
     if not math.isfinite(error) or not 0 <= error <= 1e-5:
         raise ValueError("Run has no valid ONNX export check")
-    bundle = run / "export"
     task = _validate_bundle(bundle)
     if task != report["experiment"]["task"]:
         raise ValueError("Run/export task mismatch")
-    checkpoint = report["export_source"]
-    if checkpoint != "best.pt" or sha256(run / checkpoint) != report["selected_checkpoint"]["checkpoint_sha256"]:
+    if policy == "final" and task != "ball":
+        raise ValueError("Final-candidate review is limited to ball experiments")
+    if sha256(run / checkpoint) != expected_hash:
         raise ValueError("Run's selected checkpoint does not match its report")
     value = "res://" + bundle.relative_to(root).as_posix() if bundle.is_relative_to(root) else bundle.as_posix()
     previous = read_selection(task, root)
@@ -93,5 +108,6 @@ if __name__ == "__main__":
     operation = parser.add_mutually_exclusive_group(required=True)
     operation.add_argument("--run", type=Path)
     operation.add_argument("--rollback", choices=("stand", "ball"))
+    parser.add_argument("--policy", choices=("best", "final"), default="best")
     args = parser.parse_args()
-    print(json.dumps(select_run(args.run) if args.run else rollback(args.rollback), indent=2))
+    print(json.dumps(select_run(args.run, policy=args.policy) if args.run else rollback(args.rollback), indent=2))

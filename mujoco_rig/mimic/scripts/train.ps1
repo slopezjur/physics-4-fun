@@ -7,6 +7,10 @@ param(
     [int] $EvaluationInterval = 0,
     [ValidateSet('reference', 'recovery_v1')]
     [string] $BallReward = '',
+    [ValidateSet('all_directions', 'front_back_torso_v1', 'mixed_recovery_v1')]
+    [string] $BallCurriculum = '',
+    [ValidateSet('best', 'final')]
+    [string] $ViewerPolicy = '',
     [ValidateSet('torque', 'target_pd')]
     [string] $Control = '',
     [ValidateSet('legacy', 'support_v2')]
@@ -43,7 +47,7 @@ $preset = $settings.Experiments[$Experiment]
 if ($preset.Task -eq 'ball' -and ($Control -ne 'target_pd' -or $Stability -ne 'guarded')) {
     throw 'The ball Perturb experiment requires -Control target_pd and -Stability guarded.'
 }
-if ($Minutes -eq 0) { $Minutes = $settings.Minutes }
+if ($Minutes -eq 0) { $Minutes = if ($preset.Minutes) { $preset.Minutes } else { $settings.Minutes } }
 if ($Envs -eq 0) { $Envs = $settings.Envs }
 if ($Iterations -eq 0) { $Iterations = $settings.Iterations }
 if ($EvaluationInterval -eq 0) { $EvaluationInterval = $settings.EvaluationInterval }
@@ -53,8 +57,10 @@ if ([bool]$InitFrom -ne [bool]$SourceContract) { throw 'Specify both -InitFrom a
 # Guarded fine-tuning needs a source checkpoint. Preserve the configured warm start by default;
 # upstream mode may intentionally start fresh when no explicit source is supplied.
 if (-not $InitFrom -and $Stability -eq 'guarded') {
-    $InitFrom = $settings.InitializeFrom; $SourceContract = $settings.SourceContract
+    $InitFrom = if ($preset.InitializeFrom) { $preset.InitializeFrom } else { $settings.InitializeFrom }
+    $SourceContract = if ($preset.SourceContract) { $preset.SourceContract } else { $settings.SourceContract }
 }
+if (-not $ViewerPolicy) { $ViewerPolicy = if ($preset.ViewerPolicy) { $preset.ViewerPolicy } else { 'best' } }
 $python = Require-MimicPath $settings.Python
 $checkout = Require-MimicPath $settings.MimicKit
 if (-not $Out) {
@@ -66,6 +72,7 @@ $arguments = @('-u', '-X', 'faulthandler', '-m', 'mujoco_rig.mimic.train_stand',
     '--mimickit', $checkout, '--control', $Control, '--contact-mode', $ContactMode, '--stability', $Stability, '--task', $preset.Task,
     '--out', $destination, '--seconds', (Format-MimicNumber ($Minutes * 60)), '--envs', "$Envs",
     '--iterations', "$Iterations", '--seed', "$($settings.Seed)",
+    '--viewer-policy', $ViewerPolicy,
     '--evaluation-interval', "$EvaluationInterval", '--actor-max-kl', (Format-MimicNumber $settings.ActorMaxKl))
 if ($InitFrom) {
     $arguments += @('--initialize-from', (Require-MimicPath $InitFrom),
@@ -75,11 +82,12 @@ if ($NoSelectViewer) { $arguments += '--no-select-viewer' }
 if ($preset.Task -eq 'ball') {
     if (-not $BallReward) { $BallReward = $preset.BallReward }
     if (-not $BallReward) { $BallReward = 'reference' }
+    if (-not $BallCurriculum) { $BallCurriculum = if ($preset.BallCurriculum) { $preset.BallCurriculum } else { 'all_directions' } }
     $arguments += @('--ball-speed-min', (Format-MimicNumber $preset.BallSpeedMin),
         '--ball-speed-max', (Format-MimicNumber $preset.BallSpeedMax), '--quiet-fraction', (Format-MimicNumber $preset.QuietFraction),
-        '--ball-reward', $BallReward)
-} elseif ($BallReward) {
-    throw '-BallReward only applies to ball Perturb experiments.'
+        '--ball-reward', $BallReward, '--ball-curriculum', $BallCurriculum)
+} elseif ($BallReward -or $BallCurriculum -or $ViewerPolicy -ne 'best') {
+    throw '-BallReward, -BallCurriculum and final viewer policy only apply to ball Perturb experiments.'
 }
 if ($DryRun) { @{ executable = $python; arguments = $arguments } | ConvertTo-Json -Depth 4; return }
 New-Item -ItemType Directory -Path (Split-Path $destination -Parent) -Force | Out-Null

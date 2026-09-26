@@ -2,6 +2,8 @@ param(
     [string] $Config = "$PSScriptRoot/config.ps1",
     [string] $Experiment = '',
     [string] $Run = '',
+    [ValidateSet('best', 'final')]
+    [string] $Policy = 'best',
     [double] $BallSpeed = 0,
     [switch] $DryRun
 )
@@ -13,7 +15,8 @@ if (-not $settings.Experiments.ContainsKey($Experiment)) { throw "Unknown experi
 $preset = $settings.Experiments[$Experiment]
 $task = $preset.Task
 if ($Run) {
-    $bundle = Require-MimicPath (Join-Path (Resolve-MimicPath $Run) 'export')
+    $exportDirectory = if ($Policy -eq 'final') { 'final-export' } else { 'export' }
+    $bundle = Require-MimicPath (Join-Path (Resolve-MimicPath $Run) $exportDirectory)
     # Older Stand exports predate experiment.json. Validate the bundle contract first, then
     # conservatively treat a missing experiment manifest as a Stand policy.
     $task = 'stand'
@@ -39,6 +42,11 @@ if ($Run) {
         $bundle = Require-MimicPath $selectedPath
     } else {
         $bundle = Require-MimicPath $settings.WatchBundle
+    }
+    $metadataPath = Join-Path $bundle 'experiment.json'
+    if ($task -eq 'ball' -and $BallSpeed -eq 0 -and (Test-Path -LiteralPath $metadataPath)) {
+        $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+        $BallSpeed = $metadata.horizontal_speed_max
     }
 }
 if ($task -notin @('stand', 'ball')) { throw "Unsupported exported task: $task" }

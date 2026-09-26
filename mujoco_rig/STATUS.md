@@ -1,5 +1,1572 @@
 # MuJoCo track — status
 
+## 2026-09-25: Isolated one-leg PPO pilot did not improve retention
+
+`mimic/train_single_support.py` trained a diagnostic right-leg-support policy
+from the retained Stand checkpoint on the physically valid 8 s pose. In three
+minutes on the GPU it completed 72 PPO iterations and 2,359,296 transitions.
+The selected checkpoint retained all eight native quiet-standing phases, but
+the native one-leg hold remained at its starting 0.93 s and failed the 3 s
+gate at every evaluation. No checkpoint was exported or selected in Godot.
+Evidence: `logs/mimickit-steps/single-support-train-3min-01/report.json`.
+
+A separate one-minute update audit completed 24 iterations and 786,432
+transitions. The PPO guard accepted 335 actor steps and rejected 17; the
+one-leg hold still remained at 0.93 s. Thus the guard did not completely
+prevent actor updates, and the current static-pose reward/task did not produce
+measurable retention. This single-seed result does not identify whether the
+remaining failure is exploration, credit assignment, or control authority.
+Evidence: `logs/mimickit-steps/single-support-update-audit-1min-01/report.json`.
+
+Do not extend this pilot or resume Perturb PPO unchanged. The next distinct
+experiment should establish a native closed-loop weight-transfer entry into
+the valid one-leg pose, with measured support loads and fall timing, before
+training swing/landing or promoting a ball-hit policy.
+
+## 2026-09-25: One-leg support is physically feasible but unlearned
+
+`mimic/probe_single_support.py` isolated three static poses from the checked
+forward placed-step motion. Poses at 7, 8 and 9 s all pass the full applicable
+static physical checks; the 8 and 9 s poses specify right-leg support with
+the left foot unloaded. Each was then held for a three-second native episode.
+Reference PD survived 1.42/1.55/2.05 s, the frozen Stand actor
+0.90/0.93/1.07 s, and observation-COM feedback 0.95/1.00/1.23 s. None
+passed upright, slow, correctly loaded retention. The one-leg gate explicitly
+requires the swing foot to remain unloaded and a final continuous 0.5 s
+settled window, so planting both feet cannot
+masquerade as success. Evidence:
+`logs/mimickit-steps/single-support-holds-03/report.json`.
+
+This identified a separate right-leg support target. The isolated PPO pilot
+above did not learn the three-second hold. There is no basis yet for more
+Perturb PPO or for promoting a step policy to Godot.
+
+## 2026-09-25: Retimed step is blocked at weight transfer before swing
+
+`mimic/short_step.py` built a fixed timing bracket from the previously
+physically checked 15 cm forward placed-step poses. Each candidate retained a
+0.25 s starting hold, recomputed pose velocities and contact timing, and
+reran the full physical checks. Motion durations of 2, 4, 6 and 8 s failed
+root-wrench and/or action feasibility. At 10 and 12 s root support passed but
+the delayed target-PD action feasibility still failed. Only the 14 s motion
+passed all applicable single-step physical gates. A separate sparse-knot
+cubic version at 2 and 4 s made floor/stance and support feasibility worse.
+These are diagnostic candidates, not admitted training motions. Evidence:
+`logs/mimickit-steps/short-step-forward-{2,4,6,8,10,12,14}s-01/report.json`
+and `short-step-forward-sparse-{2,4}s-01/report.json`.
+
+`mimic/evaluate_short_step.py` tested the offline-passing 14 s candidate in
+native MuJoCo with reference PD, the frozen Stand actor and observation-COM
+feedback. They fell at 1.87, 2.25 and 2.62 s respectively. Swing starts at
+3.98 s; none reached it, let alone planted the foot. The bottleneck is the
+preceding single-leg weight transfer and its closed-loop control. Evidence:
+`logs/mimickit-steps/short-step-forward-14s-native-02/report.json`.
+
+Retiming the old 22-second clip cannot supply a ball-hit reflex. The next
+implementation should train/validate a separate controlled weight-transfer
+task and then build a new short swing-and-landing motion from states that
+actually survive that transfer. Do not use these candidate references to
+train Perturb or change the selected Godot bundle.
+
+## 2026-09-25: Ball-hit step probe exposes a missing landing controller
+
+The original-reference eight-shot 33-second suite compared the 1.5/1.5 COM
+feedback baseline with three fixed ankle/hip variants. All feedback variants
+recovered the same 4/8 confirmed hits, passed the eight-phase short quiet
+gate, and moved a foot at most about 2 cm in successful trials. Increasing
+feedback gains, adding paired hip pitch, or widening its correction did not
+create a recovery step. Evidence:
+`logs/mimickit-steps/com-ball-original-reflex-sweep-01/report.json`.
+
+`mimic/capture_step_reflex.py` is a native-only diagnostic that triggers when
+the observation-derived COM capture point leaves the planted-foot region and
+commands a bounded single-foot swing using the physical foot Jacobian. A
+corrected 10 cm step request triggered on the four cases the balance teacher
+failed. Three attempts lifted the foot around 5–6 cm; none achieved a loaded
+landing at least 5 cm away, and recovery remained 4/8. Swing-joint action
+targets saturated in 88–94% of step samples. A separate diagnostic doubled
+the step target envelope to 0.5 rad while scaling the frozen actor actions so
+their original joint targets remained unchanged. Saturation fell to 78–83%,
+but it still placed no foot and recovered the same 4/8. One trigger occurred
+at 3.05 s, leaving less than a second before collapse; others occurred near
+2.3–2.4 s. Evidence:
+`logs/mimickit-steps/com-ball-original-capture-step-03/report.json` and
+`logs/mimickit-steps/com-ball-original-capture-step-wide-01/report.json`.
+
+This is a failed stepping gate, not a new policy. The 22-second placed-step
+reference is also not native-trackable by the retained Stand actor, so it is
+not a valid ballistic reflex demonstration. Next, build and validate a short
+weight-transfer, swing and supported-landing task as a separate capability,
+with an explicit versioned action contract if a wider range is required.
+Only then train a step expert or distill it into a policy and test untouched
+ball directions/speeds. Do not promote these diagnostics to Godot or run
+longer Perturb PPO from them.
+
+## 2026-09-25: Original-reference COM teacher works; mixed imitation is not ready
+
+On the original standing reference and the same eight confirmed physical hits,
+both native-state and observation-derived COM feedback teachers recovered 4/8;
+the frozen actor and earlier pre-lift-only residual recovered 0/8. The two
+teachers agreed on which cases survived the full 33-second window. This
+isolates the problem to transferring feedback behavior into a learned policy,
+not to missing COM information or an incapable joint layout. Evidence:
+`logs/mimickit-steps/com-ball-original-teacher-33s-01/report.json`.
+
+`mimic/distill_mixed_com.py` ran one bounded supervised pilot with the frozen
+Stand actor, pre-lift support pulses, quiet standing, and eight original-reference
+ball demonstrations. Those training shots differ in angle, speed, launch time,
+target body and reference phase from the eight fixed evaluation shots. Six of
+the eight teacher demonstration shots survived eight seconds; this is not a
+recovery gate. The artifact is versioned and remains experimental. On the
+untouched original-reference 33-second ball suite, it recovered 0/8 confirmed
+hits, while preserving 8/8 three-second quiet standing and a 33-second
+pre-lift no-ball hold. On the pre-lift ball suite it retained 3/8 recoveries,
+the same count as the earlier residual. Three of its original-reference ball
+falls happened after five seconds;
+delaying a fall is not recovery. Evidence:
+`logs/mimickit-steps/com-residual-mixed-01/report.json` and
+`logs/mimickit-steps/com-residual-mixed-ball-{original,support}-01/report.json`.
+
+Do not select this artifact or run longer Perturb training from it. The next
+task is a closed-loop feedback or stepping controller that survives the full
+original-reference test, followed by imitation/PPO only after its teacher
+behavior survives the target physical cases. Ankle feedback alone did not
+show a deliberate recovery step.
+
+## 2026-09-25: Physical balls expose reference-specific recovery, not Perturb readiness
+
+`mimic/evaluate_com_ball.py` compares the unchanged support-entry actor with
+the isolated COM residual using the same eight deterministic ballistic launch
+settings: front, back and two diagonals at 1.5/2.0 m/s, 8 kg and 9 cm radius.
+All shots made confirmed character contact. Each case ran to 33 s, leaving
+more than 30 s after impact; recovery additionally requires a final continuous
+0.5 s upright, slow, two-foot-supported window. The original eight-phase
+three-second quiet-standing gate passed for both controllers.
+
+On the pre-lift support-entry reference, the source actor recovered 0/8 while
+the residual recovered 3/8. The recovered cases had measured normal contact
+impulses of 26.7–41.2 N·s and survived 30.7 s after impact, but their maximum
+foot displacement was only 3.6–6.9 mm: they do not demonstrate a recovery
+step. The residual also held the same reference for 33 s without a ball,
+whereas the source actor fell at 7.067 s. Evidence:
+`logs/mimickit-steps/com-residual-ball-33s-02/report.json`.
+
+On the original standing reference used by Perturb, the same residual and
+source actor each recovered 0/8 confirmed hits; all falls occurred within
+4.6 s. Evidence: `com-residual-ball-original-33s-01/report.json`. Both stress
+tests clamp policy phase at the reference endpoint, matching residual training
+but differing from the current Godot long-run phase behavior. This establishes
+a reference-transfer failure, not general ball recovery. Do not export/select
+the residual or launch longer Perturb training from it. The next substantive
+work is a reference-aware balance and stepping training task with mixed quiet,
+physical-hit and pre-lift states, followed by untouched long-horizon tests.
+
+## 2026-09-25: COM parity passes; isolated learned residual passes first gate
+
+`mimic/godot_com_parity.py` reset the Godot bridge and native MuJoCo to 24
+matching pre-lift pose/velocity fixtures, including ±4 cm root shifts. Maximum
+Godot-versus-native COM X and velocity errors were 5.08e-9 m and 2.32e-10
+m/s. The observation-derived COM errors were smaller than 3.13e-9 m and
+1.17e-11 m/s. Evidence: `logs/mimickit-steps/godot-com-parity-01/report.json`.
+This validates reset-state sensing in the character-only model, not a live
+Godot controller or the projectile world.
+
+`mimic/distill_com_feedback.py` then trained a small ankle-action residual
+from the observation-driven teacher while keeping the source Stand actor
+frozen. Teacher demonstrations used ±80/160 N pelvis pushes at 2 s on static
+and transition references; the eight held-out cases used ±120 N at 1.75/2.25
+s. The first pilot passed 8/8 held-out pushes but only 7/8 original quiet
+standing phases, so it failed selection. One bounded revision increased quiet
+rehearsal weight and limited residual magnitude to 0.2. That revision passed
+8/8 held-out 12-second settled-root gates and 8/8 three-second quiet phases.
+Evidence: `logs/mimickit-steps/com-residual-distill-{01,02}/report.json`.
+The second pilot's artifact is experimental and hash-bound to its source
+checkpoint and observation contract. This is one training seed, one pre-lift
+reference, and a narrow force/timing interpolation. It does not establish
+ball recovery, stepping, long-term standing, or general game readiness. No
+ONNX export, Godot policy selection, or live scene behavior changed. Expand
+the disturbance and reference test matrix before considering promotion.
+
+## 2026-09-25: Existing support-v2 observations reconstruct native COM
+
+`mimic/observation_com.py` defines the versioned
+`mimic_com_from_stand_observation_v1` derived-state contract. It reconstructs
+whole-body COM X and velocity from the existing 362-input support-v2 root and
+hinge pose/velocity channels plus the fixed, hash-checked rig. It does not
+reinterpret checkpoints or append actor inputs. A nonzero-rotation/velocity
+unit fixture matches native MuJoCo; in 12 native pulse evaluations, maximum
+position and velocity discrepancies were 2.97e-8 m and 6.49e-8 m/s.
+
+The retained actor, native-oracle teacher and observation-driven teacher were
+compared on four previously untested cases: ±120 N pelvis pulses for 0.12 s
+at 2 s during static and entry/terminal-pose 12-second holds. The actor passed
+0/4 settled-root gates; both teacher forms passed 4/4. Their final root X
+positions differed by at most 6e-9 m. Evidence:
+`logs/mimickit-steps/com-observation-validation-01/report.json`.
+This validates the feedback signal and the native controller on these four
+force pulses. It does not yet validate Godot parity, stepping, ball impacts,
+or a learned actor. The next experiment should check the same derived state
+against the Godot bridge and then use separate training and held-out forces
+for a bounded actor-distillation pilot. No export or viewer selection changed.
+
+## 2026-09-25: Native COM feedback stabilizes the isolated pre-lift hold
+
+`mimic/probe_com_authority.py` first measured paired ankle-pitch authority on
+the unchanged native plant. A ±0.25 normalized residual changed COM X at
+0.5 s from the zero-residual 0.061 m to 0.106/0.016 m, with opposite velocity
+responses (`logs/mimickit-steps/com-authority-02.json`). The bounded
+`mimic/com_feedback_teacher.py` then added reference-relative whole-body COM
+position and velocity feedback to the retained actor without changing its
+weights. The actor alone fell at 7.067 s on the 12-second transition/terminal
+pose hold. All four feedback variants survived 12.001 s and passed the
+settled-root gate; the smallest tested gains (1.5/1.5) needed a peak 0.113
+normalized ankle correction. Its static 12-second hold also passed, and quiet
+standing stayed 8/8 over three seconds. Evidence:
+`logs/mimickit-steps/com-teacher-feasibility-01/report.json` and
+`com-teacher-gates-01/report.json`.
+
+This is a native oracle using MuJoCo subtree COM/velocity, tested on one
+pre-lift transition and the existing quiet phases. It is a viable teacher
+behavior, not yet an actor trained to balance, a Godot-compatible observation,
+or evidence of stepping or impact recovery. No checkpoint was trained,
+exported or selected for Godot. Next derive and validate equivalent COM state
+from policy-observable signals under a versioned contract, test independent
+support shifts, and only then distill feedback into the actor.
+
+## 2026-09-25: Support critic cannot yet supply reliable delayed-fall credit
+
+`mimic/audit_support_critic.py` compares the trained value head with exact
+discounted return to failure on one deterministic native entry trajectory.
+The retained actor falls at 7.067 s under the 12-second terminal-pose hold.
+Its critic underpredicts realized return by 24.44 on average at ages 2–4 s,
+then overpredicts near the delayed fall: at 6 s it predicts 57.3 versus 26.6
+realized discounted reward. On this trajectory TD-λ advantages are positive
+at 3–4 s (+5.23 and +8.48) during the swing and negative at 6 s (-8.92),
+when the imminent fall is difficult to avert. With γ=0.99, λ=0.95 and the
+control timestep, direct reward contributions have a 0.272 s e-folding
+time; long-delayed credit relies on the critic. This is one deterministic
+path, not a measured stochastic PPO batch or proof of causal failure.
+Evidence: `logs/mimickit-steps/support-critic-audit-02.json`.
+
+`mimic/probe_support_calibration.py` then fitted only the critic on 256 GPU
+worlds with separate validation worlds in both quiet and support groups.
+The group RMSE improved quiet 6.424 -> 5.635 and support 12.886 -> 12.434;
+the existing balanced gate passed and actor fingerprints stayed unchanged.
+However, the same critical native path's 2–4 s RMSE worsened 24.581 -> 25.909,
+and the actor still fell at 7.067 s. Evidence:
+`support-critic-calibration-01/critic_calibration.json` and
+`support-critic-audit-calibrated-01.json`. The calibrated checkpoint is an
+isolated diagnostic. It was not used for actor training, exported or selected
+in Godot. Aggregate critic calibration is insufficient here; any next
+value-learning probe must validate the late support/fall window separately
+before it can justify another actor update.
+
+## 2026-09-25: Quiet rehearsal works; support-entry PPO still regresses
+
+`mimic/support_rehearsal_task.py` assigns fixed GPU worlds to original quiet
+standing and a 12-second entry/terminal-pose hold. The support tracking reward
+applies only to entry worlds; quiet worlds retain their original reference
+reward. The actor still uses the support-v2 362-input contract. Native
+checkpoint review now includes quiet standing, six-second static hold,
+six-second entry and a 12-second terminal-phase hold. Checkpoint selection
+requires quiet retention before considering support metrics, and neither
+training nor evaluation changes the Godot selection.
+
+Two 128-world, 45-second integration controls kept quiet standing at 8/8 but
+failed to improve support: the tracking-reward final held 4.850 s and the
+original-reward final held 4.117 s, versus 7.067 s for the starting actor.
+The training rewards were checked separately: quiet worlds receive identical
+rewards, while a 14 cm root offset changes the support reward by about 0.186.
+Evidence: `logs/mimickit-steps/support-rehearsal-{smoke,reference-smoke}-01`.
+
+The full 2,048-world, 304.688-second tracking/rehearsal pilot completed 60
+updates and 3,932,160 transitions. Quiet standing remained 8/8, but entry
+survival fell from 6.000 to 2.567 s, static hold from 6.000 to 3.867 s, and
+the 12-second hold from 7.067 to 2.567 s. No periodic checkpoint improved
+the starting actor under the native gate; `best.pt` remains iteration zero.
+Evidence: `support-rehearsal-5min-01/{report.json,best.json}`. The mixed
+rehearsal prevents the observed quiet regression but does not produce a stable
+support transition. No further same-method PPO run, export or Godot promotion
+is warranted. Next inspect the policy-update/critic signal for this support
+task or use a controller that explicitly regulates COM and support before
+returning to a full placed step.
+
+## 2026-09-25: Support-entry failure is an undamped fore-aft oscillation
+
+`mimic/audit_support_entry.py` compares the source, static-stage, retained
+entry-stage and final actors on the identical native six-second transition.
+The retained entry actor keeps both feet planted and loaded at sampled times;
+there is no motor saturation. Its root X error moves from +0.072 m at 1.5 s
+to -0.067 m at 3 s and +0.137 m at 6 s, while forward root speed is still
+0.119 m/s. COM likewise moves past the front of the planted feet. A separate
+12-second native hold freezes the terminal reference and phase after six
+seconds; the actor falls at 7.067 s. Six-second survival was a delayed-fall
+artifact, not settled support. Evidence: `logs/mimickit-steps/support-entry-audit-02/report.json`
+and `support-entry-retention-12s-01/report.json`.
+
+The inherited DeepMimic reward has only 0.15 root-pose weight with a 0.25
+squared-error scale and 0.10 root-velocity weight with a 0.01 scale. At the
+observed 0.137 m horizontal error, the root-position term loses only about
+0.0007 reward per step; at 0.119 m/s, the velocity term loses about 0.000014.
+This is a plausible contributor to weak damping, not proof that reward alone
+causes it. A versioned support-only position/velocity reward was therefore
+tested from the retained checkpoint in a bounded 128-world, 53.641-second
+smoke run. After 16 updates / 65,536 transitions, quiet standing regressed
+8/8 -> 7/8 and entry endpoint error increased 0.136 -> 0.245 m. The quiet-first
+selector retained the unchanged iteration-zero actor. Evidence:
+`support-tracking-smoke-01/report.json`. No longer run, export or Godot
+selection followed. The next controller experiment needs explicit quiet
+rehearsal and a longer settled-support gate, rather than a stronger reward
+applied to entry-only PPO.
+
+## 2026-09-24: Isolated pre-lift support control learns a pose, not yet its entry
+
+`mimic/support_transition.py` derives two six-second references from the
+physically checked forward placed-step diagnostic: a static target at source
+time 3.5 s and a slow 3.25-to-3.5 s entry followed by a hold. The isolated
+`train_support_transition.py` pilot keeps six-second GPU episodes connected
+across native reviews and retains the support-v2 observation/action contract.
+Its gate requires quiet standing plus six-second native static and entry
+survival, final-two-second pelvis height >=0.75 m, horizontal speed <=0.2 m/s
+and final root error <=0.05 m. No policy is exported or selected for Godot.
+
+The 2,048-world static-pose stage ran 303.281 training seconds, 80 updates and
+5,242,880 transitions. Native static survival improved 1.933 -> 6.000 s, but
+final root error was 0.0535 m, just above the gate. Entry survival improved
+2.500 -> 4.267 s but still ended in a fall. Original quiet standing passed
+throughout. Evidence: `logs/mimickit-steps/support-transition-5min-01/report.json`.
+This supports a learnable local support pose, not a validated transition,
+placed step or Perturb recovery.
+
+The entry-targeted 2,048-world continuation from that static checkpoint ran
+301.157 training seconds, 70 updates and 4,587,520 transitions. Its retained
+update-32 checkpoint survived six seconds in both native cases and passed
+8/8 original quiet standing. Static hold passed the full gate (final root
+error 0.0471 m); entry did not (0.1357 m final root error despite six-second
+survival). Later updates regressed, and the final actor fell at 4.984 s on
+static hold and 2.817 s on entry. The update-32 `best.pt` is retained only as
+an isolated partial candidate; neither it nor final weights were exported or
+selected in Godot. Evidence:
+`logs/mimickit-steps/support-entry-5min-01/{report.json,best.json}`.
+Further identical PPO updates are not justified by this unstable tracking.
+Next measure the entry's root/support trajectory and action behavior, then
+adjust the task/control objective only if that diagnosis identifies a cause.
+
+## 2026-09-24: Pre-lift failure localizes to the support transition
+
+`mimic/audit_prelift.py` reproduces eight native interventions on the same
+forward placed-step reference and Stand v2 actor. The original controller falls
+at 4.667 seconds. Freezing the reference at 3.25 seconds lets it survive the
+six-second window; freezing at 3.5 seconds still falls at 4.984 seconds. A
+static reset into the 3.25-second target survives six seconds, while a reset
+into the 3.5-second target falls at 1.933 seconds. Rescaling only the phase
+input gives 4.634 seconds, disabling body/body collision gives the unchanged
+4.667 seconds, and doubling target-PD gain worsens survival to 1.450 seconds.
+The earlier substep trace has no body/body contact during the 3.25–4.0-second
+reversal and negligible motor saturation. Reference-only PD drifts forward and
+falls at 1.850 seconds even before the shift. This localizes a missing
+stabilizing support transition; it does not establish a broken skeleton,
+mapper or insufficient actuator capacity. Evidence:
+`logs/mimickit-steps/prelift-audit-01/report.json` and
+`placed-step-forward-native-01/report.json`.
+
+The AMP task previously lacked a pre-lift center-of-mass transfer objective
+and penalized horizontal speed throughout the shift. It now rewards the
+reference COM path and applies settling only after landing; a native-state
+check confirms the target support state scores above the unshifted state at
+seven seconds. The matched 2,048-world 180.562-second pilot completed 19
+updates / 1,245,184 transitions. It retained 8/8 quiet standing but full-step
+survival changed only 4.667 -> 4.700 seconds, still before foot lift, with the
+foot moving backward. Evidence:
+`logs/mimickit-steps/amp-step-transfer-reward-01/report.json`.
+No AMP policy was exported or selected in Godot. More of this same training is
+not supported by the native results. The next skill gate is a stabilizing
+3.25-to-3.5-second support transition with sustained native standing before
+returning to full-step or impact training.
+
+## 2026-09-24: AMP step adapter works; first native pilot does not learn the step
+
+`mimic/amp_step.py` now supplies MimicKit's AMP agent with a versioned pair of
+native dummy states at the control timestep. Its features exclude contact labels,
+world translation and the future task reference. The actor keeps the existing
+362-observation support-v2 target-PD contract; the discriminator is used only
+during training. Demonstrations are validated CC-BY-4.0 100STYLE standing and
+forward/back stepping references plus the two physically checked procedural
+placed steps. The step task scores upright survival, left-foot placement and
+right-foot support; AMP scores whole-body motion. Source Stand actor, critic and
+normalizer weights transfer unchanged into the new AMP agent.
+
+An initial 128-world integration smoke test completed five updates without
+nonfinite values and retained 8/8 quiet standing, but did not improve the step.
+After separating the task objective from full-body imitation and initializing
+the new discriminator output near zero, a bounded 2,048-world RTX 4080 SUPER
+pilot ran 180.875 seconds, 19 updates and 1,245,184 transitions. It retained
+the inherited three-second training episode, which made it an incomplete
+step-curriculum check: native full-step survival stayed 4.667 -> 4.667 seconds.
+The corrected eight-second connected-episode pilot ran 189.578 seconds,
+21 updates and 1,376,256 transitions. Native full-step survival rose only
+4.667 -> 4.717 seconds, still before the planned 7-second foot lift; the left
+foot moved about 7 cm backward and no placement occurred. Quiet standing
+remained 8/8. At the last update all sampled demonstrations had negative
+discriminator logits, although their mean logit (-0.297) exceeded the agent
+mean (-1.51). The discriminator retains a relative motion signal but has not
+produced a step. Reports under `logs/mimickit-steps`:
+`amp-step-smoke-01`, `amp-step-pilot-01`, and `amp-step-connected-01`.
+These are one-seed pilots, not a learned step. No AMP policy was exported or
+selected in Godot.
+
+Next investigate discriminator/demo distribution and the 4.67-second pre-lift
+fall with fixed native cases. Another long AMP or Perturb run on this setup has
+no measured basis yet. Keep the current Godot selection unchanged.
+
+## 2026-09-24: Single placed-step references pass offline; learned control remains blocked
+
+`mimic/placed_step.py` constructs one left-foot placement from the existing CC-BY-4.0
+standing pose, audited 15 cm static step endpoint and calibrated support-transfer
+knots. Forward and backward 22-second references each move the foot 15 cm, lift it
+about 6 cm, leave the right support foot planted, and pass joint, contact,
+penetration, root-support and delayed target-PD feasibility checks. The common
+walking validator's `foot_lift` check is false by design because only one foot
+should lift; the new single-step gate requires left-foot lift and placement.
+These are necessary offline checks, not a dynamically tracked recovery step or
+human motion example. Evidence:
+`logs/mimickit-steps/placed-step-{forward,backward}-09/report.json`.
+
+Native closed-loop tests of the unchanged Stand v2 actor pass 8/8 original quiet
+standing cases. On either complete placed-step reference the actor falls at
+4.667 seconds, during the weight shift; planned foot lift begins at 7 seconds.
+Reference-only PD falls at 1.850 seconds. No controller places the foot.
+Evidence: `placed-step-forward-native-01` and `placed-step-backward-native-01`
+under `logs/mimickit-steps`.
+
+An isolated guarded PPO pilot on the forward reference used 2,048 CUDA worlds,
+306.891 training seconds, 27 updates and 1,769,472 transitions. A bounded critic
+gradient was required: the first unrestricted transferred-critic update produced
+NaN weights despite finite observations and rewards. The bounded run kept quiet
+standing, but complete-trial survival changed only 4.667 -> 4.700 seconds;
+no foot placement or settled finish was learned. The update-16 native review was
+also 4.684 seconds. A second bounded pilot gave longer connected eight-second
+episodes starting at rest, weight shift or toe-off. It completed 302.250 seconds,
+39 updates and 2,555,904 transitions; native full-step survival rose only
+4.667 -> 4.784 seconds. Quiet standing stayed 8/8, but the left foot moved
+backward and no foot placement or settled finish was learned. Native checkpoint
+reviews at updates 16 and 32 also failed before lift. These two one-seed pilots
+do not justify extending the same PPO imitation setup. The motion remains an
+isolated diagnostic; no policy was exported or selected for Godot. Evidence:
+`placed-step-forward-pilot-01/report.json` and
+`placed-step-forward-staged-01/report.json`.
+
+Next: integrate a step-capable motion prior with a task objective, using
+commercial-compatible clips and the existing dummy-native MuJoCo/Newton plant.
+MimicKit's AMP task agent is the concrete reference; the current custom trainer
+does not expose its discriminator or motion-demo interface. Require a complete
+native placed step plus quiet retention before adding impacts or promoting a
+policy. The current Godot Perturb selection remains the user's manual choice in
+`logs/mimickit-viewer/ball.json`.
+
+## 2026-09-24: Mixed 30-minute Perturb continuation regresses; reviewed candidate restored
+
+Completed the user-approved `perturb-mixed-30min-01` from the visually reviewed
+`perturb-front-back-15min-01/model.pt` and its matching final-export contract.
+The new opt-in `mixed_recovery_v1` samples 50% focused front/back torso episodes,
+25% broad all-direction/all-body episodes and 25% quiet episodes at reset. These
+are episode probabilities, not transition proportions. Ball speeds remain 1–2
+m/s; reward, rig, observation semantics, controller and optimizer are unchanged.
+The new `perturb_mixed` PowerShell preset exposes the exact experiment.
+
+The run completed **1805.453 seconds, 223 updates and 14,614,528 transitions**
+with 2,048 CUDA worlds. Validation at update 64 briefly reached 6/6 backward
+survivals, but update 128 regressed to 2/6. No evaluated checkpoint restored
+forward survival while retaining the backward improvement and broad performance.
+
+Final results versus the reviewed starting candidate:
+
+- Five-second forward survival **2/6 -> 1/6**, below the original baseline's 3/6.
+- Five-second backward survival **4/6 -> 2/6**.
+- Focused survival **6/12 -> 3/12**; settled recovery remains **1/12**.
+- Thirty-second runtime survival and final settled recovery **6/12 -> 3/12**.
+  No additional falls after five seconds in these focused cases.
+- Quiet survival remains **8/8** at five and 30 seconds.
+- Full 96-case survival **72 -> 73**, but settled recovery **25 -> 5**.
+  The original baseline was 76 survivals / 26 recoveries.
+- GPU evaluation also gives only 3/12 focused survivals and one focused recovery
+  (full suite 72 survivals / 6 recoveries), so poor impact behavior is also present
+  in the training backend.
+
+Godot/native parity passes all 96 cases; maximum action difference is 1.11e-5,
+pose difference 1.63e-6. Final ONNX/PyTorch action error is 4.77e-7. 29 relevant
+tests pass, including mixed sampling proportions, quiet/focused exclusivity,
+broad target coverage, partial resets and unchanged validation schedules.
+
+The actual final candidate was exported and automatically selected, then rolled
+back after measured regression. At that point F5/F6 again used
+`perturb-front-back-15min-01/final-export`, the candidate the user approved.
+The user later selected the mixed final export for visual review; the current
+selection is recorded in `logs/mimickit-viewer/ball.json`.
+Stand selection and all parent checkpoint hashes remain unchanged. The rejected
+candidate is retained in `perturb-mixed-30min-01/final-export`; it can be inspected
+with `watch.ps1 -Run logs/mimickit-training/perturb-mixed-30min-01 -Policy final`
+without changing the default selection.
+
+Decision: the mixed run failed its predeclared retention milestone. Do not
+automatically extend this training or increase projectile difficulty. The next
+design decision is a usable recovery-step motion prior/control approach, rather
+than another duration increase or a return to the open-ended optimizer audit.
+This experiment does not isolate the underlying cause of the regression.
+Results are one-seed development evidence; the 30-second test preserves the
+existing out-of-training reference endpoint/phase semantics. Evidence is in
+`comparison.json`, `milestone.json`, `learning_curve.json`, `review-final`,
+`godot-parity`, and `source-snapshot` under the mixed run directory. All processes
+have finished; no further training is queued.
+
+## 2026-09-24: Focused Perturb run improves backward recovery, with retention trade-offs
+
+Paused the continuous-standing/optimizer investigation below. Completed one
+gameplay-focused 15-minute run, `logs/mimickit-training/perturb-front-back-15min-01`,
+from the previously selected `perturb-resume-15min-01/best.pt`. The rig, physical
+ball, action bounds, observation semantics, reference and recovery_v1 reward are
+unchanged. The opt-in `front_back_torso_v1` curriculum concentrates perturbed
+training episodes on Chest/Spine/Pelvis, world +/-X with +/-10-degree variation,
+1–2 m/s and 25% quiet episodes. Original legacy contact semantics are preserved.
+
+Training completed 900.407 seconds, 110 updates and 7,208,960 transitions with
+2,048 CUDA worlds. No further run is queued. The unchanged full 96-case validation
+still selects the original actor as best.pt; the new explicit final-review export
+option exposes the actual trained candidate separately instead of silently
+showing the retained starting policy.
+
+Paired native/ONNX review on 12 fixed front/back torso impacts:
+
+- Five-second survival: **3/12 -> 6/12**. Forward **3/6 -> 2/6**; backward
+  **0/6 -> 4/6**. The lost forward case is Spine at 1 m/s.
+- Five-second settled recovery: **0/12 -> 1/12**, backward Pelvis at 2 m/s,
+  reference phase 0.8. All 12 impacts are confirmed for both actors.
+- Thirty-second runtime stress: survival and final settled recovery **3/12 ->
+  6/12**. Neither actor has an additional fall after five seconds in these cases.
+- Quiet survival remains **8/8** at both five and 30 seconds.
+- Full 96-case survival regresses **76 -> 72**, settled recovery **26 -> 25**.
+
+The long stress uses the existing Godot endpoint-clamped reference and increasing
+phase outside the finite training reference. It is not the separate continuous-
+standing contract and does not establish in-distribution 30-second learning.
+These are one-seed development cases, not independent generalization evidence.
+No deliberate or natural recovery step has been established by survival counts.
+
+All Godot/native parity checks pass on 96 cases (max action difference 1.15e-5,
+max pose difference 1.17e-6). Both ONNX exports match their PyTorch actors within
+3.58e-7. 28 focused/related tests pass; PowerShell scripts parse and dry runs
+resolve both the unchanged default and new curriculum correctly.
+
+Godot Perturb now selects `perturb-front-back-15min-01/final-export` for review,
+with `perturb-resume-15min-01/export` preserved as its previous selection. Stand's
+selection and all source checkpoints are unchanged. Run `MimicPerturb.tscn` with
+F6; start at BallSpeed=1, BallTarget=Chest, and compare Forward/Backward. To restore
+the prior viewer, run `./mujoco_rig/mimic/scripts/select.ps1 -Experiment perturb -Previous`.
+
+Decision: **partial backward-recovery progress, not an overall replacement**.
+The predeclared milestone requires retaining both directional survival counts;
+the forward loss fails that condition. Stop here for visual review instead of
+automatically extending training, increasing ball difficulty or adjusting PPO.
+If the motion quality is inadequate, the next design decision is a usable
+recovery-step prior/control approach, not another blind duration increase.
+Evidence: `comparison.json`, `milestone.json`, `review-baseline`, `review-final`,
+`godot-parity`, `source-snapshot` and the training report in the run directory.
+
+## 2026-09-24: Isolated actor update preserves retention; no wrong-direction conclusion yet
+
+Added `mimic/probe_actor_update.py` and five focused tests. Completed
+`logs/mimickit-training/actor-direction-01` from the admitted temporal pilot's
+`calibrated.pt`, keeping its critic, normalization, fixed action variance, physical
+plant, objective and collection settings unchanged. This is a fresh diagnostic
+batch/seed, not an exact replay of the earlier pilot's random stream.
+
+One prepared 2,048-world rollout supplies 65,536 transitions, including 7,617
+states aged >=15 seconds. Independent branches start from identical weights,
+fresh actor optimizer state and sampler/RNG state: no update, one SGD step, and
+one normal actor phase (40 SGD steps on this same batch). No critic update occurs.
+The exact batch/advantages and sampler permutation are saved in `batch.pt`.
+
+Both updated branches improve the whole-batch PPO loss:
+
+- One step: loss decreases by 0.000781; rollout KL 0.000260; one accepted step.
+- Actor phase: loss decreases by 0.006874; rollout KL 0.005852; all 40 steps accepted.
+- Action-bound penalty remains zero. Critic, normalization and fixed distribution
+  tensors remain bitwise unchanged. Independent CPU calculation reproduces the
+  first SGD step to maximum weight error 3.73e-9 and recomputes all branch losses.
+
+All branches, plus an unchanged-policy repeat, advance together in the GPU test.
+Each has 256 first-episode trials (32 per posture), with exactly shared Gaussian
+noise and a common 30-second horizon. Native deterministic retention is evaluated
+separately and retains cases **0, 5 and 6 (3/8)** for baseline, one-step and actor
+phase alike. None gains a new passing posture; none passes the complete gate.
+
+Measured stochastic outcomes:
+
+- Baseline: 16/256 survive, mean survival 11.7084 s, discounted prefix return 0.279061.
+- No-op repeat: 16/256, 11.7129 s, return 0.279125. Small backend numerical variation
+  remains even with identical policy/noise; the repeat is not bitwise identical.
+- One step: 15/256, 11.6782 s, return 0.278610. Paired return delta -0.000451,
+  bootstrap 95% interval [-0.002804, 0.001698].
+- Actor phase: 19/256, 11.9085 s, return 0.282205. Paired return delta +0.003144,
+  interval [-0.001945, 0.008466]. Survival-time delta +0.2001 s has interval
+  [-0.1063, 0.5096]. These intervals include no change.
+
+The primary return is the measured discounted 30-second prefix with zero tail,
+not the complete continuing objective. A separate frozen-critic timeout estimate
+also gives inconclusive intervals: actor-phase delta +0.003714, interval
+[-0.003380, 0.010827]. Intervals resample matched replicas within postures and are
+conditional on one training batch; they do not establish training-seed robustness.
+These survival counts do not imply settled recovery or replace the native gate.
+
+The experiment finds no incorrect implementation of this first gradient step and
+does not demonstrate a reliably harmful update direction. It also does not prove
+learning improvement. Preserved single-phase retention does not explain the
+earlier eight-iteration regression: cumulative policy/optimizer changes, new
+rollouts and subsequent critic updates were deliberately excluded here.
+
+26 focused/related tests pass. Saved `verify.py` independently checks provenance,
+unchanged non-actor tensors, CPU loss/SGD arithmetic, and all paired scalar
+trajectory outcomes. Diagnostic weights remain isolated; source checkpoints and
+Godot selections are unchanged. No policy was promoted, no long training run was
+started, and all processes have finished.
+
+Next: one short matched comparison across successive PPO iterations with critic
+updates enabled versus frozen, retaining the same objective and behavioral gate.
+Track where divergence first appears; do not infer a critic defect yet or add
+another reward/optimizer adjustment during that comparison.
+
+## 2026-09-24: Temporal readiness passes; the bounded actor update still regresses on both backends
+
+Implemented `mimic/standing_readiness.py` and the opt-in stationary training flags
+`--objective retention_30s_v1 --temporal-ready`. The new objective keeps DeepMimic
+tracking but uses physical-time discount `exp(-dt/30)` and reward scaling
+`1-discount`, giving a normalized continuing value and a 30-second e-folding time.
+It is not a finite terminal-at-30 objective: collection timeouts still bootstrap.
+The critic output head is explicitly rescaled as an initialization prior, then
+recalibrated; the actor, normalization, rig and policy observation contract do not
+change. Objective/version and critic-unit migration are recorded in run artifacts.
+Legacy training behavior remains available; the new objective is experimental.
+
+Critic calibration v2 preserves per-posture validation and adds age bands 0–5,
+5–15 and 15+ seconds plus 0.5/2/5-second pre-failure windows. Every slice requires
+separate training/validation evidence. No slice RMSE may increase; balanced
+posture MSE must decrease by at least 10%. Calibration loss includes the temporal
+slices. A failed calibration ends the run with a report and zero actor updates.
+The credit probe now honors the reward scale recorded in its source agent config.
+
+Successful calibration is followed by a frozen-policy, 30-second GPU preparation
+pass with staggered resets. Live physical states, including delayed control state,
+survive into the first PPO rollout. Preparation transitions are excluded from PPO.
+Both preparation and the actual first batch require early and late coverage for
+every incumbent passing posture. No artificial observation clock or replay buffer
+is used; updates log their actual count of states aged at least 15 seconds.
+
+Completed `logs/mimickit-training/continuous-stand-temporal-01`, with 2,048 CUDA
+worlds, 1,000 calibration steps, evaluation interval 8 and a five-minute PPO ceiling:
+
+- Calibration passed all posture and temporal slices. Balanced posture MSE fell
+  from 0.226275 to 0.042770 (81.1%). Five-second pre-failure RMSE fell from 0.625077
+  to 0.202804. These comparisons use the same new objective/units, not the old
+  unscaled critic's loss. Calibration took 207.69 seconds.
+- Preparation passed in 218.83 seconds. Retained postures 0, 5 and 6 had 66, 50
+  and 56 live worlds aged >=15 seconds, respectively, plus early-state coverage.
+- The first actual PPO batch contained **8,891/65,536 late-state transitions**.
+  PPO reached live episode ages of 29.886 seconds. The previous lack of any
+  late-episode actor samples has been corrected and verified.
+- Nevertheless, native retention fell from **3/8 to 0/8** at iteration 8.
+  The three previously retained postures fell at 23.34, 19.52 and 22.54 seconds.
+  All 320 actor steps passed the rollout KL check; maximum accepted KL was 0.006620.
+- Training stopped on regression after 524,288 transitions / 57.42 seconds of
+  PPO-stage time, including periodic native validation. It did not complete five
+  minutes of PPO. Rollout took 34.17 seconds and optimization 5.09 seconds.
+- The rejected candidate also passes **0/8 on the GPU**. Its native/GPU fall
+  durations differ by at most 0.050003 seconds. This measured regression is present
+  in the training simulator as well as native evaluation.
+- The selected actor remains the unchanged baseline, with **3/8 on both backends**.
+  Source checkpoints and Godot selections are unchanged; no policy was exported.
+
+68 focused/regression tests pass. Saved `verify.py` checks objective units, unchanged
+actor initialization, source/input/viewer hashes, every temporal calibration gate,
+actual batch coverage, PPO counts/KL and recorded trace durations/settling. The
+separate `check_candidate_gpu.py` and `candidate-gpu.json` preserve the rejected
+actor's backend comparison, hashes and traces. All checks pass and jobs have ended.
+
+These corrections are implemented, but **no improved controller was produced**.
+Their combined pilot does not establish individual causal effects, and is not a
+controlled speed/performance comparison with the earlier 16-iteration pilot.
+
+Next: isolate one actor update against the unchanged actor on matched full-episode
+trials, checking whether the surrogate's predicted improvement agrees with measured
+return and retention. Freeze the critic/objective/collection setup for that test;
+do not add another simultaneous reward or optimizer adjustment. Long Stand/Perturb
+runs and Godot promotion remain unsupported by the measured behavior.
+
+## 2026-09-24: Full-episode credit audit exposes a short-term objective/retention mismatch
+
+Added `mimic/probe_standing_credit.py` and four focused return-boundary tests.
+Completed `logs/mimickit-training/standing-credit-audit-01`: two frozen stochastic
+GPU rollouts, 256 worlds each (32 replicas per posture), seed 210922, full first
+episodes up to 30 seconds. Initial and calibrated critics see the exact same
+baseline-actor trajectories; the rejected candidate uses its own actor and critic.
+All weights, normalization, source checkpoints and Godot selections are unchanged.
+
+The probe saves per-step rewards, terminal flags, first-episode masks, values,
+next values, sampled discounted returns and upstream 32-step TD-lambda targets.
+It reports age strata and the final 0.5/2/5 seconds preceding failures. Failures
+correctly bootstrap zero; timeouts correctly bootstrap the evaluated critic.
+There is no demonstrated failure/timeout handling bug. Short rollouts do not impose
+a hard prediction horizon: useful longer-term information must enter through the
+critic, whose quality is therefore essential.
+
+Measured findings:
+
+- At control timestep 0.016668 s, discount 0.99 has a 1.150-second half-life;
+  gamma*lambda has a 0.188-second trace half-life. An individual reward 10 seconds
+  ahead gets weight 0.002406. These are decay measures, not hard cutoffs.
+- The pinned MimicKit humanoid agent uses the same 0.99 discount, 0.95 lambda and
+  32 steps, but its Newton example runs at 30 Hz. Our near-60-Hz bridge halves their
+  physical timescales. This establishes a configuration difference, not proof that
+  copying the example's physical timescale would solve retention.
+- Calibration reduces overall sampled value RMSE from 12.136 to 9.162. However,
+  on the same baseline trajectories within five seconds of failure, RMSE increases
+  from 13.747 to 14.256 and positive value bias from 7.422 to 9.809. Aggregate
+  posture validation missed this conditional regression. Sampled returns remain
+  noisy estimates; their sign is not an oracle for an individual action advantage.
+- The candidate's corresponding five-second pre-failure RMSE is 19.546 and bias
+  14.224, on its own trajectories. This comparison also changes the visited states.
+- Baseline stochastic survival is 21/256 through 30 seconds; candidate is 13/256.
+  Mean survival falls from 11.761 to 11.467 seconds. These are noisy-action survival
+  diagnostics, not the deterministic eight-case settled-retention gate or a claim
+  about generalization. Baseline itself is fragile under exploration.
+
+Independent offline scoring of the same complete trajectories makes the mismatch
+concrete. With zero tail after the common 30-second horizon, mean gamma=0.99 return
+increases from **82.963 to 83.459** for the behaviorally rejected candidate. Rescaling
+gamma to the 30-Hz example's physical discount (0.994987 at this timestep) still
+ranks the candidate higher: **146.219 to 147.342**. The undiscounted finite-30-second
+reward sum ranks it lower: **675.233 to 653.192**. These alternative scores do not
+reuse an old critic bootstrap. No policy was trained with a new discount/objective;
+the result does not justify setting gamma=1 in the existing infinite-horizon code.
+
+Thus simply extending training or rescaling one discount is not an established
+fix. Early tracking gains can offset lost late retention in the sampled training
+objective. Separately, the previous pilot's actor batches never reached episode
+ages beyond 8.534 seconds before its first behavioral rejection. These findings
+support a collection/objective investigation; they do not implicate a new skeleton
+or sensor defect or isolate one sole cause of the regression.
+
+30 focused/related tests pass. The saved `verify.py` independently recomputes
+Monte Carlo and TD-lambda arrays with NumPy, checks survival aggregates, exact
+baseline trajectory sharing, source/checkpoint/viewer hashes, and records the
+upstream agent/engine configs with hashes. All checks pass; all probes have ended.
+
+Next implementation: make late-episode coverage explicit before the first actor
+update and validate critic calibration by age and pre-failure windows, preserving
+the existing native per-case retention gate. Separately define the desired
+standing objective over physical time before choosing a longer-horizon return;
+do not silently reinterpret existing critics. Test these changes in isolation,
+not another broad optimizer search or a longer Perturb run.
+
+## 2026-09-24: Continuous-Stand pilot stopped on measured regression; baseline retained
+
+Implemented `mimic/train_continuous_stand.py` with explicit stationary-contract
+migration, frozen loaded normalization, posture-balanced critic calibration and
+native 30-second checkpoint selection. Selection cannot discard any incumbent
+passing posture. The pilot stops at the first measured retention regression.
+Legacy training entry points and Godot selections remain unchanged.
+
+The local training loop also removes an upstream lifecycle mismatch: MimicKit's
+outer loop resets every training world at output iterations, even with zero test
+episodes. At 32 control steps per iteration and output interval 16 this prevents
+long uninterrupted standing. The stationary runner retains upstream rollout/PPO
+methods but resets worlds only at initialization, failure or the 30-second timeout;
+native validation uses separate worlds. A focused test checks this lifecycle.
+
+Completed `logs/mimickit-training/continuous-stand-5min-01`, starting from
+`small-shift-15min-01/best.pt`, with 2,048 CUDA environments, a five-minute PPO-stage
+ceiling, evaluation interval 16 and the existing 0.02 rollout KL limit. No fixed
+teacher anchor or optimizer search was added.
+
+- Critic calibration: 200 steps, 201.23 seconds. Balanced validation MSE fell from
+  97.91 to 57.86 (40.9%); every posture's RMSE decreased. Actor and normalization
+  remained unchanged. This validates critic fitting, not standing behavior.
+- PPO stopped after 16 iterations / 1,048,576 transitions, using 71.86 seconds of
+  its five-minute ceiling including periodic native evaluation. GPU rollout took
+  45.05 seconds and optimization 10.06 seconds. Startup, calibration and final
+  checks are additional; this was not five completed minutes of PPO.
+- Initial native retention: **3/8**, postures 0, 5 and 6. Updated actor: **0/8**.
+  Those three previously passing postures fell at 21.54, 17.55 and 19.78 seconds.
+  All 640 actor steps were accepted; maximum accepted rollout KL was 0.010037.
+  Thus this rollout KL bound did not prevent delayed standing regression.
+- The selector rejected the candidate and retained the unchanged initial state as
+  `best.pt`. Final native and GPU checks both retain the same **3/8** postures;
+  neither passes the complete gate. This is no behavioral improvement.
+
+The actor-update rollouts reached only 8.534 seconds of simulated episode age
+before the first validation stopped training. The separate frozen-actor calibration
+did cover complete first episodes, but PPO had not yet sampled the later states
+where the previously stable postures now fail. This is a concrete coverage gap to
+investigate, not proof that it alone caused regression. Extending the run blindly
+would bypass the measured behavioral safeguard.
+
+57 focused and related tests pass. `verification.json` independently checks source,
+reference, checkpoint and viewer hashes; all 24 saved final/selected native/GPU
+case trace aggregates; zero phase; unchanged normalization; critic-only calibration
+changes; initial/selected state equality; and update/sample counters. Recorded
+settled masks are aggregated, not independently re-simulated. No policy was exported
+or promoted to Godot. All training/evaluation processes have finished.
+
+Next: diagnose long-horizon trajectory coverage and value/advantage targets before
+another actor update. In particular, measure whether late-standing states and
+delayed failures influence the learning signal; design collection around that
+evidence while keeping the same 30-second retention gate. Do not start Perturb,
+relax the gate or tune further optimizer retries on this result.
+
+## 2026-09-24: Continuous standing has a valid reference and 30-second gate; no passing teacher yet
+
+Implemented `continuous_stand.py`, `continuous_stand_task.py` and
+`probe_continuous_stand.py`. Reference schema `mimic_stationary_stand_reference_v1`
+defines eight independent held postures from fixed phases of the admitted small
+weight-shift reference. Pose is constant for all nonnegative times, velocity and
+acceleration are zero, and the phase observation is always zero. The new
+`mimic_stationary_stand_target_pd_v1` contract explicitly distinguishes these
+semantics from the finite-clip policies despite retaining 362 inputs. Legacy
+reference loading rejects the stationary artifact. Existing tasks, exported
+weights/normalization and Godot selections are unchanged.
+
+The first artifact exposed an actual reset sensitivity: fitted soles were tangent
+to the floor within float roundoff. Native and GPU contact sets could disagree at
+reset, producing a 0.002582 rad hinge discrepancy and about 57 N actor-load
+discrepancy in the first control interval. The corrected reference explicitly seats
+each posture 0.1 mm into compliant floor contact. All eight postures were rechecked
+for geometry, foot-plus-toe support, force balance, root wrench and actuator-window
+feasibility; all pass, maximum penetration 0.100025 mm. No rig, solver parameter,
+contact material, PD gain or action authority changed. The superseded artifact and
+its reports remain in `continuous-stand-01` / `continuous-stand-retention-01`, with
+source snapshots; use `continuous-stand-02` for subsequent work.
+
+Both backends now initialize all four soles in contact; measured per-sole reset
+load discrepancy is 0.011963 N. Reference samples, future targets, queued targets
+and phase agree exactly, and partial GPU resets preserve other worlds. A repeated
+16-control-step prefix remains below its 0.001 pose-component threshold, but late
+contact transitions vary: the latest run reaches 0.000491 rad hinge discrepancy,
+0.0000235 m root discrepancy and 9.25 N actor-load discrepancy. An earlier repeat
+was closer. This establishes corrected reset/reference transport, not bitwise
+trajectory equality or a full-horizon physics guarantee.
+
+The versioned retention gate requires all eight first episodes to survive 30
+seconds, each mean root error <= 0.05 m, and an uninterrupted final two-second
+settled window. Settled requires pelvis >= 0.75 m, tilt <= 15 degrees, horizontal
+speed <= 0.2 m/s, angular speed <= 1 rad/s, >= 5 N support per foot including toes,
+and foot-position error <= 0.03 m. Maintenance resets never count as new successes.
+
+`logs/mimickit-training/continuous-stand-retention-02` compares seven unchanged
+checkpoints on exactly these targets, with the original 600-state anchor bank:
+
+- Motion teacher, original Stand, and each of the three guarded finals pass cases
+  0, 5 and 6 for 30 seconds with the settled window and root-error bound: **3/8**.
+- Unanchored rehearsal update 16 passes only case 0: **1/8**, losing two teacher
+  successes despite passing the old eight-case five-second clip suite.
+- Unanchored update 32 passes **0/8**, losing all three teacher successes.
+- No policy passes the complete stationary gate. This is explicitly reference/
+  contract transfer for old policies, not an in-distribution evaluation of actors
+  already trained on continuous standing. Offline feasibility does not imply that
+  an existing actor knows how to hold every target.
+
+Full 30-second GPU checks of the motion teacher and original Stand reproduce the
+same three surviving cases and the same failed complete gate as native MuJoCo.
+Original Stand's per-case survival durations match; the teacher's failing-case
+durations differ by up to 0.400032 seconds. `gpu-check.json` and saved GPU traces
+record this remaining numerical sensitivity. No GPU optimization was performed.
+
+Calibration returns `no_passing_teacher`, with no recommended replacement KL
+limit. Zero deviation already fails the complete behavioral gate. The current
+guard preserves the three known successful cases in this sample; original Stand
+also preserves them despite larger teacher-relative KL than the rejected actors.
+Neither result supports a universal numerical stability radius. No bound was
+relaxed, and this new diagnostic gate is not silently applied to legacy selection.
+
+Ten focused tests and 24 related tests pass. They cover unlimited reference time,
+zero phase/velocity, explicit support at reset, immutable future targets, partial
+resets, rejection of old stationary semantics/nonzero velocity, first-episode-only
+counting, complete settled-window gating, and unchanged finite-clip semantics.
+Independent verification checks all 56 final native case traces and the source,
+checkpoint, reference, trace and viewer hashes. Preparation/probe commands and
+gate definitions are documented in `mimic/README.md`.
+
+Next: explicitly integrate this contract into a bounded **Stand** training pilot
+and establish 8/8 continuous retention before recalibrating the motion safeguard.
+Do not continue the stalled weight-shift PPO, tune more optimizer retries, or
+advance to Perturb. No PPO, export, Godot policy selection, commit or push occurred.
+All diagnostic and test processes have finished.
+
+## 2026-09-24: Fixed standing KL is conservative; sustained standing remains unvalidated
+
+Completed `logs/mimickit-training/anchor-retention-audit-01`: seven saved policies,
+the exact 600-state bank from the precision pilot, the original eight five-second
+native standing phases, and two paired 30-second continuations. No optimizer ran,
+no bound changed, no checkpoint/export changed, and Godot selections are unchanged.
+
+On the same bank, teacher-to-candidate **maximum per-state** Gaussian KL is:
+
+- Starting motion teacher: 0; five-second standing 8/8, root error 0.036987 m.
+- Unanchored rehearsal update 16: 0.404095; 8/8, error 0.033259 m.
+- Unanchored update 32: 1.583010; 5/8, error 0.060140 m.
+- Hard-anchor final: 0.019472; 8/8, error 0.035341 m.
+- Backtracking/projected finals: approximately 0.020000; both 8/8, errors
+  0.036121/0.035897 m. CPU recomputation differs from recorded CUDA KL by roughly
+  1e-6 at the boundary; this is not evidence of a meaningful constraint violation.
+- Original Stand policy: 1.787167 relative to the motion teacher; 8/8, error
+  0.023629 m. Its original architecture and normalization are loaded separately.
+
+Thus 0.02 is not necessary for passing this short suite. Neither these sparse,
+dependent checkpoints nor their KL values establish a safe replacement threshold.
+In particular, original Stand passes at a larger distance than the failing
+update-32 policy: distance from this teacher is not a monotonic stability score.
+
+The quiet reference lasts **5.966786 seconds**. Increasing `episode_seconds` to
+30 in the ordinary evaluator would create negative reset phases. The diagnostic
+instead preserves the original five-second phase grid (0 through 0.966786 seconds)
+and extends each first episode without counting resets. Two protocols are explicit:
+
+- Existing sampling: endpoint pose and velocity clamp, while observed phase keeps
+  increasing. At 30 seconds original Stand retains 1/8 cases; all six other
+  policies retain 0/8. At 20 seconds original Stand retains 5/8, teacher 0/8,
+  unanchored update 16 1/8, and each guarded final 2/8.
+- Diagnostic endpoint hold: keep the final pose, zero reference velocity after
+  the clip ends, and clamp observed phase to one. At 30 seconds original Stand
+  retains 2/8; all six other policies retain 0/8. This is an inference-only
+  sensitivity test, not an admitted reference, trained contract, or runtime fix.
+
+Every continuation failure from a policy passing the short suite occurs **after
+its reference ends**. The three short-suite failures at update 32 occur within
+the reference. Endpoint handling affects the measured durations, and neither
+continuation is an in-distribution long-standing benchmark. These results do not
+identify a skeleton, contact-sensor, or joint fault, or isolate the cause of the
+post-clip falls. They do show that short-suite retention cannot establish the
+sustained standing required by the game.
+
+Independent verification reproduces all seven previously recorded short results,
+confirms exact first-episode pose prefixes in both continuations, checks survival
+counts against trace masks, and verifies checkpoint/runner/reference/bank/viewer
+hashes. Reports, per-case traces, the read-only runner, and `verification.json`
+are retained under the audit directory. All jobs have finished.
+
+Next: define and validate explicit continuous-standing reference semantics (a
+physically checked smooth loop or stationary target, with consistent velocities
+and phase), then compare original Stand and the motion teacher on that 30-second
+native gate. Use measured retention to calibrate the motion-learning safeguard;
+do not merely raise the 0.02 limit or add more optimizer retries. No new PPO or
+Perturb training is justified by this audit alone.
+
+## 2026-09-24: Backtracking and projected steps work, but learning remains constrained
+
+Guarded PPO now has opt-in `--actor-backtracks 8` and `--actor-project-anchor`.
+Ordinary search tries the original optimizer displacement and eight halvings.
+Each trial restores the original weights, gradients and independent copies of
+optimizer state. Acceptance requires the existing rollout/standing KL bounds and
+measured same-minibatch actor-loss reduction above the numerical floor. The base
+learning rate stays unchanged, rejected trials cannot accumulate momentum/Adam
+steps, and an accepted trial advances optimizer state once.
+
+Halving alone reached the standing boundary again. The optional projected fallback
+removes outward displacement against the current worst protected state's gradient,
+targeting a 0.1% inward margin. It then searches step sizes and rechecks every actual
+constraint and the PPO loss. This linear approximation cannot bypass the full
+state-bank checks. The fallback is separately versioned in experiment metadata;
+both controls default off and no retention bound was relaxed.
+
+Fifty-six focused/related tests passed. New tests verify successful constrained
+descent, exact rollback on rejection/exception, preservation of momentum across
+retries, one Adam counter increment, rejection of uphill or zero-change proposals,
+and a boundary case where projected descent succeeds while halving cannot. All
+new behavior remains local to our adapter; the pinned MimicKit checkout is unchanged.
+
+Two 2048-world checks used the same starting checkpoint, precision reward,
+200-step critic calibration, fixed standing teacher, 0.02 limits and seed 210921.
+Both completed 16 iterations / 1,048,576 transitions:
+
+- `shift-backtracking-16iter-01`: 80.281 seconds of PPO/checks; 59 accepted actor
+  steps, 14 with reduced step sizes, and 11 zero-acceptance iterations. Sum of
+  accepted learning-rate fractions is 45.961. There were 263 candidate trials.
+- `shift-projected-16iter-01`: 85.203 seconds; 79 accepted steps, including 25
+  projected steps, and 10 zero-acceptance iterations. Sum of accepted fractions
+  is only 45.086 despite the higher acceptance count. There were 774 trials.
+- For comparison, the preceding single-proposal pilot's first 16 iterations
+  accepted 44 full-size steps and had 13 zero-acceptance iterations. These are
+  bounded implementation checks, not independent-seed learning comparisons.
+
+Maximum accepted standing-state KL stays at 0.0199995 in both new runs. Every
+accepted proposal reports positive measured local loss reduction. However, both
+final actors still survive 6/8 short and 3/8 extended motion cases, while retaining
+8/8 standing at three and five seconds. Extended mean duration is 4.2753 seconds
+for halving and 4.2712 for projection, against 4.2753 initially. No tracking gate
+passes. Both selectors keep update zero. Selected ONNX hashes exactly match the
+starting export, whose previously measured full-motion fall remains 3.1169 seconds.
+
+Native/Newton per-case short-suite survival times match for final and selected
+actors; selected ONNX action discrepancy is 2.682e-7. Protocol and anchor/calibration
+artifact hashes verify. `git diff --check` passes. All jobs have finished, no larger
+pilot followed, and both Godot selections remain unchanged.
+
+The optimizer mechanisms are validated, but they have not resolved the practical
+learning stall. Do not count many tiny accepted steps as useful motion learning,
+and do not extend training unchanged. Before further optimizer variants, measure
+the relationship between actor deviation and actual standing retention (including
+longer native cases) to assess whether this fixed 0.02 policy constraint is an
+appropriate proxy. Keep it unchanged until that evidence is available; these runs
+do not justify relaxing the bound or advancing to Perturb.
+
+## 2026-09-24: Five-minute precision pilot preserves standing but actor updates stall
+
+`logs/mimickit-training/shift-precision-5min-01` completed the authorized pilot
+from `small-shift-15min-01/best.pt`, with 2048 CUDA worlds, precision_v1, equal
+quiet/motion rehearsal, five-/eight-second training horizons, a fixed per-state
+quiet KL limit of 0.02, 200 critic calibration steps and seed 210921. Calibration
+passed before PPO. The 300-second PPO budget completed 75 iterations / 4,915,200
+transitions in 302.172 seconds, including scheduled native checks every 16 updates.
+Preparation and final checks were additional. No training settings changed mid-run.
+
+Only iterations 1, 2 and 5 changed the actor: 40, 3 and 1 accepted optimizer steps,
+respectively. The other 72 iterations accepted none. There were 44 accepted and
+74 rejected proposals in total; the actor loop stops on its first rejected proposal.
+Maximum accepted quiet-state KL was 0.019472 under the 0.02 cap. In zero-acceptance
+iterations, proposed rollout KL never exceeded 0.000709, well below its separate
+0.02 limit. The fixed quiet constraint, not the rollout bound, blocked progress.
+The exact actor/distribution/normalization tensors at evaluation 16 and final 75
+are identical. This is an optimization stall, not evidence that more samples are
+improving the controller.
+
+Final versus initial native results:
+
+- Quiet standing remains 8/8 at both three and five seconds. Five-second mean
+  root error changes from 36.99 to 35.34 mm.
+- Three-second motion survival remains 6/8; mean root error changes from
+  72.19 to 72.60 mm.
+- Eight-second motion survival remains 3/8. Mean duration changes from 4.2753
+  to 4.2628 seconds and mean root error from 117.38 to 116.27 mm.
+- Root and relative-displacement tracking gates still fail. Selection keeps
+  update zero, including its calibrated critic and unchanged starting actor.
+
+The paired complete-motion probe reproduces the same 3.1169-second fall for the
+starting and selected exports; their ONNX hashes are identical. This probe uses
+the common reference task for both controllers and is not a precision-reward
+return comparison. Native/Newton per-case short-suite survival times agree for
+both final and selected actors. Final cumulative return differs by 0.0567 points;
+selected ONNX action discrepancy is 2.682e-7. Artifact hashes and exact checkpoint
+comparisons are recorded in `verification.json` alongside the training report.
+
+Do not extend this run or relax the standing limit automatically. The next change
+should make the optimizer seek feasible steps under the fixed anchor, for example
+by testing backtracking of rejected proposals while restoring the same pre-step
+weights and momentum for each trial. Validate actual surrogate improvement and
+unchanged retention bounds before another pilot; smaller steps might still stall
+when a direction points out of the feasible region. This is a proposed optimizer
+change, not an implemented or validated solution. No further actor training,
+production-code edits or Godot viewer selection changes followed this run.
+
+## 2026-09-24: Precision objective, standing anchor and frozen-actor calibration validated
+
+The experimental weight-shift path now supports `precision_v1`, a versioned
+reward combining original tracking (0.5), horizontal position tracking at 5 mm
+scale (0.4) and horizontal velocity tracking at 0.05 m/s scale (0.1). Quiet
+rehearsal keeps its original reward. Native and CUDA motion tasks use the same
+function; selection and experiment metadata identify the objective explicitly.
+Stand/Ball defaults, observations, normalization, motor authority and physical
+tracking gates are unchanged.
+
+An optional fixed starting-policy anchor rejects actor updates exceeding a
+maximum per-state KL on protected standing states, in addition to the existing
+rollout KL bound. Rejection restores optimizer momentum and weights. The teacher
+must first pass five-second standing; its checkpoint and observation bank are
+hashed in the run protocol. Sampling thins time steps within every phase and
+excludes post-termination frames. A coverage test catches the initial flattening
+bug that skipped phases; `shift-precision-smoke-01` predates that correction and
+is superseded by `shift-precision-smoke-02` for anchor validation.
+
+Changed rewards require explicit critic calibration before PPO. Calibration
+collects complete first episodes with the stochastic actor frozen, fits only the
+critic, and reserves every fourth world for validation. Both task validation
+RMSEs must not worsen and balanced MSE must fall at least 10%; otherwise the
+original critic is restored and actor training is blocked. Failure bootstrap is
+zero; timeouts use the initial critic. This validation is for value fitting, not
+independent behavioral robustness. The calibration-only CLI exits without export.
+
+`logs/mimickit-training/shift-precision-calibration-01` passed on 2048 CUDA worlds
+with 200 critic optimizer steps and 141,567 sampled states. A full checkpoint
+comparison confirms that only the six critic tensors changed. Its kinematic
+reward probe scores a held starting pose at 0.773820 mean / 0.598291 minimum,
+compared with 0.998321 mean under the original reward and 1.0 for exact tracking.
+This establishes reward discrimination, not a successful physical controller.
+
+The corrected integration run `shift-precision-smoke-02` repeated calibration
+and completed two PPO updates / 131,072 transitions. Calibration validation RMSE
+fell from 12.39 to 9.35 for quiet standing and 34.06 to 8.92 for motion. Actor and
+normalization remained unchanged during calibration. During PPO, 43 actor steps
+were accepted and one rejected; maximum protected-state KL stayed at 0.019829
+under the configured 0.02 bound. The observation bank includes all eight phases,
+and saved bank/calibration hashes agree with the finalized protocol.
+
+Both initial and final actors retain 8/8 standing at three and five seconds,
+6/8 short-motion survival and 3/8 eight-second motion survival. Extended mean
+duration changes from 4.2753 to 4.2608 seconds, so selection keeps update zero
+(the calibrated critic with the original actor). No motion gate passes and no
+behavioral improvement is claimed. Native/CUDA per-case survival times match.
+The final cumulative return differs by 0.0587 out of about 86, with mean root
+tracking error differing by 0.054 mm; the same-input reward function agrees
+between CPU/CUDA within 1e-6. Selected ONNX action discrepancy is 2.682e-7.
+
+Forty-seven focused and related regression tests passed, including reward routing,
+all-phase anchor coverage, frozen teacher behavior, transactional rollback,
+failure/timeout return semantics and rejection of mixed reward selection histories.
+`git diff --check` passes. No longer training run was launched. Both Godot viewer
+selections remain unchanged and all calibration/integration processes have ended.
+
+Next is a bounded five-minute weight-shift pilot with these explicit options,
+watching actor acceptance as well as native standing and extended motion tracking.
+The tight anchor can limit learning; reject a stalled/regressed experiment rather
+than relaxing retention automatically. This does not yet justify Perturb training.
+
+## 2026-09-24: Rehearsal regression diagnosis identifies reward and retention gaps
+
+Diagnostics compare `shift-rehearsal-15min-01/initial.pt`, retained update 16 and
+first rejected update 32 without optimizer steps or viewer changes. Evidence is
+under that run's `update-diagnostics/report.json`, `reward-diagnostic.json` and
+`critic-diagnostic.json`; adjacent Python runners record source/checkpoint hashes.
+This investigation changes no production training code or settings.
+
+**Small-shift reward discrimination is weak.** A kinematic counterfactual holds
+the starting pose with zero velocity while the reference completes its 16-second
+cycle. It receives mean reward 0.998321 and minimum 0.993289, versus 1.0 for exact
+reference tracking over 81 phases. This is a reward test, not a physically validated
+controller. The root-position term alone loses only 0.000673 of total reward for
+a 30 mm error: its weight is 0.15 and its squared-distance scale is 5. The current
+objective therefore gives little direct incentive for the millimetre/centimetre
+precision required by the separate relative-displacement gate. Survival incentives
+still exist; this finding does not explain every fall by itself.
+
+**Per-update KL does not preserve the original standing policy.** On fixed valid
+states from the initial native trajectories, initial-to-candidate mean KL is
+0.189/0.749 for quiet standing at updates 16/32, and 0.445/1.600 for motion.
+These use the same Gaussian distribution KL as the guard but a fixed starting
+teacher and fixed states, so they are different measurements from the rolling
+0.02 update budget. Quiet action RMS drift is 0.00562/0.01117 (normalized action
+units); motion drift is 0.00861/0.01633. The largest changes include thigh and
+ankle actions. No causal KL threshold is established by this comparison.
+All six native five-second quiet/eight-second motion results exactly reproduce
+the training reports: standing is 8/8, 8/8, 5/8; motion is 3/8, 3/8, 1/8.
+
+**Strong mixed-task gradient opposition was not observed.** Fresh 512-world GPU
+rollouts use equal quiet/motion groups, three seeds (210921-210923), 16 consecutive
+32-step blocks per checkpoint, and no optimizer updates. Across 144 batches,
+27 paired full-group PPO gradient probes have cosine similarity -0.122 to 0.095.
+The equally mixed gradient has positive dot product with both component gradients
+in every probe. This is a local surrogate-loss diagnostic using estimated
+advantages, not proof that subsequent optimization cannot interfere with either
+behavior. Fresh batches do not reconstruct the original training updates.
+
+**The critic remains phase-dependent and imperfect.** A separate native probe
+uses the actual stochastic actor, eight fixed initial phases and three action-noise
+seeds per task/checkpoint (144 episodes total). Initial-state motion value RMSE
+against discounted sampled returns is 15.10/14.69/14.06 at updates 0/16/32.
+Phase-mean errors include overestimates near +23 and underestimates near -27.
+Quiet value RMSE improves from 13.54 to 8.10 to 7.22 even as behavior regresses;
+value fit alone is therefore not an acceptance criterion. Failures use complete
+terminal returns with zero bootstrap. Timeouts bootstrap from the same critic,
+so those targets are not independent ground truth. These are validation phases
+and three rollout seeds, not independent training seeds or generalization tests.
+
+The 32-step rollout spans 0.5334 seconds. With gamma 0.99 and lambda 0.95, the
+geometric GAE trace factor decays over 0.2717 seconds, putting substantial reliance
+on critic bootstrap for delayed consequences. This is not a hard learning horizon.
+Checkpoint fingerprints are unchanged after all probes; observation/action
+normalization tensors match exactly across checkpoints. The added motion-feature
+channels have zero clipping on the fixed states (the preserved legacy motion
+channels still clip). No new sensor or joint defect was established here.
+
+Next implementation should give the experimental weight-shift objective meaningful
+motion discrimination and protect quiet behavior against cumulative actor drift
+using a fixed starting-policy reference. Keep reward/version identity explicit,
+leaving legacy Stand/Perturb semantics intact. Validate reward ordering and quiet
+retention before another bounded actor-training experiment; inspect/calibrate the
+critic for the resulting objective before interpreting actor updates. Do not solve
+this by increasing the training budget or promoting these exports to Godot.
+Both existing viewer selections remain unchanged; all diagnostic jobs have ended.
+
+## 2026-09-24: Fifteen-minute rehearsal run does not establish motion progress
+
+`logs/mimickit-training/shift-rehearsal-15min-01` completed the authorized run
+from `small-shift-15min-01/best.pt` (that run's update 80). It used 2048 CUDA
+worlds: 1024 original quiet-standing worlds with five-second episodes and 1024
+small-shift worlds with eight-second episodes. Support_v2, target-PD, inherited
+additive features, frozen normalization, guarded PPO, critic clipping 1, seed
+210921 and evaluation interval 16 were retained. The 903.203-second budget
+completed 175 updates and 11,468,800 transitions. Initial/final checks and export
+were additional; scheduled native checks consumed 153.234 seconds of the budget.
+
+The selected checkpoint is update 16. Compared with the starting policy:
+
+- Three-second motion survival remains 6/8, with mean duration unchanged at
+  2.6585 seconds and mean root error decreasing from 72.19 to 70.05 mm.
+- Eight-second motion survival remains 3/8. Mean duration changes from 4.2753
+  to 4.3024 seconds, while mean root error increases from 117.38 to 118.59 mm.
+- Both quiet suites remain 8/8; five-second mean root error decreases from
+  36.99 to 33.26 mm. Root and relative-displacement motion gates still fail.
+- A separate paired phase-zero attempt at the complete 16-second motion falls
+  at 3.1169 seconds initially and 3.2003 seconds with the selected policy.
+  Neither completes the shift and return. This small delay is not learned transfer.
+
+Quiet retention first fails at update 32 despite quiet worlds being actual training
+samples. Final update 175 has 1/8 short-motion survivors and 0/8 extended-motion
+survivors (2.4294-second extended mean duration). Final quiet survival is 8/8 at
+three seconds and 7/8 at five seconds, with five-second mean root error 60.11 mm,
+also exceeding the 50 mm retention limit. Later checkpoints are rejected.
+All 7000 actor optimizer steps were accepted; maximum accepted rollout KL was
+0.007441. These bounds did not prevent cumulative behavioral regression.
+
+The export contains selected update 16; the regressed final weights remain in
+`model.pt`. Selected native/Newton short-suite survival counts and all per-case
+durations agree. ONNX maximum action discrepancy is 2.682e-7. The report and
+`complete-motion/report.json` retain the baseline and candidate results. No
+generalization or independent-seed claim follows from these fixed cases.
+
+Do not extend this configuration or advance it to Perturb. Quiet rehearsal alone
+did not solve forgetting, and longer episodes did not establish tracking. Before
+changing another training setting, diagnose quiet and motion losses/advantages
+separately and measure cumulative actor drift on fixed baseline states, including
+the early accepted and first rejected checkpoints. Distinguish mixed-task update
+interference from an objective or value-estimation problem before selecting a fix.
+These are hypotheses to test, not established causes. Both Godot selections remain
+unchanged. Training and the paired native probe have finished.
+
+## 2026-09-24: Quiet rehearsal and longer motion training implemented and smoke-tested
+
+`RehearsalTask` now allocates fixed groups of worlds to original quiet standing
+and the motion reference. The intended configuration is 50% five-second quiet
+worlds and 50% eight-second motion worlds, with random valid start phases on reset.
+Fixed groups preserve the transition mixture despite different failure rates.
+Reference routing is shared through `StandTask` hooks for resets, future poses,
+phase normalization, rewards, issued PD targets and per-world episode limits.
+The existing single-reference and Ball defaults retain their original behavior.
+
+Native evaluation retains the original eight three-second motion cases and both
+quiet suites, and adds eight extended motion cases. The new explicit selection
+schema `mimic_weight_shift_rehearsal_v1` requires both motion tracking gates and
+quiet retention; its ranking considers extended survival before short survival.
+The extended suite spans a different phase grid, so its success count is not a
+paired subtraction from the short-suite count. Cache/selection identity includes
+the longer horizon. Relative-displacement and physical thresholds are unchanged.
+
+Warm starts can now continue the exact same admitted motion, restoring validated
+additive-feature lineage before building optimizers/loading weights. This permits
+continuing `small-shift-15min-01/best.pt` (update 80), without falling back to the
+original Stand checkpoint or silently changing normalization.
+
+`logs/mimickit-training/shift-rehearsal-smoke-01` successfully completed two CUDA
+updates / 131,072 transitions with 2048 worlds: 1024 quiet and 1024 motion. Initial
+native results are 6/8 short-motion, 3/8 eight-second motion and 8/8 for both quiet
+durations. The smoke candidate preserves those counts. Extended mean survival
+changes only from 4.2753 to 4.2774 seconds; this is pipeline verification, not
+evidence of improved learning. Root and movement tracking still fail.
+
+Checkpoint selection, inherited feature architecture, native/GPU short-suite
+agreement and ONNX export all completed; maximum export discrepancy is 2.682e-7.
+Eighteen focused task/contract tests and 23 related regression tests passed; a
+subsequent feature test also checks rejection of altered inherited layouts.
+Tests exercise mixed-reference observations/rewards/targets, partial resets,
+seeded phase selection, longer timeouts, TEST isolation, delayed-fall ranking and
+incompatible-horizon rejection. No full training run or viewer promotion followed
+the smoke test. Both Godot selections remain unchanged.
+
+The next bounded experiment is the documented 15-minute rehearsal command in the
+Mimic README, initialized from the retained pre-smoke checkpoint for comparison.
+It should establish whether actual quiet practice prevents forgetting and whether
+the longer motion episodes improve the eight-second tracking suite.
+
+## 2026-09-24: Fifteen-minute small-shift pilot improves short survival, then regresses
+
+`logs/mimickit-training/small-shift-15min-01` ran the approved 2048-world GPU pilot
+from `shift-normalization-03/candidate.pt` on `weight-shift-small-01`. It retained
+support_v2, target-PD, additive motion features, frozen normalization, guarded PPO
+(actor KL 0.02), critic gradient clipping 1, evaluation interval 16 and seed 210921.
+The 900-second budget completed 186 updates / 12,189,696 transitions in 900.813
+seconds, with initial/final checks and export additional to that budget.
+
+The selected checkpoint is update 80 (5,242,880 transitions, evaluated at 392.172
+seconds). Against the initial policy on the same eight three-second phase cases:
+
+- Motion survival improves from 2/8 to 6/8; mean duration 2.3606 to 2.6585 seconds.
+- Mean root error decreases from 136.55 to 72.19 mm. Foot/joint tracking checks pass,
+  but root and relative-displacement tracking still fail. No curriculum gate passes.
+- Quiet standing remains 8/8 at both durations. Mean root error increases from
+  18.46 to 23.84 mm at three seconds and 23.63 to 36.99 mm at five seconds, within
+  the existing retention limit.
+
+Longer training did not sustain the gains. Update 112 first loses a five-second
+quiet trial; subsequent checkpoints regress further and are rejected. Final update
+186 has 2/8 motion survivors, 146.47 mm mean motion root error, 8/8 short quiet
+survivors but only 2/8 five-second quiet survivors (88.08 mm mean root error).
+All 7,440 actor optimizer steps were accepted, with maximum accepted rollout KL
+0.01020. Finite optimization and KL compliance did not prevent behavioral forgetting.
+
+The separate paired phase-zero 16-second motion attempt (`complete-motion/report.json`)
+ends in a fall at 3.0002 seconds initially and 3.1169 seconds for selected update 80.
+Neither completes the outward shift and return. This is a short-validation gain,
+not learned full weight transfer or evidence to advance to Perturb. These cases
+were used for checkpoint selection; no independent-seed/generalization claim follows.
+
+The selected native/Newton survival counts and per-case durations agree. ONNX
+maximum action discrepancy is 2.682e-7. Export uses update 80; final unselected
+weights remain in `model.pt`. Both Godot viewer selections are unchanged and all
+training/evaluation jobs have finished. No production code changed during this run.
+
+Do not extend this run unchanged. The next experiment should include original quiet
+standing as actual training samples (currently it is only a retention evaluation)
+and train/evaluate beyond the three-second motion episode boundary. Keep the
+relative-displacement gates and compare against the retained checkpoint, so longer
+survival or later falls cannot be mistaken for completed motion tracking.
+
+## 2026-09-24: Smaller shifts and behavior-preserving motion features are ready for a pilot
+
+`prepare_shift_curriculum` retimes prefixes of the admitted two-foot motion to
+four-second outward shifts, with stopped endpoints and mirrored returns. Both
+16-second references pass all unchanged applicable physical gates, including
+root-wrench support and the existing 0.25-radian target-PD action window:
+
+- `weight-shift-small-01`: one-second source prefixes, 21.828 mm horizontal excursion.
+- `weight-shift-medium-01`: 1.5-second prefixes, 45.365 mm horizontal excursion.
+
+Both keep the feet and toes planted. They are motion references admitted for an
+isolated curriculum, not successful controllers. No skeleton/control limits were
+changed. Evaluation is now explicitly `mimic_weight_shift_tracking_v2`: per-case
+horizontal displacement error must be below the smaller of 15 mm and half the
+reference displacement RMS, with a 2 mm noise floor. This rejects standing still
+through a small meaningful shift. Legacy v1 results are not silently reranked.
+
+Two direct normalization migrations were rejected. Compensating the first network
+layers retained quiet standing but changed clipped motion behavior, dropping small
+shift survival from 2/8 to 0/8. Replacing scales without compensation reduced quiet
+survival to 4/8 at three seconds and 1/8 at five seconds. Their artifacts remain
+diagnostic under `shift-normalization-01` and `-02`; the trainer rejects them.
+
+The admitted preparation is `logs/mimickit-steps/shift-normalization-03`. Its
+`mimic_dual_motion_features_v1` architecture preserves all original normalization
+statistics, clipping and learned weights. It appends 266 separately scaled motion
+features (pending targets and future references) to the original 362 normalized
+inputs. Actor and critic input weights for the appended features start at zero.
+Thus the current policy is retained, while PPO can learn from motion information
+that was previously clipped. The external observation/controller contract remains
+362 values; this architecture change is recorded in checkpoint/export lineage.
+
+The scales were calibrated from 4,404 observations covering quiet/small/medium
+native rollouts and complete ideal-reference trajectories, including motion after
+early falls. New features stay inside the +/-10 clip on all tested post-preparation
+rollouts; 126 input scales required widening. The original input path is untouched.
+Initial ONNX actions match the source exactly on calibration observations. Quiet
+standing remains 8/8 at both three and five seconds, with mean root errors 18.46
+and 23.63 mm. Small/medium motion retains its original 2/8 and 1/8 survival counts;
+no new movement competence is claimed before learning.
+
+The trainer validates preparation/checkpoint/reference hashes and measured
+retention before accepting this initialization. It builds expanded layers before
+the optimizers, freezes both feature normalizers during guarded PPO, and preserves
+the preparation lineage in subsequent exports. Source checkpoints and Godot viewer
+selections remain unchanged. `candidate.pt` plus `contract.json` are training inputs;
+the preparation directory is not a Godot viewer bundle.
+
+CUDA integration on the RTX 4080 SUPER confirms 362 raw observations / 628 internal
+features, expanded-layer optimizer membership, nonzero gradients on new feature
+weights, maximum GPU action error 2.384e-7 and zero ONNX re-export discrepancy.
+No optimizer step or PPO update was performed. Evidence is `integration.json` in
+the preparation directory. Twenty-two focused tests passed, followed by eight
+feature/weight-shift tests after adding preparation integrity checks.
+
+Next: a bounded 15-minute, 2048-world pilot on the small reference, initialized from
+the admitted candidate, retaining critic clipping at 1, actor KL 0.02, evaluation
+interval 16 and no viewer promotion. Advance to the medium reference only after
+measured movement tracking and standing retention; longer survival alone is not
+the curriculum completion criterion. Reproduction commands are in the Mimic README.
+
+## 2026-09-24: Early weight-shift diagnosis; no torque saturation or clipping-only fix
+
+`audit_weight_shift` compares the original support_v2 Stand actor and the selected
+five-minute weight-shift actor on identical phase-zero native cases. It records
+physics-substep controls/contact loads, actual/reference poses, policy actions and
+normalizer coverage. All traces stop at first termination. No training, exported
+weights, normalization statistics, rig settings or Godot selections were changed.
+Evidence: `logs/mimickit-steps/weight-shift-audit-02/report.json` and
+`weight-shift-unclipped-01/report.json`.
+
+The full shift reproduces the early fall at 1.650 / 1.683 seconds (baseline/pilot).
+Both feet still carry substantial load at 0.8 seconds: approximately 357/304 N for
+the baseline and 366/295 N for the pilot. Root X velocity is already -0.306 / -0.284
+m/s. The 5 cm root-error threshold follows at 0.854 / 0.888 seconds. This is early
+horizontal divergence while the feet remain supported, not an observed loss of
+both foot-load channels. Joint targets are not clamped in the first 0.8 seconds;
+maximum motor demand is under 42% of the configured limits and no motor saturates
+anywhere in either full-shift trial. This does not prove that every required
+corrective action is reachable, but it gives no evidence for raising torque limits.
+
+The frozen Stand normalizer clips 10.1% of future-reference values and 2.46% of
+queued-target values in the early full-shift window. Future-reference clipping is
+only 0.46% on the quiet baseline, but also 9.72% on a successful held-start-pose
+case. Some new knee targets reach about 42 standard deviations under statistics
+learned from near-static standing. Input coverage is poor; clipping alone does not
+explain the failure. Removing only the observation clip in private in-memory ONNX
+copies worsens both full shifts to 1.350 seconds; action clipping and all learned
+weights remain intact. No unclipped policy is exported or promoted.
+
+Private amplitude interventions retain the initial pose and reduce subsequent
+motion using MuJoCo tangent-space interpolation with recomputed velocities:
+
+- Holding the start pose survives three seconds with both actors.
+- Quarter amplitude survives 2.550 / 2.684 seconds.
+- Half amplitude survives 2.017 / 2.117 seconds.
+- Full amplitude survives 1.650 / 1.683 seconds.
+
+These single-phase interventions are diagnostic kinematics, not physically admitted
+training references or proof of general recoverability. They support beginning a
+validated motion curriculum near a stable hold. Before another training budget,
+prepare physically checked smaller shifts and explicitly handle normalization
+coverage for the broader motion distribution. Preserve old export semantics and
+standing-retention checks; do not silently replace a loaded actor's statistics or
+remove clipping. The unresolved capability is moving balance, not a demonstrated
+need to rebuild the skeleton. Six diagnostic tests pass, covering coordinate
+indexing, quaternion-preserving amplitude changes, source immutability, clip-only
+intervention isolation and first-episode trace accounting.
+
+## 2026-09-23: Weight-shift pilot is numerically stable, but tracking remains failed
+
+The approved isolated pilot extracts the two double-support shifts from
+`transfer-calibration-02` and reverses each back to standing. The resulting
+`weight-shift-reference-01` contains 321 poses over 16 seconds. Its separate
+`mimic_weight_shift_reference_v1` contract requires planted feet/toes, horizontal
+excursion and all applicable physical gates. Foot lift is deliberately inapplicable
+to this task; stepping admission and the diagnostic parent remain unchanged.
+The trainer explicitly validates a reference-only substitution from the support_v2
+Stand checkpoint, retaining the physical/control contract and frozen normalizer.
+
+The first attempt, `weight-shift-5min-01`, aborted during its first optimizer update.
+A bounded reproduction (`weight-shift-critic-probe.json`) found finite observations,
+value targets and advantages, followed by unbounded critic SGD updates: loss rose
+from 464.6 to infinity and critic parameters became NaN on minibatch seven. Actor KL
+guarding did not protect the critic. The new opt-in `--critic-grad-clip 1` uses
+MimicKit's existing optimizer clipping; its default remains zero for other runs.
+Nonfinite parameter failures now save names/metrics before aborting without export.
+
+The retry, `logs/mimickit-training/weight-shift-5min-02`, completed 48 updates and
+3,145,728 transitions in 301.157 seconds, using 2048 CUDA worlds, evaluation interval
+16, seed 210921 and actor KL limit 0.02. Initial/final native evaluations are
+additional wall time. All 1,920 actor optimizer steps were accepted; maximum
+accepted rollout KL was 0.00997. The critic remained finite throughout this run.
+No reward, rig, sensor, latency or runtime action-authority changes were made.
+
+On the eight three-second native phase probes, initial to selected iteration 48:
+
+- Survival: 1/8 to 2/8; mean duration 1.7168 to 1.8418 seconds.
+- Mean root error: 0.16987 to 0.15258 m. Root, foot and displacement gates still fail.
+- Quiet standing: 8/8 retained at both three and five seconds. Mean root error
+  changes from 0.01846 to 0.01965 m and 0.02363 to 0.02650 m respectively.
+- Native and Newton final survival counts and durations agree; export action
+  discrepancy is below 3.6e-7.
+
+These are checkpoint-selection cases, not independent generalization evidence.
+The separate paired phase-zero full-motion attempt (`weight-shift-full-probe-01`)
+terminates at 1.6501 seconds for the baseline and 1.6835 seconds for the selected
+pilot. Neither completes the 16-second motion. This is a small short-suite gain,
+not successful weight transfer or a basis for promoting a stepping/Perturb policy.
+
+Both Godot viewer selections remain unchanged. The experimental export is retained
+for diagnosis only. Before a longer run, examine the early shift's state/action
+trajectory and frozen-normalizer coverage, then test a smaller-amplitude progression
+if the observations and available corrective actions are adequate. Keep the current
+standing-retention and movement gates; do not relax them to accept survival alone.
+
+Verification: 33 focused tests passed, followed by an eight-test weight-shift/contact
+rerun after the optimizer option and failure diagnostics were added. The full-motion
+probe and training completed; no training jobs remain active.
+
+## 2026-09-23: Transfer passes offline gates but fails native closed-loop tracking
+
+`track_transfer` now loads a calibration through an explicitly diagnostic reader,
+checks source/rig/content provenance, checks saved velocities and quaternion
+continuity, and reruns every offline physical gate. It reuses runtime reference
+sampling without creating a training-admission manifest. Native tests retain
+the deployed target-PD gains, torque/residual limits, latency and support_v2
+contacts. Traces stop at each case's first termination; later resets are excluded.
+
+`logs/mimickit-steps/transfer-tracking-01` tests `transfer-calibration-02` with
+the trained `stand-support-v2-15min-01` actor. The original standing baseline
+passes 8/8 three-second trials with that actor. Zero-residual PD passes 0/8 even
+on the original standing reference, so its failure alone cannot establish that
+a motion is unlearnable. On the transfer, all three controllers fail 8/8 short
+phase probes. The full 32-second attempt terminates before the first planned
+lift at four seconds: reference-only PD at 1.883 s, the standing actor at 1.650 s,
+and prefilled-queue PD at 1.883 s. No controller completes the transfer.
+
+The standing actor reaches 5 cm root error after 0.854 s, without motor saturation
+in that rollout. Private interventions under `transfer-tracking-interventions-01`
+narrow the failure: holding the calibration's initial pose survives three seconds
+with 14.4 mm mean / 23.6 mm maximum root error; using the original actor's phase
+scaling or disabling self-collisions still terminates at 1.650 s. These are single
+initial-phase interventions, not long-horizon proofs or production changes.
+Observed foot lift during a fall is not evidence of controlled stepping.
+
+The measured gap is motion-conditioned balance during the early weight shift.
+The tested reset-delay, phase-scaling and collision interventions do not resolve
+it. This does not prove the skeleton is defective, that an old Stand actor should
+already track a new motion, or that PPO cannot learn it. A dedicated, small
+weight-shift learning pilot with standing retention is the next useful experiment;
+the reference's offline pass is not a deployable controller. No PPO, export,
+Godot selection, physical model, control contract or admission-limit changes were
+made by this tracking investigation.
+
+Verification: 23 focused tests pass, including diagnostic provenance, fresh
+physical revalidation, first-episode trace truncation, reference sample timing,
+seed initialization, export compatibility, fixed context and contact contracts.
+The contact tests were rerun with the configured MimicKit path after their initial
+environment-dependent skip. `git diff --check` passes; no jobs remain active.
+
+## 2026-09-23: Requested 15-minute Perturb continuation regressed
+
+`logs/mimickit-training/perturb-resume-15min-01` warm-started the selected
+`perturb-recovery-v1-30min-02/best.pt`, preserving legacy contact semantics,
+target-PD, recovery_v1 reward, guarded PPO (KL bound 0.03), seed 210921,
+2048 CUDA worlds, evaluation interval 64, 1–2.5 m/s balls and 25% quiet worlds.
+This uses the existing standing reference; no new transfer calibration was used.
+The script loads weights/normalization with a fresh optimizer, not a complete
+optimizer/RNG resume. Training completed 125 updates / 8,192,000 transitions in
+905.313 seconds; initial/final validation and export were additional wall time.
+
+On the identical 96-case native validation suite, the final trained candidate
+regresses from 72 to 60 survived hits and 17 to 12 settled recoveries. Forward
+torso survival drops from 3/6 to 0/6; backward torso rises from 0/6 to 2/6.
+Both survive 8/8 three-second quiet phases, but mean root tracking error rises
+from 0.041654 m to 0.055176 m, failing the existing 0.05 m retention gate.
+The final candidate also survives 8/8 five-second quiet phases, with 0.060790 m
+mean root error. No actor update was rejected by the KL guard; that does not
+establish preserved behavior. The update-64 and final candidates both fail
+checkpoint selection. `best.pt` remains iteration 0.
+
+Export and viewer selection ran automatically. The new selected ONNX has the
+same SHA256 as the previous Godot actor, so F5 behavior is unchanged. Final
+trained weights are separately exported under `final-diagnostic/export` with
+`diagnostic_only: true`; they were not selected. Export action error is below
+4.2e-7 for both exports.
+
+A paired 30-second native stress test covers the same 12 forward/back torso
+impacts and eight quiet phases: baseline survives 3/12 impacts, final candidate
+2/12; both survive 8/8 quiet phases. Neither loses a five-second impact survivor
+later. This test retains runtime endpoint clamping and increasing phase after
+the roughly six-second reference, so it is outside the trained reference range,
+not proof of general long-horizon recovery. Reports and the hashed runner are in
+`long-baseline`, `long-final`, and `perturb-resume-long-probe.py` under the training
+log tree. No production code or training settings changed during this run.
+
+This single continuation does not support a longer run with unchanged settings.
+Keep the retained baseline; the directional trade-off and standing drift remain
+unresolved. All training and post-training evaluation jobs have finished.
+
 ## 2026-09-23: Feasible slow transfer calibration; no policy promotion
 
 `transfer-calibration-02` provides a 32-second stepping-in-place diagnostic on

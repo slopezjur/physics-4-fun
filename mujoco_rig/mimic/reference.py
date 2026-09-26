@@ -12,6 +12,8 @@ class StandReference:
     def __init__(self, path: Path, rig, device):
         self.path = path
         metadata = json.loads(path.with_suffix(".json").read_text())
+        if metadata.get("schema") == "mimic_stationary_stand_reference_v1":
+            raise ValueError("Stationary targets require the explicit continuous-standing contract")
         if not metadata["passed"] or metadata["model_sha256"] != sha256(rig.path):
             raise ValueError("Motion validation failed or motion targets a different rig")
         if metadata["reference_sha256"] != sha256(path):
@@ -20,6 +22,14 @@ class StandReference:
             raise ValueError("This source license has not been reviewed for the experiment")
         self.sha256 = metadata["reference_sha256"]
         with np.load(path, allow_pickle=False) as data:
+            if metadata.get("schema") == "mimic_weight_shift_reference_v1":
+                from .weight_shift import validate_reference
+                validate_reference(metadata)
+                if ("contact" not in data or "sole_contact" not in data
+                        or data["contact"].shape != (len(data["qpos"]), 2)
+                        or not data["contact"].all() or not data["sole_contact"].all()):
+                    raise ValueError("Weight-shift references require both feet and toes planted")
+                validate_sole_schedule(data["contact"], data["sole_contact"])
             if metadata.get("schema") == TOE_REFERENCE_SCHEMA:
                 from .motion_protocol import validate_motion_reference
                 validate_motion_reference(metadata)

@@ -1,5 +1,6 @@
 """Automatic viewer selection preserves completed exports and supports rollback."""
 import json
+import shutil
 from pathlib import Path
 import tempfile
 import unittest
@@ -83,6 +84,27 @@ class ViewerSelectionTests(unittest.TestCase):
         (run / "report.json").write_text(json.dumps(report))
         with self.assertRaisesRegex(ValueError, "ONNX"):
             select_run(run, self.root)
+
+    def test_final_candidate_is_explicit_hash_checked_and_reversible(self):
+        old = self.make_run("old")
+        select_run(old, self.root)
+        run = self.make_run("candidate")
+        shutil.copytree(run / "export", run / "final-export")
+        (run / "model.pt").write_bytes(b"final candidate differs from retained best")
+        report = json.loads((run / "report.json").read_text())
+        report["final_review_export"] = dict(checkpoint="model.pt", bundle="final-export",
+            checkpoint_sha256=sha256(run / "model.pt"), onnx_max_action_error=1e-7)
+        (run / "report.json").write_text(json.dumps(report))
+        selection = select_run(run, self.root, policy="final")
+        self.assertEqual(selection["bundle"], "res://candidate/final-export")
+        self.assertEqual(selection["previous"], "res://old/export")
+        self.assertEqual(rollback("ball", self.root)["bundle"], "res://old/export")
+        before = selection_path("ball", self.root).read_bytes()
+        (run / "model.pt").write_bytes(b"tampered")
+        with self.assertRaisesRegex(ValueError, "checkpoint"):
+            select_run(run, self.root, policy="final")
+        self.assertEqual(selection_path("ball", self.root).read_bytes(), before)
+        self.assertEqual(select_run(run, self.root)["bundle"], "res://candidate/export")
 
 
 if __name__ == "__main__":

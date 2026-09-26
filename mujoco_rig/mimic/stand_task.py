@@ -18,10 +18,11 @@ from .contact_contract import LEGACY, SUPPORT_V2, SAMPLING, SUPPORT_BODIES
 
 class StandTask(BaseEnv):
     def __init__(self, rig: Rig, reference: Path, num_envs=128, device="cuda:0", seed=210921,
-                 engine_factory=DummyNewtonEngine, control_mode="torque", contact_mode=LEGACY):
+                 engine_factory=DummyNewtonEngine, control_mode="torque", contact_mode=LEGACY,
+                 reference_factory=StandReference):
         super().__init__(False)
         self.rig, self.device = rig, device
-        self.reference = StandReference(reference, rig, device)
+        self.reference = reference_factory(reference, rig, device)
         if control_mode not in ("torque", "target_pd"):
             raise ValueError(f"Unknown control mode: {control_mode}")
         self.target_pd = control_mode == "target_pd"
@@ -63,16 +64,28 @@ class StandTask(BaseEnv):
     def get_env_time(self, env_ids=None):
         return self.steps * self.dt if env_ids is None else self.steps[env_ids] * self.dt
 
+    def sample_reference(self, time, env_ids=None):
+        return self.reference.sample(time)
+
+    def reference_duration(self, env_ids=None):
+        return self.reference.duration
+
+    def episode_duration(self, env_ids=None):
+        return self.episode_seconds
+
+    def reference_phase(self, time):
+        return time / self.reference_duration()
+
     def reset(self, env_ids=None):
         ids = self.ids if env_ids is None else env_ids
         if len(ids):
             self.steps[ids] = 0
             if self._mode == EnvMode.TRAIN:
-                self.offset[ids] = torch.rand(len(ids), device=self.device, generator=self.rng) * (self.reference.duration - self.episode_seconds)
+                self.offset[ids] = torch.rand(len(ids), device=self.device, generator=self.rng) * (self.reference_duration(ids) - self.episode_duration(ids))
             else:
                 # Deterministic phase coverage for repeated evaluation.
-                self.offset[ids] = ids / max(1, self.get_num_envs() - 1) * (self.reference.duration - self.episode_seconds)
-            q, v = self.reference.sample(self.offset[ids])
+                self.offset[ids] = ids / max(1, self.get_num_envs() - 1) * (self.reference_duration(ids) - self.episode_duration(ids))
+            q, v = self.sample_reference(self.offset[ids], ids)
             self.engine.reset_envs(ids, q, v)
         return self.observations(), {}
 
@@ -83,7 +96,7 @@ class StandTask(BaseEnv):
         q = self.engine.native_qpos()
         root_rot = self.engine.get_root_rot(0)
         phase = self.offset + self.steps * self.dt
-        future_q, _ = self.reference.sample(phase[:, None] + self.dt * torch.tensor([1, 2, 3], device=self.device))
+        future_q, _ = self.sample_reference(phase[:, None] + self.dt * torch.tensor([1, 2, 3], device=self.device))
         future = torch.cat([future_q[..., :3], quat_to_tan_norm(future_q[..., [4, 5, 6, 3]]), future_q[..., 7:]], dim=-1)
         control = self.engine.policy_control
         pending = torch.cat([control.pending[(control.cursor + i) % len(control.pending)] for i in range(len(control.pending))], dim=-1)
@@ -92,13 +105,13 @@ class StandTask(BaseEnv):
             loads += self.engine.get_ground_contact_forces(0)[:, self.allowed_ground[2:], 2].abs() * 0.001
         return torch.cat([q[:, :3], quat_to_tan_norm(root_rot), self.engine.get_root_vel(0),
                           self.engine.get_root_ang_vel(0), q[:, 7:], self.engine.get_dof_vel(0) * 0.1,
-                          loads, pending, future.flatten(1), (phase / self.reference.duration)[:, None]], dim=-1)
+                          loads, pending, future.flatten(1), self.reference_phase(phase)[:, None]], dim=-1)
 
     def reward(self):
         return self.reference_reward()
 
     def reference_reward(self, *, track_root=True):
-        q, v = self.reference.sample(self.offset + self.steps * self.dt)
+        q, v = self.sample_reference(self.offset + self.steps * self.dt)
         target_pos, target_rot = self.mapper.from_native_qpos(q)
         body_pos, body_rot = self.engine.get_body_pos(0), self.engine.get_body_rot(0)
         result = compute_reward(
@@ -113,14 +126,14 @@ class StandTask(BaseEnv):
 
     def step(self, action):
         if self.target_pd:
-            self.engine.policy_control.set_reference(*self.reference.sample(self.offset + self.steps * self.dt))
+            self.engine.policy_control.set_reference(*self.sample_reference(self.offset + self.steps * self.dt))
         self.engine.set_cmd(0, action)
         self.engine.step()
         self.steps += 1
         obs = self.observations()
         reward = self.reward()
         done = torch.zeros_like(self.steps, dtype=torch.int)
-        done[self.steps * self.dt >= self.episode_seconds] = DoneFlags.TIME.value
+        done[self.steps * self.dt >= self.episode_duration()] = DoneFlags.TIME.value
         contact = self.engine.get_ground_contact_forces(0).clone()
         contact[:, self.allowed_ground] = 0
         fallen = self.engine.get_root_pos(0)[:, 2] < 0.65

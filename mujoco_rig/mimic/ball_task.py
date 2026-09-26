@@ -15,7 +15,12 @@ from .recovery_reward import RecoveryReward
 class BallTask(StandTask):
     def __init__(self, rig, reference, num_envs=128, device="cuda:0", seed=210921,
                  engine_factory=None, control_mode="target_pd", speed_min=1., speed_max=2., quiet_fraction=.25,
-                 reward_mode="reference", contact_mode="legacy"):
+                 reward_mode="reference", contact_mode="legacy", curriculum="all_directions"):
+        if curriculum not in ("all_directions", "front_back_torso_v1", "mixed_recovery_v1"):
+            raise ValueError(f"Unknown ball curriculum: {curriculum}")
+        if curriculum == "mixed_recovery_v1" and quiet_fraction != .25:
+            raise ValueError("mixed_recovery_v1 requires 25% quiet episodes")
+        self.curriculum = curriculum
         if reward_mode not in ("reference", "recovery_v1"):
             raise ValueError(f"Unknown ball reward: {reward_mode}")
         self.reward_mode = reward_mode
@@ -33,6 +38,9 @@ class BallTask(StandTask):
             [rig.model.body(name).id - 1 for name in self.target_bodies],
             device=device, dtype=torch.long
         )
+        self.torso_indices = torch.tensor(
+            [rig.model.body(name).id - 1 for name in ("Chest", "Spine", "Pelvis")],
+            device=device, dtype=torch.long)
         super().__init__(rig, reference, num_envs, device, seed,
                          engine_factory or (BallNativeEngine if device == "cpu" else BallNewtonEngine), control_mode, contact_mode)
         self.episode_seconds = 5.
@@ -41,6 +49,7 @@ class BallTask(StandTask):
         self.directions = torch.zeros((num_envs, 3), device=device)
         self.shot_target_body = torch.zeros(num_envs, device=device, dtype=torch.long)
         self.shot_enabled = torch.zeros(num_envs, device=device, dtype=torch.bool)
+        self.focused_shot = torch.zeros(num_envs, device=device, dtype=torch.bool)
         self.reset()
 
     def reset(self, env_ids=None):
@@ -54,7 +63,28 @@ class BallTask(StandTask):
             angle = 2 * math.pi * torch.rand(len(ids), generator=self.rng, device=self.device)
             target_pick = torch.randint(0, len(self.target_bodies), (len(ids),), generator=self.rng, device=self.device)
             self.shot_target_body[ids] = self.target_indices[target_pick]
-            self.shot_enabled[ids] = torch.rand(len(ids), generator=self.rng, device=self.device) >= self.quiet_fraction
+            self.focused_shot[ids] = False
+            if self.curriculum in ("front_back_torso_v1", "mixed_recovery_v1"):
+                # World +/-X matches the existing forward/back validation directions.
+                # Keep modest angle variation instead of teaching only two exact rays.
+                side = torch.randint(0, 2, (len(ids),), generator=self.rng, device=self.device)
+                jitter = torch.rand(len(ids), generator=self.rng, device=self.device) * 2 - 1
+                focused_angle = side * math.pi + jitter * math.radians(10)
+                target_pick = torch.randint(0, len(self.torso_indices), (len(ids),), generator=self.rng, device=self.device)
+                if self.curriculum == "mixed_recovery_v1":
+                    # One categorical draw gives unconditional 50/25/25 episode
+                    # probabilities, not 50% of the already-filtered impact worlds.
+                    mixture = torch.rand(len(ids), generator=self.rng, device=self.device)
+                    focused = mixture < .5
+                    self.shot_enabled[ids] = mixture < .75
+                else:
+                    focused = torch.ones(len(ids), device=self.device, dtype=torch.bool)
+                angle = torch.where(focused, focused_angle, angle)
+                self.shot_target_body[ids] = torch.where(focused, self.torso_indices[target_pick], self.shot_target_body[ids])
+                self.focused_shot[ids] = focused
+            if self.curriculum != "mixed_recovery_v1":
+                self.shot_enabled[ids] = torch.rand(len(ids), generator=self.rng, device=self.device) >= self.quiet_fraction
+            self.focused_shot[ids] &= self.shot_enabled[ids]
         else:
             self.shot_steps[ids] = 60
             # Full Cartesian coverage: bodies vary fastest, then direction, then speed.
@@ -64,6 +94,7 @@ class BallTask(StandTask):
             angle = ((case_ids // len(self.target_bodies)) % 4) * math.pi / 2
             self.shot_target_body[ids] = self.target_indices[ids % len(self.target_bodies)]
             self.shot_enabled[ids] = True
+            self.focused_shot[ids] = False
             self.offset[ids] = level.float() * .8
             self.engine.reset_envs(ids, *self.reference.sample(self.offset[ids]))
         self.directions[ids, 0] = torch.cos(angle)
@@ -94,6 +125,16 @@ class BallTask(StandTask):
                 "quiet_fraction": self.quiet_fraction, "launch_distance_m": .65,
                 "launch_steps_inclusive": [60, 120], "target_body": "multi_body",
                 "target_bodies": list(self.target_bodies),
+                "training_curriculum": {"schema": self.curriculum,
+                    "episode_probabilities": {"focused_torso": .5, "all_directions": .25, "quiet": .25}
+                        if self.curriculum == "mixed_recovery_v1" else None,
+                    "focused_component": {"target_bodies": ["Chest", "Spine", "Pelvis"],
+                        "direction_centers_degrees": [0, 180], "direction_jitter_degrees": 10}
+                        if self.curriculum == "mixed_recovery_v1" else None,
+                    "target_bodies": ["Chest", "Spine", "Pelvis"] if self.curriculum == "front_back_torso_v1" else list(self.target_bodies),
+                    "direction_centers_degrees": [0, 180] if self.curriculum == "front_back_torso_v1" else None,
+                    "direction_jitter_degrees": 10 if self.curriculum == "front_back_torso_v1" else None,
+                    "validation": "unchanged full 96-case all-direction suite"},
                 "flight": "ballistic; aim at launch-time target; no gravity cancellation",
                 "reward": (self.recovery_reward.contract() if self.reward_mode == "recovery_v1" else
                            {"schema": "standing_reference_v1", "description": "unchanged DeepMimic standing reference"})}

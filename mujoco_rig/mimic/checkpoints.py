@@ -73,12 +73,18 @@ def standing_passed(metrics):
 
 
 def checkpoint_rank(metrics):
+    from .continuous_stand import EVALUATION_SCHEMA, retention_rank
+    if metrics.get('evaluation_schema') == EVALUATION_SCHEMA:
+        return retention_rank(metrics)
     values = [metrics[key] for key in ("episodes", "successes", "mean_survival_seconds", "mean_root_tracking_error_m")]
     count = metrics["episodes"]
     if not all(math.isfinite(float(v)) for v in values) or type(count) is not int or count < 1 \
             or type(metrics["successes"]) is not int or not 0 <= metrics["successes"] <= count or metrics["mean_survival_seconds"] < 0 \
             or metrics["mean_root_tracking_error_m"] < 0:
         raise ValueError("Invalid evaluation metrics")
+    if "weight_shift_tracking" in metrics:
+        from .weight_shift import checkpoint_rank as weight_shift_rank
+        return weight_shift_rank(metrics)
     if "quiet_standing_passed" in metrics:
         if type(metrics["quiet_standing_passed"]) is not bool:
             raise ValueError("Ball selection requires a measured quiet-standing gate")
@@ -118,16 +124,20 @@ class BestCheckpoint:
         self.decisions = []
 
     def consider(self, save, metrics, *, iteration, samples):
+        from .continuous_stand import EVALUATION_SCHEMA, retention_regressions
         rank = checkpoint_rank(metrics)
-        ball = "quiet_standing_passed" in metrics
+        stationary = metrics.get('evaluation_schema') == EVALUATION_SCHEMA
+        weight_shift = "weight_shift_tracking" in metrics
+        ball = "quiet_standing_passed" in metrics and not weight_shift
         groups = ball_selection_groups(metrics)[1] if ball else None
         if self.metadata is not None and any(metrics.get(key) != self.metadata["metrics"].get(key)
-                                             for key in ("episodes", "evaluation_schema")):
+                                               for key in ("episodes", "evaluation_schema", "extended_motion_seconds", "reward_schema")):
             raise ValueError("Cannot compare checkpoints evaluated on different suites")
-        regressions = ball_regressions(metrics, self.metadata["metrics"]) if ball and self.metadata is not None else []
+        regressions = (retention_regressions(metrics, self.metadata['metrics']) if stationary else
+                       ball_regressions(metrics, self.metadata['metrics']) if ball else []) if self.metadata is not None else []
         improved = self.metadata is None or rank > checkpoint_rank(self.metadata["metrics"])
         decision = dict(iteration=iteration, samples=samples, accepted=improved and not regressions,
-                        reason="directional_regression" if regressions else "improved_rank" if improved else "rank_not_improved",
+                        reason=("standing_case_regression" if stationary else "directional_regression") if regressions else "improved_rank" if improved else "rank_not_improved",
                         regressions=regressions)
         if not decision["accepted"]:
             self.decisions.append(decision)
@@ -138,9 +148,12 @@ class BestCheckpoint:
         temporary.replace(self.path)
         self.metadata = {"checkpoint_sha256": digest, "iteration": iteration, "samples": samples,
                          "metrics": copy.deepcopy(metrics), "contract": self.contract,
-                         "selection_policy": BALL_SELECTION if ball else "motion_tracking_v1" if "motion_tracking" in metrics else "standing_rank_v1",
+                         "selection_policy": EVALUATION_SCHEMA if stationary else metrics["evaluation_schema"] if weight_shift and "extended_motion_native" in metrics else "weight_shift_tracking_v2" if weight_shift else BALL_SELECTION if ball else "motion_tracking_v1" if "motion_tracking" in metrics else "standing_rank_v1",
                          "retention_groups": groups,
-                         "selection": ("retain confirmed hits, survival and recovery in every direction and torso subgroup; then quiet standing gate, survived confirmed hits, settled recovery, successes, survival, root error"
+                         "selection": ("retain every passing stationary case; rank complete gate, passing cases, survival count, worst/mean duration and root error" if stationary else
+                                       "quiet standing retention, both tracking gates, extended survival, short survival, duration and root error" if weight_shift and "extended_motion_native" in metrics else
+                                       "quiet standing retention, weight-shift tracking, survival, displacement error, root error" if weight_shift else
+                                       "retain confirmed hits, survival and recovery in every direction and torso subgroup; then quiet standing gate, survived confirmed hits, settled recovery, successes, survival, root error"
                                        if ball else
                                        "tracking gate, successes, survival, lower foot error, lower root error; fixed eight phases"
                                        if "motion_tracking" in metrics else

@@ -1,6 +1,8 @@
 param(
     [string] $Config = "$PSScriptRoot/config.ps1",
     [string] $Run = '',
+    [ValidateSet('best', 'final')]
+    [string] $Policy = 'best',
     [switch] $Previous,
     [string] $Experiment = ''
 )
@@ -11,7 +13,7 @@ $settings = Read-MimicConfig $Config
 $python = Require-MimicPath $settings.Python
 $arguments = @('-B', '-m', 'mujoco_rig.mimic.viewer_selection')
 if ($Run) {
-    $arguments += @('--run', (Require-MimicPath $Run))
+    $arguments += @('--run', (Require-MimicPath $Run), '--policy', $Policy)
 } else {
     if (-not $Experiment) { $Experiment = $settings.DefaultExperiment }
     if (-not $settings.Experiments.ContainsKey($Experiment)) { throw "Unknown experiment: $Experiment" }

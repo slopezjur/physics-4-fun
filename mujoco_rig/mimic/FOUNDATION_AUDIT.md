@@ -339,6 +339,26 @@ not training-admitted or deployed. Native closed-loop tracking is the next step;
 there is no evidence here supporting another reward or torque change. Sixty-six
 focused tests cover the fitting, initialization and interpolation paths.
 
+## Native transfer tracking (2026-09-23)
+
+The passing offline calibration is not yet tracked in native closed loop.
+`track_transfer` revalidates its provenance and physical checks without creating
+a training manifest. The deployed Stand v2 actor passes 8/8 original standing
+trials but 0/8 transfer phase trials. Its complete-transfer attempt falls at
+1.650 s, before the planned first lift at four seconds. Reference-only PD falls
+at 1.883 s with either the production empty queue or a diagnostic prefilled queue;
+it also fails the original standing baseline, so zero-action survival is not a
+necessary prerequisite for a learnable reference.
+
+The same actor holds the calibration's first pose for three seconds with 14.4 mm
+mean root error. Separate original-phase-scaling and private no-self-collision
+tests still fall at 1.650 s. The transfer actor reaches 5 cm root drift at 0.854 s
+without saturating its motors. These results point to the early moving balance
+task rather than the tested initialization, phase-scaling or self-contact causes.
+They do not establish global skeleton correctness or inevitable training failure.
+No policy, rig, controller contract or Godot selection changed. Evidence:
+`transfer-tracking-01` and `transfer-tracking-interventions-01` in the step log tree.
+
 ## Reproduction
 
 Use the project's Mimic virtual environment for `$python`, and the configured
