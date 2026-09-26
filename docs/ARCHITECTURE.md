@@ -12,7 +12,9 @@ Physics4Fun.Ragdoll/
 │   ├── IBalanceTelemetryProvider.cs    # Read-only contract for UI & diagnostics
 │   ├── IBiomechanicalReflex.cs         # Autonomous reflex strategy contract
 │   ├── IBalanceStrategy.cs             # Balance strategy contract (BalanceContext + Apply)
-│   ├── IBoneState.cs                   # Narrow read-only bone view; what makes consumers testable
+│   ├── IBoneState.cs                   # Read-only bone state
+│   ├── IBoneActuator.cs                # Balance and reflex commands
+│   ├── ISupportLoadBone.cs             # Support hierarchy and load share
 │   └── ISupportLoadDistribution.cs     # How planted limbs share body weight
 ├── Modules/
 │   ├── DynamicSteppingModule.cs         # Instantaneous Capture Point (ICP) & 2-bone IK
@@ -32,6 +34,7 @@ Physics4Fun.Ragdoll/
 │   ├── SupineRecoveryTrajectory.cs      # 4-phase get-up trajectory from back
 │   ├── ProneRecoveryTrajectory.cs       # 4-phase get-up trajectory from front
 │   ├── PushUpDrillTrajectory.cs        # Scripted push-up drill for actuator validation
+│   ├── PushUpDrillClock.cs             # Per-ragdoll diagnostic repetition clock
 │   ├── IPhasedRecoveryTrajectory.cs    # Contract for trajectories driven by GetUpPhaseController
 │   └── ReactiveMotionTrajectories.cs   # Impact stumbling and flailing trajectories
 ├── Support/
@@ -55,7 +58,7 @@ Physics4Fun.Ragdoll/
 * Each physical capability (ICP stepping, asymmetric weight shifting, ankle reactions, hip strategy, pelvis stabilization, arm reflexes, vestibular gaze, hit reactions, environmental bracing, and get-up synthesis) is encapsulated in a dedicated module without cross-contamination.
 * Autonomous reflexes implement `IBiomechanicalReflex` and register into a pipeline dynamically without modifying core balance code. Balance strategies (stepping, weight transfer, hip, ankle, pelvis stabilization) implement `IBalanceStrategy` and register into `BalanceController`'s balance pipeline the same way — each strategy receives a single per-tick `BalanceContext` and self-gates on state/step-phase/ground-contact, so a new strategy can be added by registering it, no orchestrator edits required. Motion trajectories implement `IMotionTrajectory` and register into `BiomechanicalMotionSynthesizer`; any trajectory can be substituted for another at runtime.
 * Telemetry consumers (`RagdollTelemetryRecorder`, HUDs) bind to `IBalanceTelemetryProvider`, isolating diagnostics and UI from mutable physics controllers.
-* High-level controllers depend on abstractions (`IBiomechanicalReflex`, `IBalanceStrategy`, `IMotionTrajectory`, `IBalanceTelemetryProvider`) rather than concrete monolithic physics blocks.
+* High-level controllers depend on abstractions (`IBiomechanicalReflex`, `IBalanceStrategy`, `IMotionTrajectory`, `IBalanceTelemetryProvider`) rather than concrete monolithic physics blocks. The support-load policy takes `ISupportLoadBone` so it can be checked without a Godot scene.
 * `BalanceController` composes the two pipelines and owns bone wiring, telemetry, and per-tick sensing; the state machine (`RagdollStateMachine`), ground sensing (`GroundContactModule`), and shared kinematics math (`BiomechanicalKinematics`) are each extracted into their own single-purpose classes rather than living inline in the coordinator.
 
 ---
@@ -133,10 +136,18 @@ instead of an anonymous line in the body class.
 
 One more is retired outright: the project now has a **test project**. `Tests/Physics4Fun.Tests`
 covers the SPD actuator, the Hill law, swing-twist, the behavioural FSM, the capture-point maths and
-the get-up phase machine in 91 tests that need no Godot install and run in ~30 ms — see
+the get-up phase machine in over 140 tests that need no Godot install — see
 `Tests/README.md` for what is reachable and what is permanently not. The reach was widened by
 `IBoneState`, a narrow read-only bone contract that lets a context struct stop carrying
 `ActiveBone`; `RecoveryContext` moved first, with no call-site and no scene changes.
+
+`BalanceContext` now carries the write-side `IBoneActuator`, and the reflexes depend on
+the read-only `IBoneState` or the write-side `IBoneActuator` according to what they use. The
+procedural strategies can be exercised with managed fakes. Each `HumanoidRagdoll` owns its motion
+trajectory registry, preventing cross-body state leakage if a trajectory later becomes stateful.
+The push-up drill clock and the grab tether renderer are also separate from their coordinators.
+`PlantedLimbLoadDistribution` now reads the hierarchy and writes shares through
+`ISupportLoadBone`; its known total-mass estimate remains unchanged.
 
 Two more are retired by the move to many bodies per process. `OrientationClassifier` was a static
 class holding a static hysteresis latch — correct while a process simulated one ragdoll, and a
@@ -151,19 +162,18 @@ the angle that was actually commanded.
 | # | Where | Issue | Why it matters |
 |---|---|---|---|
 | 1 | `ActiveBone` | ~5 responsibilities in ~840 lines: rigid body, SPD actuator, gravity/support feed-forward, force-velocity limit, joint-limit querying. | Less urgent than it reads. The SPD core was never actually in here — it lives in `PidController3D`, which has zero scene-tree references and is now covered by 17 tests. What remains engine-bound is orchestration, the load feed-forward (which walks the distal chain reading transforms), and joint-limit reads that query a `Generic6DofJoint3D` by string. The Hill law and swing-twist are pure statics and covered. A split is still worth doing, but the arithmetic it would move is now pinned, which is what makes it safe. |
-| 2 | `BalanceContext` | 28 members, 14 of them `ActiveBone`; every module receives the whole body. | Two separate issues, and only one is worth fixing. The **width** is deliberately kept: passed `in`, no per-tick copy, negligible at 64 bodies, no defect ever traced to it. The **bone type** is not — carrying `ActiveBone` (a `RigidBody3D`) is what keeps every `IBalanceStrategy` and reflex module untestable, exactly as it did for `RecoveryContext` before that moved to `IBoneState`. Converting it is the next step, and needs a write-side `IBoneActuator` companion for the modules that drive bones rather than only observing them. |
+| 2 | `BalanceContext` | 28 members; every module receives the whole body. | The bone dependency is retired. Width remains deliberate: the context is passed `in`, and no defect has been traced to its size. |
 | 3 | `RagdollRLBridge` | Still ~7 responsibilities after the curriculum extraction; `GetStepInfo` is 130 lines. | Cohesive dictionary assembly, so splitting it adds indirection without clarity. The `TaskKind` switch is closed for extension — the right moment to add a registry is when a third brain appears, not before. |
 | 4 | `BodyStateObservation` | The 7-float goal block emits constants and has no contract of its own — no `IRlGoalProvider` alongside the other five. | Deliberately **not** fixed. The slots are inert (six emit exactly `0.0`, so their first-layer weights receive exactly zero gradient), and the interface earns nothing until something actually writes a command. The moment one does — heading for walking is the near-certain first — it should arrive as a contract, not as an edit to `Build()`. |
 | 5 | `RagdollSpawner._EnterTree` | Spawn timing is load-bearing and enforced only by a comment. | `sync.gd` builds its agent list from the `AGENT` group in `_ready`, and `PolicyAutoLoader` reads `Agents` in the root's `_Ready`. Moving the spawn to `_Ready` makes Sync handshake with an empty observation space. Godot offers no way to declare this ordering, so the comment is the mechanism. |
-| 6 | `BiomechanicalMotionSynthesizer` | Static registry sharing one trajectory instance across every body in the process; statelessness is an unenforced invariant. | Safe today — every trajectory is a pure function of its arguments and holds only immutable `PhaseBoundaries` — and now documented on the class. A trajectory that caches per-body state would silently share it across 64 ragdolls, producing targets that depend on which *other* body was evaluated first: nondeterministic, load-dependent, and invisible in a single-body scene. The fix if it happens is the one `OrientationClassifier` just took: move the registry off `static` and give each `BalanceController` its own. |
-| 7 | `HumanoidRagdoll` | ~8 responsibilities in 693 lines: state driving, bone registry, muscle stiffness, target writing, reset/teleport/spawn, the push-up drill, telemetry ownership, recovery-context assembly. | The push-up drill is the cleanly separable one — a self-contained scripted diagnostic with its own timer, constants and progress property, sitting in the body class. Not extracted here because it is inert in every scene that matters and the churn would touch the same file as item 1; worth doing alongside that, not before it. |
-| 8 | `PhysicsGrabber` | Grab physics and tether *rendering* (`ImmediateMesh`, `StandardMaterial3D`) in one class. | Debug tooling used only by `TestChamber.tscn`, so the blast radius is a debug scene. Recorded rather than fixed. |
+| 6 | `BiomechanicalMotionSynthesizer` | Shared trajectory state across bodies. | Retired: each `HumanoidRagdoll` owns a registry and its trajectory instances. |
+| 7 | `HumanoidRagdoll` | State driving, bone registry, muscle stiffness, target writing, reset/teleport/spawn, telemetry ownership and recovery-context assembly remain together. | The push-up repetition clock is extracted. Further splits need scene-level verification because this class coordinates the live Godot body. |
+| 8 | `PhysicsGrabber` | Grab physics and tether rendering in one class. | Retired: `GrabTetherVisual` owns the mesh and material; the grabber supplies endpoints. |
 
 Two notes that are not table rows:
 
-`ActiveBone.IsTargetWithinJointLimits` is known-broken (Euler YXZ cannot represent the ±2.6 rad
-limits four axes on this rig have) and its own doc comment says so. It is diagnostic-only; the RL
-action path scales into the limits by construction and does not depend on it.
+`ActiveBone.IsTargetWithinJointLimits` now uses swing-twist decomposition for wide joint ranges;
+managed actuator tests cover the formerly misread axes.
 
 **The observation width is frozen at 113.** Not debt so much as a standing constraint: it has been
 106, 108, 115 and 113 across the archived lineages, every change orphans every checkpoint, and one

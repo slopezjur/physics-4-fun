@@ -69,6 +69,7 @@ rl/runs_archive/
 # alters the dummy visible in a diff. Everything below is a build artifact of those two.
 isaac_lab/logs/
 isaac_lab/outputs/
+isaac_lab/scripts/outputs/
 isaac_lab/assets/dummy.usd
 isaac_lab/assets/configuration/
 isaac_lab/assets/config.yaml
@@ -85,16 +86,12 @@ isaac_lab/exported/*.pt
 # The exported policy in Models/ stays tracked on purpose: it is the deliverable Godot loads, it is
 # ~1 MB, and a scene that references a file nobody has is broken for everyone who clones.
 isaac_lab_3/logs/
-isaac_lab/logs/
-rl/runs/
 *.pt
 *.tfevents.*
 
 # Scratch and probes. Kept out because they are written to answer one question and are misleading
 # once the answer is known - a stale reference_obs.json reads exactly like a current one.
 isaac_lab_3/exported/
-**/__pycache__/
-*.pyc
 
 # Root-level RSL-RL training output. `isaac_lab/logs/` and `isaac_lab_3/logs/` are already ignored
 # above, but runs land in `logs/rsl_rl/` at the repo root, which those patterns do not reach: 8.3 GB

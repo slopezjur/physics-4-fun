@@ -10,11 +10,8 @@ namespace Physics4Fun.Tests;
 /// <summary>
 /// The first tests this module has ever had.
 ///
-/// <para>Not for want of trying: <see cref="BalanceContext"/> used to carry the concrete
-/// <c>ActiveBone</c>, a <c>RigidBody3D</c>, so exercising a balance strategy meant standing up a
-/// live scene tree. The strategy with the longest method in the codebase was therefore the one
-/// nothing could reach. Once the context carries <see cref="IBoneState"/>, <see cref="FakeBone"/> is
-/// enough - which is exactly what that class was written for.</para>
+/// <para><see cref="BalanceContext"/> carries <see cref="IBoneActuator"/> rather than a live
+/// <c>ActiveBone</c>, so <see cref="FakeBone"/> can exercise the strategy without a scene tree.</para>
 ///
 /// <para>These cover the guard clauses rather than the stepping maths. The guards are what decide
 /// whether the module acts on the body at all, they are cheap to state exactly, and one of them -
@@ -24,8 +21,8 @@ public class DynamicSteppingModuleTests
 {
     private static BalanceContext Context(
         RagdollState state = RagdollState.Balanced,
-        IBoneState? footL = null,
-        IBoneState? footR = null,
+        IBoneActuator? footL = null,
+        IBoneActuator? footR = null,
         StepPhase phase = StepPhase.LeftSwing)
     {
         FakeBone pelvis = FakeBone.At(0.9f, name: "Pelvis");

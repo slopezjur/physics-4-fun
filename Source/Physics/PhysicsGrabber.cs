@@ -23,10 +23,7 @@ public partial class PhysicsGrabber : Node
     private Vector3 _lastTargetPosition;
     private Vector3 _targetVelocity;
 
-    // Visual 3D Tether Line
-    private MeshInstance3D _tetherMeshInstance = null!;
-    private ImmediateMesh _immediateMesh = null!;
-    private StandardMaterial3D _tetherMaterial = null!;
+    private GrabTetherVisual _tether = null!;
 
     public bool IsGrabbing => _grabbedBody != null && IsInstanceValid(_grabbedBody);
     public RigidBody3D? GrabbedBody => _grabbedBody;
@@ -38,22 +35,7 @@ public partial class PhysicsGrabber : Node
     {
         _camera = GetViewport().GetCamera3D();
 
-        // Setup 3D visual tether line
-        _immediateMesh = new ImmediateMesh();
-        _tetherMaterial = new StandardMaterial3D
-        {
-            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-            AlbedoColor = new Color(0.2f, 0.95f, 1.0f, 0.9f),
-            Transparency = BaseMaterial3D.TransparencyEnum.Alpha
-        };
-
-        _tetherMeshInstance = new MeshInstance3D
-        {
-            Mesh = _immediateMesh,
-            MaterialOverride = _tetherMaterial,
-            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off
-        };
-        AddChild(_tetherMeshInstance);
+        _tether = new GrabTetherVisual(this);
     }
 
     public override void _UnhandledInput(InputEvent @event)
@@ -172,10 +154,9 @@ public partial class PhysicsGrabber : Node
 
     private void UpdateTetherVisual()
     {
-        _immediateMesh.ClearSurfaces();
-
         if (!IsGrabbing || _grabbedBody == null || _camera == null)
         {
+            _tether.Clear();
             return;
         }
 
@@ -183,11 +164,7 @@ public partial class PhysicsGrabber : Node
         Vector3 targetPos = _camera.GlobalPosition + (rayDir * _currentGrabDistance);
         Vector3 worldGrabPoint = _grabbedBody.GlobalTransform * _localGrabPoint;
 
-        // Draw line between cursor target point and grabbed body point
-        _immediateMesh.SurfaceBegin(Mesh.PrimitiveType.Lines);
-        _immediateMesh.SurfaceAddVertex(targetPos);
-        _immediateMesh.SurfaceAddVertex(worldGrabPoint);
-        _immediateMesh.SurfaceEnd();
+        _tether.Draw(targetPos, worldGrabPoint);
     }
 
     private void TryGrab()
@@ -216,6 +193,7 @@ public partial class PhysicsGrabber : Node
             _localGrabPoint = _grabbedBody.GlobalTransform.AffineInverse() * hitPos;
             _currentGrabDistance = rayOrigin.DistanceTo(hitPos);
             _lastTargetPosition = hitPos;
+            _targetVelocity = Vector3.Zero;
 
             // If grabbed body belongs to a ragdoll, trigger flailing reaction
             if (_grabbedBody.GetParent() is HumanoidRagdoll ragdoll)
@@ -223,7 +201,6 @@ public partial class PhysicsGrabber : Node
                 ragdoll.SetState(RagdollState.Flailing);
             }
 
-            GD.Print($"[PhysicsGrabber] Grabbed {_grabbedBody.Name} ({_grabbedBody.Mass:F1}kg)");
         }
     }
 
@@ -240,8 +217,8 @@ public partial class PhysicsGrabber : Node
             _grabbedBody.ApplyCentralImpulse(throwImpulse);
         }
 
-        GD.Print($"[PhysicsGrabber] Released {_grabbedBody.Name}");
         _grabbedBody = null;
-        _immediateMesh.ClearSurfaces();
+        _targetVelocity = Vector3.Zero;
+        _tether.Clear();
     }
 }

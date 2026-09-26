@@ -14,19 +14,19 @@ public class ArmReflexModule : IBiomechanicalReflex
 
     private IBoneState? _pelvis;
     private IBoneState? _chest;
-    private IBoneState? _upperArmL;
-    private IBoneState? _upperArmR;
-    private IBoneState? _forearmL;
-    private IBoneState? _forearmR;
+    private IBoneActuator? _upperArmL;
+    private IBoneActuator? _upperArmR;
+    private IBoneActuator? _forearmL;
+    private IBoneActuator? _forearmR;
     private Godot.Collections.Array<Rid> _ragdollRids = new();
 
     public void Initialize(
         IBoneState pelvis,
         IBoneState? chest,
-        IBoneState? upperArmL,
-        IBoneState? upperArmR,
-        IBoneState? forearmL,
-        IBoneState? forearmR,
+        IBoneActuator? upperArmL,
+        IBoneActuator? upperArmR,
+        IBoneActuator? forearmL,
+        IBoneActuator? forearmR,
         Godot.Collections.Array<Rid> ragdollRids)
     {
         _pelvis = pelvis;

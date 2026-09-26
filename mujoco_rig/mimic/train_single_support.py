@@ -14,7 +14,7 @@ from .checkpoints import standing_passed
 from .evaluate_stand import evaluate
 from .native_engine import NativeDummyEngine
 from .policy import StandPolicy
-from .probe_single_support import (HOLD_SECONDS, PoseHoldReference,
+from .probe_single_support import (EXTENDED_HOLD_SECONDS, HOLD_SECONDS, PoseHoldReference,
                                    evaluate_hold, physical_pose)
 from .probe_steps import validate_reference_substitution
 from .rig import Rig
@@ -22,7 +22,7 @@ from .runtime import MIMICKIT_REVISION, activate
 from .track_transfer import CalibrationReference
 
 
-SCHEMA = "mimic_single_support_ppo_pilot_v1"
+SCHEMA = "mimic_single_support_ppo_pilot_v2"
 TARGET_POSE_SECONDS = 8.
 
 
@@ -60,7 +60,7 @@ def run(args):
     with np.load(parent.path, allow_pickle=False) as arrays:
         frame = round(TARGET_POSE_SECONDS / parent.dt)
         physical = physical_pose(rig, arrays, frame)
-        pose = arrays["qpos"][frame].copy()
+        pose = np.asarray(physical["pose"], dtype=np.float64)
     if not physical["passed"] or physical["contact"] != [False, True]:
         raise ValueError("Target must be physically feasible right-leg support")
 
@@ -84,7 +84,7 @@ def run(args):
     hold = StandTask(rig, args.reference, 1, "cpu", engine_factory=NativeDummyEngine,
                      control_mode="target_pd", contact_mode="support_v2",
                      reference_factory=reference_factory)
-    hold.episode_seconds = HOLD_SECONDS
+    hold.episode_seconds = EXTENDED_HOLD_SECONDS
     quiet = StandTask(rig, Path(__file__).parent / "assets/stand_reference.npz",
                       8, "cpu", engine_factory=NativeDummyEngine,
                       control_mode="target_pd", contact_mode="support_v2")
@@ -102,12 +102,14 @@ def run(args):
                     model_sha256=sha256(rig.path), source_reference_sha256=parent.sha256,
                     target_pose_seconds=TARGET_POSE_SECONDS, target_contact=physical["contact"],
                     target_physical_checks=physical["checks"],
+                    target_passive_equilibrium=physical["metrics"]["passive_equilibrium"],
                     actor_contract=train_task.observation_contract(),
                     reward=dict(base_weight=.6, right_support_weight=.2,
                                 quiet_velocity_weight=.2, left_unloaded=True),
-                    native_gate=dict(hold_seconds=HOLD_SECONDS,
+                    native_gate=dict(hold_seconds=EXTENDED_HOLD_SECONDS,
                                      quiet_standing_phases=8,
-                                     final_settled_seconds=.5),
+                                     final_settled_seconds=.5,
+                                     max_swing_load_after_startup_n=5.),
                     envs=args.envs, seconds=args.seconds, seed=args.seed,
                     evaluation_interval=args.evaluation_interval,
                     mimickit_revision=MIMICKIT_REVISION,
@@ -122,7 +124,8 @@ def run(args):
     def review():
         actor = copy.deepcopy(StandPolicy(agent)).eval().cpu()
         quiet_metrics, _ = evaluate(quiet, actor)
-        hold_metrics, hold_gate = evaluate_hold(hold, actor, physical["contact"])
+        hold_metrics, hold_gate = evaluate_hold(hold, actor, physical["contact"],
+                                                seconds=EXTENDED_HOLD_SECONDS)
         return dict(quiet=quiet_metrics, quiet_passed=standing_passed(quiet_metrics),
                     hold=hold_metrics, hold_gate=hold_gate)
 

@@ -96,7 +96,6 @@ public partial class RagdollDebugInput : Node
                 bone.GravityScale = gravityScale;
             }
         }
-        GD.Print($"[DebugInput] Zero-Gravity set to: {_zeroGravity}");
     }
 
     private void ToggleFreezePelvis()
@@ -104,7 +103,6 @@ public partial class RagdollDebugInput : Node
         if (Ragdoll?.Pelvis != null && IsInstanceValid(Ragdoll.Pelvis))
         {
             Ragdoll.Pelvis.Freeze = !Ragdoll.Pelvis.Freeze;
-            GD.Print($"[DebugInput] Pelvis Freeze set to: {Ragdoll.Pelvis.Freeze}");
         }
     }
 }

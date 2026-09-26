@@ -9,12 +9,12 @@ namespace Physics4Fun.Tests;
 /// This class is the whole point of <see cref="IBoneState"/>. Before it, every consumer of a bone -
 /// the get-up phase machine, the balance strategies, the load distributor - needed a live
 /// <c>RigidBody3D</c> in a running scene tree to be exercised at all, so none of them ever were.
-/// Twenty lines of fake replaces the engine for anything that only READS bone state.
+/// A managed fake replaces the engine for state reads and actuator commands.
 ///
 /// It can also do something a real bone cannot: report <see cref="IsValid"/> false on demand, which
 /// exercises the teardown guards that were previously unreachable outside a crash.
 /// </summary>
-internal sealed class FakeBone : IBoneState
+internal sealed class FakeBone : IBoneActuator, ISupportLoadBone
 {
     public FakeBone(string name = "Fake") => BoneName = name;
 
@@ -24,6 +24,8 @@ internal sealed class FakeBone : IBoneState
     public Vector3 LinearVelocity { get; set; } = Vector3.Zero;
     public Vector3 AngularVelocity { get; set; } = Vector3.Zero;
     public float Mass { get; set; } = 1.0f;
+    public ISupportLoadBone? SupportParent { get; set; }
+    public float SupportedMassShare { get; set; }
     public bool InContact { get; set; }
 
     public Transform3D GlobalTransform

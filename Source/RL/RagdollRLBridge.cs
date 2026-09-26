@@ -1251,8 +1251,6 @@ public partial class RagdollRLBridge : Node
         {
             Ragdoll.ReinforcementLearningPolicyActive = false;
         }
-        // DropToProne's own per-call print would spam the console every few seconds once training
-        // is running; the single consolidated line below covers both halves of a reset instead.
         _startPoseT = SampleStartPose();
         _startedStanding = _startPoseT >= 1.0f;
 
@@ -1262,7 +1260,7 @@ public partial class RagdollRLBridge : Node
         // would spend most of the curriculum's samples on episodes that ended long before the timer.
         _effectiveMaxEpisodeSeconds = Mathf.Lerp(ProneMaxEpisodeSeconds, MaxEpisodeSeconds, _startPoseT);
 
-        Ragdoll?.StartReinforcementLearning(silent: true, startPoseT: _startPoseT);
+        Ragdoll?.StartReinforcementLearning(startPoseT: _startPoseT);
         ApplyInitialForwardVelocity();
         SelectEpisodeTask();
 

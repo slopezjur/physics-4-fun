@@ -15,25 +15,25 @@ public class HitReactionReflexModule : IBiomechanicalReflex
     public bool IsClutchingWound => _clutchTimer > 0.0f;
     public string LastHitBone => _hitBoneName;
 
-    private IBoneState? _upperArmL;
-    private IBoneState? _upperArmR;
-    private IBoneState? _forearmL;
-    private IBoneState? _forearmR;
+    private IBoneActuator? _upperArmL;
+    private IBoneActuator? _upperArmR;
+    private IBoneActuator? _forearmL;
+    private IBoneActuator? _forearmR;
     private IBoneState? _chest;
-    private IBoneState? _head;
+    private IBoneActuator? _head;
 
     private string _hitBoneName = string.Empty;
     private float _clutchTimer = 0.0f;
     private float _flinchTimer = 0.0f;
-    private IBoneState? _flinchBone;
+    private IBoneActuator? _flinchBone;
 
     public void Initialize(
         IBoneState? chest,
-        IBoneState? head,
-        IBoneState? upperArmL,
-        IBoneState? upperArmR,
-        IBoneState? forearmL,
-        IBoneState? forearmR)
+        IBoneActuator? head,
+        IBoneActuator? upperArmL,
+        IBoneActuator? upperArmR,
+        IBoneActuator? forearmL,
+        IBoneActuator? forearmR)
     {
         _chest = chest;
         _head = head;
@@ -43,7 +43,7 @@ public class HitReactionReflexModule : IBiomechanicalReflex
         _forearmR = forearmR;
     }
 
-    public void RegisterHit(IBoneState hitBone, Vector3 hitPoint, Vector3 impulse)
+    public void RegisterHit(IBoneActuator hitBone, Vector3 hitPoint, Vector3 impulse)
     {
         if (!IsEnabled || hitBone == null || !hitBone.IsValid)
         {

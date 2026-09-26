@@ -16,18 +16,18 @@ public class ObstacleBracingReflexModule : IBiomechanicalReflex
     public bool IsBracing { get; private set; } = false;
 
     private IBoneState? _chest;
-    private IBoneState? _upperArmL;
-    private IBoneState? _upperArmR;
-    private IBoneState? _forearmL;
-    private IBoneState? _forearmR;
+    private IBoneActuator? _upperArmL;
+    private IBoneActuator? _upperArmR;
+    private IBoneActuator? _forearmL;
+    private IBoneActuator? _forearmR;
     private Array<Rid>? _excludeRids;
 
     public void Initialize(
         IBoneState? chest,
-        IBoneState? upperArmL,
-        IBoneState? upperArmR,
-        IBoneState? forearmL,
-        IBoneState? forearmR,
+        IBoneActuator? upperArmL,
+        IBoneActuator? upperArmR,
+        IBoneActuator? forearmL,
+        IBoneActuator? forearmR,
         Array<Rid>? excludeRids)
     {
         _chest = chest;

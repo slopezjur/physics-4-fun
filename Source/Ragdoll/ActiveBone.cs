@@ -9,7 +9,7 @@ namespace Physics4Fun.Ragdoll;
 /// Uses pure PD control (Ki = 0) to eliminate contact limit-cycle chatter and shaking.
 /// Enforces Newton's Third Law by applying reaction torques to the parent bone.
 /// </summary>
-public partial class ActiveBone : RigidBody3D, Interfaces.IBoneState
+public partial class ActiveBone : RigidBody3D, Interfaces.IBoneActuator, Interfaces.ISupportLoadBone
 {
     /// <summary>
     /// <see cref="Interfaces.IBoneState.IsValid"/>. Every other member of that contract is already
@@ -21,6 +21,7 @@ public partial class ActiveBone : RigidBody3D, Interfaces.IBoneState
 
     [Export] public string BoneName { get; set; } = string.Empty;
     [Export] public ActiveBone? ParentBone { get; set; }
+    Interfaces.ISupportLoadBone? Interfaces.ISupportLoadBone.SupportParent => ParentBone;
 
     [ExportGroup("Biomechanical Actuator Gains")]
     [Export] public float ProportionalGain { get; set; } = 450.0f;

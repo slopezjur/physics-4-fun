@@ -50,10 +50,10 @@ public class DynamicSteppingModule : IBalanceStrategy
         }
 
         IBoneState pelvis = context.Pelvis;
-        IBoneState? thighL = context.ThighL;
-        IBoneState? thighR = context.ThighR;
-        IBoneState? shinL = context.ShinL;
-        IBoneState? shinR = context.ShinR;
+        IBoneActuator? thighL = context.ThighL;
+        IBoneActuator? thighR = context.ThighR;
+        IBoneActuator? shinL = context.ShinL;
+        IBoneActuator? shinR = context.ShinR;
         IBoneState footL = context.FootL;
         IBoneState footR = context.FootR;
         bool isGroundedL = context.IsGroundedL;
@@ -136,8 +136,8 @@ public class DynamicSteppingModule : IBalanceStrategy
             currentFootTarget.Y += 4.0f * StepHeight * s * (1.0f - s);
 
             bool isLeft = CurrentStepPhase == StepPhase.LeftSwing;
-            IBoneState? swingThigh = isLeft ? thighL : thighR;
-            IBoneState? swingShin = isLeft ? shinL : shinR;
+            IBoneActuator? swingThigh = isLeft ? thighL : thighR;
+            IBoneActuator? swingShin = isLeft ? shinL : shinR;
 
             if (swingThigh != null && swingShin != null && swingThigh.IsValid && swingShin.IsValid)
             {
@@ -175,8 +175,8 @@ public class DynamicSteppingModule : IBalanceStrategy
             }
 
             // Maintain upright stance leg posture without fighting joint limits
-            IBoneState? stanceThigh = isLeft ? thighR : thighL;
-            IBoneState? stanceShin = isLeft ? shinR : shinL;
+            IBoneActuator? stanceThigh = isLeft ? thighR : thighL;
+            IBoneActuator? stanceShin = isLeft ? shinR : shinL;
             if (stanceThigh != null && stanceShin != null && stanceThigh.IsValid && stanceShin.IsValid)
             {
                 Vector3 localUp = pelvis.GlobalTransform.Basis.Inverse() * Vector3.Up;

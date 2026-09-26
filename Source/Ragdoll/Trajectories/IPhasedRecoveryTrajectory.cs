@@ -4,10 +4,8 @@ using Godot;
 namespace Physics4Fun.Ragdoll.Trajectories;
 
 /// <summary>
-/// Everything a recovery trajectory needs to evaluate a pose, passed by value so trajectories can
-/// stay stateless singletons (<see cref="BiomechanicalMotionSynthesizer"/> holds them as
-/// <c>static readonly</c>). The lead side in particular must NOT become a mutable field on the
-/// trajectory, or two ragdolls would fight over it.
+/// Everything a recovery trajectory needs to evaluate a pose, passed by value. Each ragdoll owns
+/// its trajectory registry, and the lead side remains an input rather than mutable trajectory state.
 /// </summary>
 public readonly record struct RecoveryPose(
     float GlobalTime,

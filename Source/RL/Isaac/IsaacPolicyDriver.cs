@@ -769,7 +769,7 @@ public partial class IsaacPolicyDriver : Node
         // time warmup ends, against 0.5 degrees when left where the procedural controller had it.
         // Refreshing the gains is not worth starting the policy from a toppling body.
         //
-        // (StartReinforcementLearning() is likewise wrong here - it drops the body to prone.)
+        // StartReinforcementLearning() also teleports the body to a new episode pose.
         NeutraliseUncommandedBones();
         if (HillVelocityFilter < 1.0f)
         {
@@ -1354,11 +1354,12 @@ public partial class IsaacPolicyDriver : Node
     {
         _elapsed += delta * PhysicsTicksPerPolicyStep;
         _observation!.SetCommand(Command);
+        var ragdoll = Ragdoll!;
 
         var context = new RlContext(
-            Ragdoll!,
-            Ragdoll.Pelvis!,
-            Ragdoll.Balance!,
+            ragdoll,
+            ragdoll.Pelvis!,
+            ragdoll.Balance!,
             _controlledBones,
             0.0f,
             0.0f,

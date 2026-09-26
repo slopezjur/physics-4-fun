@@ -8,6 +8,56 @@ adds a simulated ball in `dummy_ball.xml`; its training and cross-engine impact
 parity are still experimental. Both tasks have separate, versioned Godot replay
 paths and are **not promoted to the production scenes**.
 
+## Native swing and landing probe (2026-09-26)
+
+`probe_support_step.py` uses the measured right-foot support window to attempt
+a 0.55 s, 10 cm left-foot step. The diagnostic controller lifts and moves the
+foot and briefly makes loaded contact beyond 5 cm, but cannot keep it there:
+contact lasts at most 0.28 s from source 7 s and 0.017 s from source 3 s.
+The foot retracts and the dummy falls. The existing .25 rad action range
+saturates on 88–92% of IK samples. A separate .5 rad diagnostic cuts
+saturation to 65% from the later start but still loses contact within 0.17 s.
+An adaptive touchdown reference does not fix retention either. See
+`logs/mimickit-steps/support-window-step-{7s,3s}-02/report.json`,
+`support-window-step-wide-7s-02/report.json`, and
+`support-window-step-latched-7s-01/report.json`.
+These contacts are not completed steps. The next motion needs an explicit
+loaded landing and a post-landing balance phase before policy training.
+
+Run the entry probe first to identify a supported interval, then run the
+landing probe from the same source start. Each `--out` path must be new:
+
+```powershell
+$python = "mujoco_rig/mimic/.venv/Scripts/python.exe"
+$reference = "logs/mimickit-steps/placed-step-forward-09"
+& $python -m mujoco_rig.mimic.probe_single_support_entry `
+  --mimickit $env:MIMICKIT_PATH --reference $reference `
+  --start-seconds 7 --controller balanced_axes `
+  --out logs/mimickit-steps/single-support-entry-new
+& $python -m mujoco_rig.mimic.probe_support_step `
+  --mimickit $env:MIMICKIT_PATH --reference $reference `
+  --start-seconds 7 --out logs/mimickit-steps/support-window-step-new
+```
+
+The optional `--action-radians 0.5` and `--latch-landing-reference` flags
+change only this native diagnostic; neither changes the policy contract.
+
+## Native dynamic support window (2026-09-26)
+
+`probe_single_support_entry.py --controller balanced_axes` uses fixed, native
+COM feedback and scheduled equilibrium torques to test weight transfer. From
+source 7 s it reaches the right-leg target, then falls at 5.23 s; from source
+3 s it falls at 8.25 s after reaching the target. Neither produces a retained
+one-leg hold. The version 2 probe checks foot-plus-toe loads and uprightness at
+every control step. It finds a 0.78 s clean right-leg window from the later
+start and a 0.65 s window from the earlier start. Reports:
+`logs/mimickit-steps/single-support-entry-{7s,3s}-balanced-02/report.json`.
+These windows can seed a new short swing/landing experiment. They do not pass
+the transfer or prove that the dummy can place a foot. The old motion's left
+foot remains unloaded for almost eight seconds, so a new short motion is
+needed for a reactive step. This controller reads native COM and remains
+diagnostic only.
+
 ## Single-leg support PPO pilot (2026-09-25)
 
 `train_single_support.py` initializes from the retained Stand actor and
@@ -24,6 +74,39 @@ These are diagnostic checkpoints only; no export or Godot selection changed.
 The present result does not justify another identical PPO run. A separate
 closed-loop weight-transfer entry and measured one-leg retention are needed
 before adding swing/landing or further Perturb training.
+
+## Longer single-leg support and transfer probe (2026-09-26)
+
+The original 3 s hold result was too weak: the 9 s pose stabilizer falls at
+3.80 s in a 10 s continuation and briefly puts 27.4 N on the left foot after
+startup. `probe_single_support.py` now records the maximum swing-foot load and
+requires it to stay below 5 N after the first 0.5 s. Its extended result fails.
+See `logs/mimickit-steps/single-support-holds-07/report.json`.
+
+`probe_single_support_entry.py` tests the same controller while following the
+source weight-transfer motion, with passive joint equilibrium and scheduled
+static support torques. A 7-to-9 s source transition falls 2.72 s after
+starting; a 3-to-9 s transition falls at 4.25 s, before reaching the target.
+See `logs/mimickit-steps/single-support-entry-{7s,3s}-01/report.json`.
+The teacher reads native whole-body COM, so it remains a diagnostic. No actor
+was trained or selected from these runs. The support motion still needs a
+longer continuous hold and transfer before step training. The diagnostic
+`train_single_support.py` now uses the settled pose consistently and applies
+the version 2 ten-second native selection gate; no new training was run.
+That gate requires the swing foot to remain below 5 N after the first 0.5 s
+throughout the hold, as well as a final continuous 0.5 s settled interval.
+
+## Original short single-leg hold result (2026-09-26)
+
+`probe_single_support.py` settles passive joints (head/wrists) to $< 10^{-9}$ Nm
+residuals and evaluates five controllers across static poses at 7, 8, and 9 s.
+At 9 s (COM centered over the right foot polygon), `CoronalSagittalStabilizer`
+combines static equilibrium feedforward with stance ankle sagittal pitch PD,
+stance hip roll PID ($k_p=5.0, k_i=3.0, d_v=0.5, d_\omega=0.05$), and opposing
+ankle roll coupling. It survives the full 3.00 s and passes the original
+final-state single-support gate
+with a 0.52 s continuous settled final window ($\ge 0.50$ s required). See
+`logs/mimickit-steps/single-support-holds-04/report.json`.
 
 ## Single-leg support gate (2026-09-25)
 

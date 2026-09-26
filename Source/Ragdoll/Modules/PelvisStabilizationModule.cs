@@ -56,7 +56,7 @@ public class PelvisStabilizationModule : IBalanceStrategy
     public bool ReactIntoThighs { get; set; }
 
     /// <summary>Limbs that can carry the stabilizer's reaction into the ground, in preference order.</summary>
-    private readonly List<IBoneState> _reactionLimbs = new();
+    private readonly List<IBoneActuator> _reactionLimbs = new();
 
     public void Apply(in BalanceContext context)
     {
@@ -92,7 +92,7 @@ public class PelvisStabilizationModule : IBalanceStrategy
             return;
         }
 
-        IBoneState pelvis = context.Pelvis;
+        IBoneActuator pelvis = context.Pelvis;
 
         // Axis-angle attitude error between pelvis up axis and world up (magnitude ~ sin(angle))
         Vector3 pelvisUp = pelvis.GlobalTransform.Basis.Y.Normalized();
@@ -113,7 +113,7 @@ public class PelvisStabilizationModule : IBalanceStrategy
         pelvis.ApplyTorque(torque);
 
         Vector3 reaction = -torque / _reactionLimbs.Count;
-        foreach (IBoneState limb in _reactionLimbs)
+        foreach (IBoneActuator limb in _reactionLimbs)
         {
             limb.ApplyTorque(reaction);
         }
@@ -125,8 +125,8 @@ public class PelvisStabilizationModule : IBalanceStrategy
 
         if (!rising)
         {
-            IBoneState? left = ReactIntoThighs ? context.ThighL : context.FootL;
-            IBoneState? right = ReactIntoThighs ? context.ThighR : context.FootR;
+            IBoneActuator? left = ReactIntoThighs ? context.ThighL : context.FootL;
+            IBoneActuator? right = ReactIntoThighs ? context.ThighR : context.FootR;
             if (context.IsGroundedL && left != null && left.IsValid)
             {
                 _reactionLimbs.Add(left);
@@ -148,7 +148,7 @@ public class PelvisStabilizationModule : IBalanceStrategy
         AddIfContacting(context.HandR);
     }
 
-    private void AddIfContacting(IBoneState? limb)
+    private void AddIfContacting(IBoneActuator? limb)
     {
         if (limb != null && limb.IsValid && limb.IsInContactWithWorld())
         {

@@ -51,7 +51,6 @@ public partial class ActiveJointController : RigidBody3D
 
             Vector3 offset = GlobalTransform.Basis.Y * 1.0f;
             ApplyImpulse(randomDir * DisturbanceForceMagnitude, offset);
-            GD.Print($"[ActiveJoint] Applied impulse kick: {randomDir * DisturbanceForceMagnitude}");
         }
 
         // IsKeyJustPressed, not IsKeyPressed: this runs every frame, so holding R re-ran the reset
@@ -116,6 +115,5 @@ public partial class ActiveJointController : RigidBody3D
         LinearVelocity = Vector3.Zero;
         AngularVelocity = Vector3.Zero;
         _pid.Reset();
-        GD.Print("[ActiveJoint] Reset state.");
     }
 }

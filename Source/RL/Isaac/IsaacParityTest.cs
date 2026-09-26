@@ -296,10 +296,11 @@ public partial class IsaacParityTest : Node
     private void CheckObservationParity(float delta)
     {
         float[] reference = ReadFloats("observation");
+        var ragdoll = _ragdoll!;
         float[] built = _observation!.Build(new RlContext(
-            _ragdoll!,
-            _ragdoll.Pelvis!,
-            _ragdoll.Balance!,
+            ragdoll,
+            ragdoll.Pelvis!,
+            ragdoll.Balance!,
             _controlledBones,
             0.0f,
             0.0f,

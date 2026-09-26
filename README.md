@@ -62,6 +62,13 @@ All of them are written up honestly, including the things that did not work and 
 
 For the RL side, start with [docs/RL-TRAINING.md](docs/RL-TRAINING.md). `Scenes/RL/Upright/RagdollStandArena.tscn` plays back a trained policy continuously with no episode resets, which is the honest way to see what a policy actually does.
 
+## Diagnostics and generated output
+
+Routine ragdoll state changes and grab interactions are silent. Explicit telemetry, parity and
+training tools still report their measurements. Generated experiment reports under `logs/` and
+Hydra output under `isaac_lab/scripts/outputs/` are ignored by Git. The tracked
+`mujoco_rig/plant_dump.txt` remains a reproducible input to MuJoCo rig generation.
+
 ## Third-party code
 
 `addons/godot_rl_agents/` is vendored from the [godot_rl_agents](https://github.com/edbeeching/godot_rl_agents) project by Edward Beeching, MIT licensed. It is checked in so a fresh clone can open the RL scenes without a separate plugin install. See [addons/godot_rl_agents/VENDORED.md](addons/godot_rl_agents/VENDORED.md) for provenance and [addons/godot_rl_agents/LICENSE](addons/godot_rl_agents/LICENSE) for the license. Everything outside that directory is this project's own code.

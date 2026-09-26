@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using Godot;
 using Physics4Fun.Ragdoll.Interfaces;
 
 namespace Physics4Fun.Ragdoll.Support;
@@ -33,19 +32,19 @@ public sealed class PlantedLimbLoadDistribution : ISupportLoadDistribution
     /// <summary>Guard against a malformed parent chain looping forever.</summary>
     private const int MaxChainWalk = 32;
 
-    private readonly List<ActiveBone> _plantedLimbs = new();
+    private readonly List<ISupportLoadBone> _plantedLimbs = new();
 
-    public void Distribute(IReadOnlyList<ActiveBone> allBones)
+    public void Distribute(IReadOnlyList<ISupportLoadBone> allBones)
     {
-        foreach (ActiveBone bone in allBones)
+        foreach (ISupportLoadBone bone in allBones)
         {
             bone.SupportedMassShare = 0.0f;
         }
 
         _plantedLimbs.Clear();
-        foreach (ActiveBone bone in allBones)
+        foreach (ISupportLoadBone bone in allBones)
         {
-            if (!GodotObject.IsInstanceValid(bone)
+            if (!bone.IsValid
                 || System.Array.IndexOf(SupportEndEffectors, bone.BoneName) < 0)
             {
                 continue;
@@ -63,7 +62,7 @@ public sealed class PlantedLimbLoadDistribution : ISupportLoadDistribution
         }
 
         float totalMass = 0.0f;
-        foreach (ActiveBone bone in allBones)
+        foreach (ISupportLoadBone bone in allBones)
         {
             totalMass += bone.Mass;
         }
@@ -79,9 +78,9 @@ public sealed class PlantedLimbLoadDistribution : ISupportLoadDistribution
         // in the meantime: the feed-forward can never take more than half the actuator budget.
         float share = totalMass / _plantedLimbs.Count;
 
-        foreach (ActiveBone endEffector in _plantedLimbs)
+        foreach (ISupportLoadBone endEffector in _plantedLimbs)
         {
-            ActiveBone? cursor = endEffector;
+            ISupportLoadBone? cursor = endEffector;
             int guard = 0;
             while (cursor != null && guard++ < MaxChainWalk)
             {
@@ -91,7 +90,7 @@ public sealed class PlantedLimbLoadDistribution : ISupportLoadDistribution
                 }
 
                 cursor.SupportedMassShare = share;
-                cursor = cursor.ParentBone;
+                cursor = cursor.SupportParent;
             }
         }
     }

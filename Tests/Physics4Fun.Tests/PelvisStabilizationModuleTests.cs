@@ -18,9 +18,8 @@ namespace Physics4Fun.Tests;
 /// which is why a policy trained there leans on a crutch Godot does not provide - so the reaction
 /// being present here is load-bearing for the whole sim-to-sim story, not a detail.</para>
 ///
-/// <para>Untestable until <see cref="BalanceContext"/> carried <see cref="IBoneState"/> rather than
-/// a live RigidBody3D; <see cref="FakeBone"/> records applied torques so the couple can simply be
-/// added up.</para>
+/// <para><see cref="BalanceContext"/> carries <see cref="IBoneActuator"/> rather than a live
+/// RigidBody3D; <see cref="FakeBone"/> records applied torques so the couple can be added up.</para>
 /// </summary>
 public class PelvisStabilizationModuleTests
 {

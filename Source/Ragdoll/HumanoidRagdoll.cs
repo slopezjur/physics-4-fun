@@ -78,10 +78,11 @@ public partial class HumanoidRagdoll : Node3D
     /// </summary>
     private readonly Interfaces.ISupportLoadDistribution _supportLoad = new Support.PlantedLimbLoadDistribution();
     private readonly Recovery.GetUpPhaseController _getUpPhases = new();
+    private readonly BiomechanicalMotionSynthesizer _motionSynthesizer = new();
     private readonly Diagnostics.RagdollTelemetryRecorder _recorder = new();
     private float _time;
     private float _stateTime;
-    private float _drillTime;
+    private readonly Trajectories.PushUpDrillClock _drillClock = new();
 
     /// <summary>
     /// Recovery trajectory locked in for the current get-up attempt.
@@ -133,13 +134,6 @@ public partial class HumanoidRagdoll : Node3D
             bone.BuildDistalChain(_allBones);
         }
 
-        GD.Print($"[HumanoidRagdoll] Registered {_allBones.Count} active bones:");
-        foreach (var bone in _allBones)
-        {
-            string parentName = bone.ParentBone != null ? bone.ParentBone.BoneName : "None (Root Pelvis)";
-            GD.Print($"  - Bone '{bone.BoneName}' connected to Parent '{parentName}'");
-        }
-
         if (Balance == null)
         {
             GD.PushError("[HumanoidRagdoll] BalanceController dependency is missing! Please assign it in the inspector.");
@@ -173,7 +167,7 @@ public partial class HumanoidRagdoll : Node3D
 
         if (CurrentState == RagdollState.PushUpDrill)
         {
-            _drillTime += dt;
+            _drillClock.Advance(dt);
         }
 
         if (Balance != null)
@@ -231,7 +225,7 @@ public partial class HumanoidRagdoll : Node3D
         if (newState == RagdollState.Recovering)
         {
             _getUpPhases.Reset();
-            _activeRecoveryTrajectory = BiomechanicalMotionSynthesizer.GetRecoveryTrajectory(
+            _activeRecoveryTrajectory = _motionSynthesizer.GetRecoveryTrajectory(
                 Balance?.CurrentOrientation ?? RagdollOrientation.Prone);
             _recoveryLeadSide = ChooseRecoveryLeadSide();
         }
@@ -239,7 +233,6 @@ public partial class HumanoidRagdoll : Node3D
         {
             _activeRecoveryTrajectory = null;
         }
-        GD.Print($"[HumanoidRagdoll] Transitioned to state: {newState}");
     }
 
 
@@ -271,7 +264,6 @@ public partial class HumanoidRagdoll : Node3D
         }
         UpdateBoneMuscleStiffness();
         UpdateBoneTargetRotations();
-        GD.Print("[HumanoidRagdoll] Ragdoll reset to initial standing state.");
     }
 
     /// <summary>
@@ -281,7 +273,7 @@ public partial class HumanoidRagdoll : Node3D
     /// </summary>
     private const float ProneSpawnLift = 0.5f;
 
-    public void DropToProne(bool silent = false)
+    public void DropToProne()
     {
         _time = 0.0f;
         _stateTime = 0.0f;
@@ -301,17 +293,7 @@ public partial class HumanoidRagdoll : Node3D
         }
         UpdateBoneMuscleStiffness();
         UpdateBoneTargetRotations();
-        if (!silent)
-        {
-            GD.Print("[HumanoidRagdoll] Dropped to prone.");
-        }
     }
-
-    /// <summary>Seconds spent settling into the bottom pose before reps begin.</summary>
-    private const float DrillSetupSeconds = 1.0f;
-
-    /// <summary>Seconds per full down-up repetition.</summary>
-    private const float DrillRepSeconds = 2.4f;
 
     /// <summary>
     /// Starts the isolated knee push-up drill: teleports the body prone and hands the pose over to
@@ -321,11 +303,10 @@ public partial class HumanoidRagdoll : Node3D
     public void StartPushUpDrill()
     {
         DropToProne();
-        _drillTime = 0.0f;
+        _drillClock.Reset();
         CurrentState = RagdollState.PushUpDrill;
         UpdateBoneMuscleStiffness();
         UpdateBoneTargetRotations();
-        GD.Print("[HumanoidRagdoll] Push-up drill started.");
     }
 
     /// <summary>
@@ -333,31 +314,9 @@ public partial class HumanoidRagdoll : Node3D
     /// the setup window so the body can settle onto its knees and hands before the first press,
     /// then runs a raised cosine so the reversals at both ends are smooth rather than stepped.
     /// </summary>
-    public float DrillCycleNormalized
-    {
-        get
-        {
-            if (CurrentState != RagdollState.PushUpDrill || _drillTime < DrillSetupSeconds)
-            {
-                return 0.0f;
-            }
+    public float DrillCycleNormalized => CurrentState == RagdollState.PushUpDrill
+        ? _drillClock.CycleNormalized : 0.0f;
 
-            float phase = (_drillTime - DrillSetupSeconds) / DrillRepSeconds;
-            return 0.5f * (1.0f - Mathf.Cos(phase * Mathf.Tau));
-        }
-    }
-
-    /// <summary>
-    /// Enters (or re-enters, for an episode reset) the RL state: teleports the body prone and hands
-    /// control to whatever writes <see cref="ActiveBone.FeedForwardTargetOffset"/> externally - the
-    /// RL bridge, per bone, once per physics tick. Reuses the same teleport <see cref="DropToProne"/>
-    /// already does for the procedural get-up debug key, so a fresh episode starts from the same
-    /// physical pose every time regardless of how the previous one ended.
-    /// </summary>
-    /// <param name="silent">
-    /// When true, suppresses the per-call debug prints (episode resets fire every few seconds
-    /// during training - the RL bridge logs one consolidated line per episode instead).
-    /// </param>
     /// <summary>
     /// Teleports every bone to its authored standing pose, velocities cleared.
     ///
@@ -425,14 +384,18 @@ public partial class HumanoidRagdoll : Node3D
         UpdateBoneMuscleStiffness();
     }
 
-    public void StartReinforcementLearning(bool silent = false, float startPoseT = 0.0f)
+    /// <summary>
+    /// Starts an RL episode from prone or from the requested get-up pose. The RL bridge then owns
+    /// the per-bone targets through <see cref="ActiveBone.FeedForwardTargetOffset"/>.
+    /// </summary>
+    public void StartReinforcementLearning(float startPoseT = 0.0f)
     {
         // DropToProne is still used for the exact-prone case rather than TeleportToGetUpPose(0):
         // it also sets CurrentState and refreshes target rotations, and the debug key path depends
         // on that. The two produce the same physical pose by construction.
         if (startPoseT <= 0.0f)
         {
-            DropToProne(silent);
+            DropToProne();
         }
         else
         {
@@ -442,10 +405,6 @@ public partial class HumanoidRagdoll : Node3D
         CurrentState = RagdollState.ReinforcementLearning;
         UpdateBoneMuscleStiffness();
         SeedTargetsToCurrentPose();
-        if (!silent)
-        {
-            GD.Print("[HumanoidRagdoll] Reinforcement learning episode started.");
-        }
     }
 
     /// <summary>
@@ -539,7 +498,7 @@ public partial class HumanoidRagdoll : Node3D
                 ? recovery.EvaluateBoneTarget(
                     bone.BoneName,
                     new Trajectories.RecoveryPose(_time, progress, _recoveryLeadSide))
-                : BiomechanicalMotionSynthesizer.ComputeTargetRotation(
+                : _motionSynthesizer.ComputeTargetRotation(
                     bone.BoneName,
                     CurrentState,
                     orientation,

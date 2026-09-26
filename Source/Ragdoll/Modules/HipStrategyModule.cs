@@ -54,11 +54,11 @@ public class HipStrategyModule : IBalanceStrategy
         }
 
         IBoneState pelvis = context.Pelvis;
-        IBoneState? spine = context.Spine;
-        IBoneState? thighL = context.ThighL;
-        IBoneState? thighR = context.ThighR;
-        IBoneState? shinL = context.ShinL;
-        IBoneState? shinR = context.ShinR;
+        IBoneActuator? spine = context.Spine;
+        IBoneActuator? thighL = context.ThighL;
+        IBoneActuator? thighR = context.ThighR;
+        IBoneActuator? shinL = context.ShinL;
+        IBoneActuator? shinR = context.ShinR;
         IBoneState? footL = context.FootL;
         IBoneState? footR = context.FootR;
         Vector3 centerOfMass = context.CenterOfMass;

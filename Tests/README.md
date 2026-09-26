@@ -4,7 +4,7 @@
 dotnet test Physics4Fun.sln
 ```
 
-145 managed tests. No Godot install, no scene tree, no display required — they run anywhere the .NET
+150 managed tests. No Godot install, no scene tree, no display required — they run anywhere the .NET
 SDK does, including CI.
 
 One additional native foundation test is opt-in through `P4F_FOUNDATION_FIXTURES`.
@@ -68,6 +68,8 @@ Two notes on the plumbing, both of which will look wrong until you know why:
 | Behavioural FSM | `RagdollStateMachineTests` | Settle grace, ordered escalation (stumble vs. straight to flailing), dwell timers, `PushUpDrill`/`ReinforcementLearning` being absorbing, recovery give-up horizon |
 | Capture point & level frame | `BiomechanicalKinematicsTests` | ICP leading the CoM, horizontal-only displacement, the height clamp, yaw-level basis orthonormality and its degenerate fallback |
 | Get-up phase machine | `GetUpPhaseControllerTests` | Every phase boundary, the two-point support rule, foot-under-mass requirement, timeout flagging, and the documented ~7.03 s worst case fitting `RecoveryDuration` |
+| Per-body motion | `BiomechanicalMotionSynthesizerTests`, `PushUpDrillClockTests` | Trajectory instances stay private to each ragdoll; drill setup, lockout, cycle and reset |
+| Support load | `PlantedLimbLoadDistributionTests` | Planted-chain sharing, torso stop, per-tick clearing and invalid-contact exclusion |
 
 Each test pins a claim the source makes **in prose**. That is deliberate: this project justifies its
 physics in long comments, and until now those claims were checked only by running a scene and
@@ -100,14 +102,14 @@ own design — it was that the context structs they receive carried `ActiveBone`
 require a scene tree.
 
 `Physics4Fun.Ragdoll.Interfaces.IBoneState` is the narrow read-only slice that breaks that chain,
-and `FakeBone` is the twenty lines that replace the engine. `RecoveryContext` was converted first —
+and `IBoneActuator` adds the three write operations used by balance strategies. `FakeBone` replaces
+the engine for both contracts. `RecoveryContext` was converted first —
 which is what made `GetUpPhaseControllerTests` possible — and it needed **no call-site changes and
 no scene edits**, because `ActiveBone` converts implicitly.
 
-The same move is available for `BalanceContext` (28 members, 14 of them bones) and `RlContext`,
-which would bring every `IBalanceStrategy`, every reflex module and the RL reward/termination
-components into reach. Convert one struct at a time; anything still needing the concrete type keeps
-working.
+`BalanceContext` now carries `IBoneActuator` for its 14 bones, and the balance strategies have
+managed tests. `RlContext` still carries concrete Godot dependencies; converting it requires a
+separate pass over observations, rewards and terminations.
 
-A write-side counterpart (`IBoneActuator`: target rotation, feed-forward offset, muscle strength)
-will be needed for the modules that *drive* bones rather than only observing them.
+The support-load policy consumes `ISupportLoadBone` instead of `ActiveBone`. Its parent-chain and
+load-share behavior can now be checked with the same managed fake.

@@ -14,9 +14,9 @@ public class VestibularGazeModule : IBiomechanicalReflex
 
     private IBoneState? _pelvis;
     private IBoneState? _chest;
-    private IBoneState? _head;
+    private IBoneActuator? _head;
 
-    public void Initialize(IBoneState pelvis, IBoneState? chest, IBoneState? head)
+    public void Initialize(IBoneState pelvis, IBoneState? chest, IBoneActuator? head)
     {
         _pelvis = pelvis;
         _chest = chest;

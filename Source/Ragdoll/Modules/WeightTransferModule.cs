@@ -55,10 +55,10 @@ public class WeightTransferModule : IBalanceStrategy
 
         StepPhase stepPhase = _stepping.CurrentStepPhase;
         float stepProgress = _stepping.StepProgress;
-        IBoneState? thighL = context.ThighL;
-        IBoneState? thighR = context.ThighR;
-        IBoneState? shinL = context.ShinL;
-        IBoneState? shinR = context.ShinR;
+        IBoneActuator? thighL = context.ThighL;
+        IBoneActuator? thighR = context.ThighR;
+        IBoneActuator? shinL = context.ShinL;
+        IBoneActuator? shinR = context.ShinR;
         float delta = context.Delta;
 
         float targetShareL = 0.5f;

@@ -1,5 +1,92 @@
 # MuJoCo track — status
 
+## 2026-09-26: Planned swing reaches contact but does not retain placement
+
+`mimic/probe_support_step.py` starts a fixed 0.55 s, 10 cm left-foot swing
+inside the measured right-foot support window. The native .25 rad control
+contract lifted the foot 6.5–9.0 cm and moved it 14–15 cm at peak. It made
+contact at least 5 cm forward from both starts, but that contact lasted at
+most 0.28 s from the near-target start and one control step (0.017 s) from
+the earlier start. The foot moved backward afterward; the dummy fell at
+3.82 s and 7.72 s. Swing IK actions were saturated in 88–92% of samples.
+Evidence: `logs/mimickit-steps/support-window-step-{7s,3s}-02/report.json`.
+
+An isolated .5 rad diagnostic reduced saturation to 65% for the near-target
+case but contact lasted only 0.17 s; it still fell at 4.03 s. Capturing the
+measured touchdown joint pose as an adaptive reference also failed to retain
+the landing. Neither change is a compatible policy export or validated
+training motion. Evidence: `support-window-step-wide-7s-02/report.json` and
+`support-window-step-latched-7s-01/report.json` in the same log directory.
+
+The bottleneck has moved from initiating a swing to controlling the loaded
+landing and the following balance response. Design a short motion/reference
+that includes landing and post-landing support, then verify continuous contact
+and delayed-fall retention in native MuJoCo before training or Godot selection.
+
+## 2026-09-26: Transfer has a short supported window for a dynamic step
+
+The earlier native transfer used weak forward/backward correction and fell
+before or just after reaching the one-leg target. A fixed, diagnostic controller
+with stronger sagittal feedback and lateral velocity damping reached the
+target from both starts. It still failed the terminal hold: the near-target
+start fell at 5.23 s (target at 2.5 s), and the earlier start fell at 8.25 s
+(target at 6.5 s). Both intermittently reloaded the left foot. Evidence:
+`logs/mimickit-steps/single-support-entry-{7s,3s}-balanced-02/report.json`.
+
+The v2 entry probe measures consecutive upright, right-foot-only support on
+every native control step. The near-target run produced 0.78 s from 1.33 to
+2.10 s; the earlier run produced 0.65 s from 4.75 to 5.38 s. This is a
+candidate swing interval, not a complete step or a deployable controller.
+The source clip leaves the left foot unloaded from 7.05 to 15.0 s, far longer
+than this window. Retiming that old swing is therefore not an adequate
+reactive step reference. The next experiment should start from this supported
+window and plan a short swing with an explicit loaded landing; accept it only
+after native closed-loop placement and post-landing retention.
+
+## 2026-09-26: Longer hold and transfer disprove stable one-leg support
+
+The equilibrium stabilizer survives the original 3 s static probe at the 9 s
+source pose, but a 10 s continuation falls at 3.80 s. It also places up to
+27.4 N on the intended unloaded left foot after the first 0.5 s. The strict
+one-leg gate now checks the full post-startup support interval; this controller
+does not pass. The native-only controller reads MuJoCo's whole-body COM and is
+not a deployable policy. Evidence:
+`logs/mimickit-steps/single-support-holds-07/report.json`.
+
+`mimic/probe_single_support_entry.py` applied the same equilibrium and COM
+feedback during the source motion's transfer into right-leg support. Starting
+at source 7 s, it reached the terminal pose at 2.5 s but lost upright/slow
+posture near 2 s and fell at 2.72 s. Starting at source 3 s, it fell at
+4.25 s before reaching the target at 6.5 s. Neither passed a supported
+terminal hold. Evidence:
+`logs/mimickit-steps/single-support-entry-{7s,3s}-01/report.json`.
+
+Do not train Perturb or a step expert from this teacher. A support reference
+must sustain a continuous one-leg hold after transfer with full foot/toe load
+history and a 10 s retention gate. The diagnostic PPO script now trains and
+evaluates the same passively settled target pose, with version 2 of its
+protocol and a 10 s native checkpoint gate. No new PPO run was launched.
+
+## 2026-09-26: Equilibrium stabilizer showed a transient 3 s hold
+
+`mimic/probe_single_support.py` resolved passive joint equilibrium settling
+and evaluated a coordinated coronal/sagittal stabilizer across the 7, 8, and 9 s
+poses from the placed-step reference. At 9 s, static support feasibility requires
+58.7% torque on `Thigh_R_rz` (-117.3 Nm) to counteract torso gravity. Zero-action
+reference PD sags into early fall (2.07 s), and open-loop equilibrium feedforward
+survives 3.0 s but drifts laterally, producing 40.7 N swing-foot ground contact.
+
+`CoronalSagittalStabilizer` pairs static equilibrium feedforward with stance ankle
+sagittal pitch PD and stance hip/ankle coronal roll PID with roll angular damping:
+`Thigh_R_rz` correction `-(k_p e_y + k_i \int e_y dt + d_v v_y + d_\omega \omega_x)`
+and opposing `Foot_R_rz` coupling `+1.0 * corr_hr`. At 9 s, this controller survived
+the full 3.00 s and passed the original final-state gate with 0.52 s of
+continuous settled time. That gate only checked the final foot load. The
+expanded probe above shows transient left-foot contact and a delayed fall.
+Evidence: `logs/mimickit-steps/single-support-holds-04/report.json`.
+
+The selected Godot policy and viewer files are unchanged.
+
 ## 2026-09-25: Isolated one-leg PPO pilot did not improve retention
 
 `mimic/train_single_support.py` trained a diagnostic right-leg-support policy

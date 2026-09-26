@@ -40,8 +40,8 @@ public class AnkleBalanceModule : IBalanceStrategy
             return;
         }
 
-        IBoneState? footL = context.FootL;
-        IBoneState? footR = context.FootR;
+        IBoneActuator? footL = context.FootL;
+        IBoneActuator? footR = context.FootR;
         Vector3 centerOfMass = context.CenterOfMass;
         Vector3 centerOfMassVelocity = context.CenterOfMassVelocity;
         float strength = context.Strength;
