@@ -11,7 +11,7 @@ import numpy as np
 import torch
 
 from .ball_protocol import TARGET_BODIES, VALIDATION_EPISODES, VALIDATION_SCHEMA, validation_cases
-from .checkpoints import BestCheckpoint, checkpoint_rank, ball_regressions
+from .checkpoints import BestCheckpoint, checkpoint_rank, ball_regressions, recovery_step_rank
 from .evaluate_stand import evaluate
 from .godot_ball import compare
 from .runtime import activate
@@ -19,6 +19,21 @@ from .rig import Rig
 
 
 class BallValidationTests(unittest.TestCase):
+    def test_recovered_steps_cannot_outweigh_lost_recoveries_or_quiet(self):
+        rows = [{**c, "hit": True, "survived": True, "recovered": True,
+                 "recovered_with_step": False} for c in validation_cases()]
+        baseline = self.metrics(rows)
+        baseline["recovered_with_step"] = 0
+        stepped = copy.deepcopy(baseline)
+        stepped["cases"][0]["recovered_with_step"] = True
+        stepped["recovered_with_step"] = 1
+        self.assertGreater(recovery_step_rank(stepped), recovery_step_rank(baseline))
+        self.assertLess(recovery_step_rank({**stepped, "quiet_standing_passed": False}), recovery_step_rank(baseline))
+        fewer = {**stepped, "recovered_hits": stepped["recovered_hits"]-1}
+        self.assertLess(recovery_step_rank(fewer), recovery_step_rank(baseline))
+        with self.assertRaises(ValueError):
+            recovery_step_rank({**stepped, "recovered_with_step": 2})
+
     @staticmethod
     def metrics(cases=None):
         if cases is None:

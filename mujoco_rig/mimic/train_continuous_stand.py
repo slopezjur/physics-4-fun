@@ -24,9 +24,10 @@ from .standing_readiness import (objective, initialize_value_scale, prepare_epis
 
 
 def validate_initialization(source, target, allow_migration):
+    from .balance_observation import CONTRACT as CAPTURE_CONTRACT
     if source.get('diagnostic_only') or source.get('normalization_preparation'):
         raise ValueError('Require a trained, admitted source checkpoint')
-    if source.get('observation_contract') == CONTRACT:
+    if source.get('observation_contract') in (CONTRACT, CAPTURE_CONTRACT):
         validate_contract(source, target)
         return 'same_stationary_contract'
     if not allow_migration or source.get('observation_contract') != 'mimic_stand_target_pd_v2':

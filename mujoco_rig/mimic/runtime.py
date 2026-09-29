@@ -19,3 +19,5 @@ def activate(mimickit: Path) -> None:
     if not (mimickit / "mimickit" / "engines" / "newton_engine.py").is_file():
         raise FileNotFoundError(f"Missing MimicKit engine under {mimickit}")
     sys.path.insert(0, str(mimickit / "mimickit"))
+    from .gated_recovery_net import register
+    register()

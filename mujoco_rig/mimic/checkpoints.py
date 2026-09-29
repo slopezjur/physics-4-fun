@@ -115,17 +115,30 @@ def checkpoint_rank(metrics):
             -metrics["mean_root_tracking_error_m"])
 
 
+def recovery_step_rank(metrics):
+    """Prefer measured recovered steps only when quiet/survival/recovery counts tie."""
+    ordinary = checkpoint_rank(metrics)
+    count = metrics.get("recovered_with_step")
+    if "quiet_standing_passed" not in metrics or type(count) is not int or not 0 <= count <= metrics["recovered_hits"]:
+        raise ValueError("Stepping selection requires measured recovered-step counts")
+    if sum(bool(case.get("recovered_with_step")) for case in metrics["cases"]) != count:
+        raise ValueError("Recovered-step aggregate disagrees with cases")
+    return ordinary[:3] + (count,) + ordinary[3:]
+
+
 class BestCheckpoint:
-    def __init__(self, directory: Path, contract):
+    def __init__(self, directory: Path, contract, *, rank_function=None, selection_label=None):
         self.path = directory / "best.pt"
         self.metadata_path = directory / "best.json"
         self.contract = contract
         self.metadata = None
         self.decisions = []
+        self.rank_function = rank_function or checkpoint_rank
+        self.selection_label = selection_label
 
     def consider(self, save, metrics, *, iteration, samples):
         from .continuous_stand import EVALUATION_SCHEMA, retention_regressions
-        rank = checkpoint_rank(metrics)
+        rank = self.rank_function(metrics)
         stationary = metrics.get('evaluation_schema') == EVALUATION_SCHEMA
         weight_shift = "weight_shift_tracking" in metrics
         ball = "quiet_standing_passed" in metrics and not weight_shift
@@ -135,7 +148,7 @@ class BestCheckpoint:
             raise ValueError("Cannot compare checkpoints evaluated on different suites")
         regressions = (retention_regressions(metrics, self.metadata['metrics']) if stationary else
                        ball_regressions(metrics, self.metadata['metrics']) if ball else []) if self.metadata is not None else []
-        improved = self.metadata is None or rank > checkpoint_rank(self.metadata["metrics"])
+        improved = self.metadata is None or rank > self.rank_function(self.metadata["metrics"])
         decision = dict(iteration=iteration, samples=samples, accepted=improved and not regressions,
                         reason=("standing_case_regression" if stationary else "directional_regression") if regressions else "improved_rank" if improved else "rank_not_improved",
                         regressions=regressions)
@@ -158,6 +171,8 @@ class BestCheckpoint:
                                        "tracking gate, successes, survival, lower foot error, lower root error; fixed eight phases"
                                        if "motion_tracking" in metrics else
                                        "standing gate, successes, survival, then lower root error; fixed eight phases")}
+        if self.selection_label:
+            self.metadata["selection"] = self.selection_label
         temp_metadata = self.metadata_path.with_suffix(".json.tmp")
         temp_metadata.write_text(json.dumps(self.metadata, indent=2), encoding="utf-8")
         temp_metadata.replace(self.metadata_path)

@@ -9,11 +9,14 @@ from .target_control import DelayedTargetControl
 
 
 class BallNativeEngine(NativeDummyEngine):
-    def __init__(self, rig, num_envs, device="cpu", control_factory=DelayedTargetControl):
+    def __init__(self, rig, num_envs, device="cpu", control_factory=DelayedTargetControl, ball_path=None):
         self.character = rig
-        super().__init__(load_ball_rig(rig), num_envs, device, control_factory)
+        super().__init__(load_ball_rig(rig, ball_path), num_envs, device, control_factory)
         self.ball_body = self.rig.model.body("ball").id
         self.hit = torch.zeros(num_envs, dtype=torch.bool)
+        self.hit_impulse = torch.zeros((num_envs, 3), dtype=torch.float64)
+        self.hit_normal_impulse = torch.zeros(num_envs, dtype=torch.float64)
+        self.hit_bodies = [set() for _ in range(num_envs)]
 
     def reset_envs(self, ids, qpos, qvel):
         q = np.tile(self.rig.rest, (len(ids), 1))
@@ -21,6 +24,10 @@ class BallNativeEngine(NativeDummyEngine):
         q[:, :46], v[:, :45] = np.asarray(qpos), np.asarray(qvel)
         super().reset_envs(ids, q, v)
         self.hit[ids] = False
+        self.hit_impulse[ids] = 0.
+        self.hit_normal_impulse[ids] = 0.
+        for index in ids.tolist():
+            self.hit_bodies[index].clear()
 
     def launch_ball(self, ids, position, velocity):
         for i, p, v in zip(ids.tolist(), np.asarray(position), np.asarray(velocity)):
@@ -37,6 +44,11 @@ class BallNativeEngine(NativeDummyEngine):
                 mujoco.mj_contactForce(self.rig.model, data, index, wrench)
                 if wrench[0] > 0:
                     self.hit[world] = True
+                    sign = 1. if a == self.ball_body else -1.
+                    force = sign * (contact.frame.reshape(3, 3).T @ wrench[:3])
+                    self.hit_impulse[world] += torch.from_numpy(force * self.rig.model.opt.timestep)
+                    self.hit_normal_impulse[world] += wrench[0] * self.rig.model.opt.timestep
+                    self.hit_bodies[world].add(int(b if a == self.ball_body else a))
 
     def native_qpos(self): return super().native_qpos()[:, :46]
     def get_dof_vel(self, obj_id): return super().get_dof_vel(obj_id)[:, :39]

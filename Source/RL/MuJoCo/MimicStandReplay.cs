@@ -30,9 +30,9 @@ public partial class MimicStandReplay : Node
                 return;
             }
             string bundle = System.Environment.GetEnvironmentVariable("P4F_MIMIC_BUNDLE")
-                ?? throw new InvalidOperationException("Use MimicStand.tscn for viewing, or set P4F_MIMIC_BUNDLE for batch validation.");
+                ?? throw new InvalidOperationException("Use MimicStandArena.tscn for viewing, or set P4F_MIMIC_BUNDLE for batch validation.");
             string output = System.Environment.GetEnvironmentVariable("P4F_MIMIC_REPLAY_OUTPUT")
-                ?? throw new InvalidOperationException("Batch validation requires P4F_MIMIC_REPLAY_OUTPUT. Use MimicStand.tscn for viewing.");
+                ?? throw new InvalidOperationException("Batch validation requires P4F_MIMIC_REPLAY_OUTPUT. Use MimicStandArena.tscn for viewing.");
             string model = ProjectSettings.GlobalizePath("res://mujoco_rig/dummy.xml");
             MjInterop.SetLibraryDirectory("");
             _bridge = new MjBridge(model);
@@ -62,8 +62,15 @@ public partial class MimicStandReplay : Node
             _bridge!.ResetNativeState(q, v);
             Vector3 com = _bridge.CenterOfMass();
             Vector3 velocity = _bridge.CenterOfMassVelocity();
+            float? captureError = null;
+            if (fixture.TryGetProperty("foot_loads_n", out var loads))
+                captureError = MjMimicBalanceObservation.Evaluate(com, velocity,
+                    _bridge.BodyTransform(_bridge.BodyId("Foot_L")).Origin,
+                    _bridge.BodyTransform(_bridge.BodyId("Foot_R")).Origin,
+                    loads[0].GetSingle(), loads[1].GetSingle());
             results.Add(new { com_godot_m = new[] { com.X, com.Y, com.Z },
-                              velocity_godot_m_s = new[] { velocity.X, velocity.Y, velocity.Z } });
+                              velocity_godot_m_s = new[] { velocity.X, velocity.Y, velocity.Z },
+                              loaded_capture_error_m = captureError });
         }
         File.WriteAllText(output, JsonSerializer.Serialize(new
         {

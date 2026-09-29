@@ -49,6 +49,7 @@ class NativeDummyEngine:
                 self.policy_control.physics_control(self._array("qpos"), self._array("qvel"))
                 for i, data in enumerate(self.datas):
                     data.ctrl[:] = self.native_ctrl[i].numpy()
+                    self._before_physics_step(i, data)
                     mujoco.mj_step(self.rig.model, data)
                     self._after_physics_step(i, data)
             for i, data in enumerate(self.datas):
@@ -60,12 +61,16 @@ class NativeDummyEngine:
         for i, data in enumerate(self.datas):
             data.ctrl[:] = self.native_ctrl[i].numpy()
             for _ in range(self.rig.decimation):
+                self._before_physics_step(i, data)
                 mujoco.mj_step(self.rig.model, data)
                 self._after_physics_step(i, data)
             if self._last_solve_contacts:
                 self._ground_force_cache[i] = self._read_ground_forces(data)
             mujoco.mj_forward(self.rig.model, data)
             data.xfrc_applied[:] = 0
+
+    def _before_physics_step(self, world, data):
+        pass
 
     def _after_physics_step(self, world, data):
         pass
@@ -88,6 +93,12 @@ class NativeDummyEngine:
     def get_root_ang_vel(self, obj_id):
         return torch.tensor(np.stack([d.xmat[1].reshape(3, 3) @ d.qvel[3:6] for d in self.datas]), dtype=torch.float32)
 
+    def get_center_of_mass_velocity(self):
+        for data in self.datas:
+            mujoco.mj_subtreeVel(self.rig.model, data)
+        # The character is the subtree rooted at body 1; the ball is a sibling.
+        return torch.tensor(np.stack([d.subtree_linvel[1] for d in self.datas]), dtype=torch.float32)
+
     def get_dof_vel(self, obj_id):
         return self._array("qvel")[:, 6:]
 
@@ -101,6 +112,10 @@ class NativeDummyEngine:
         if self._last_solve_contacts:
             return torch.tensor(self._ground_force_cache, dtype=torch.float32)
         return torch.tensor(np.stack([self._read_ground_forces(d) for d in self.datas]), dtype=torch.float32)
+
+    def current_state_ground_contact_forces(self, world):
+        """For offline capture after mj_forward; does not alter policy sampling."""
+        return self._read_ground_forces(self.datas[world])
 
     def _read_ground_forces(self, data):
         model = self.rig.model

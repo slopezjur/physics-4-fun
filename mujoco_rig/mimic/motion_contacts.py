@@ -3,6 +3,7 @@ import numpy as np
 
 SOLE_NAMES = ("Foot_L", "Foot_R", "Toe_L", "Toe_R")
 TOE_REFERENCE_SCHEMA = "mimic_step_reference_v6"
+HEEL_REFERENCE_SCHEMA = "mimic_step_reference_v7"
 
 
 def stance_phase_ids(contact):
@@ -58,6 +59,17 @@ def validate_sole_schedule(contact, soles):
             or not np.array_equal(soles[:, 2:], contact) or np.any(soles[:, :2] & ~soles[:, 2:]):
         raise ValueError("Expected flat-foot or toe-only support consistent with foot contact labels")
     return ~soles[:, :2] & soles[:, 2:]
+
+
+def validate_support_schedule(contact, supports):
+    """Validate independent foot-box and toe-box contacts, including heel strike."""
+    contact = np.asarray(contact)
+    supports = np.asarray(supports)
+    if (contact.dtype != bool or contact.ndim != 2 or contact.shape[1] != 2
+            or supports.dtype != bool or supports.shape != (len(contact), 4)
+            or not np.array_equal(supports[:, :2] | supports[:, 2:], contact)):
+        raise ValueError("Expected independent foot/toe support consistent with foot contact labels")
+    return supports[:, :2] & ~supports[:, 2:]
 
 
 def infer_toe_off(original_contact, completed_contact, foot_rotations):

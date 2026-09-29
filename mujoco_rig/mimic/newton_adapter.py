@@ -34,6 +34,21 @@ def target_pd(q: wp.array(dtype=float), v: wp.array(dtype=float),
 
 
 class DummyNewtonEngine(NewtonEngine):
+    def get_center_of_mass_velocity(self):
+        if not hasattr(self, "_character_mass"):
+            count = self.get_body_pos(0).shape[1]
+            self._character_mass = torch.tensor(self.rig.model.body_mass[1:1+count],
+                                                 dtype=torch.float32, device=self._device)
+            self._capture_state = self._sim_model.state()
+        # Solver body velocities can still describe the preceding substep. Derive
+        # instantaneous COM twists from current joint state without changing the
+        # simulation's buffers, contacts, or the existing policy inputs.
+        state = self._sim_state.raw_state
+        newton.eval_fk(self._sim_model, state.joint_q, state.joint_qd, self._capture_state)
+        velocity = wp.to_torch(self._capture_state.body_qd).view(self.get_num_envs(), -1, 6)
+        velocity = velocity[:, :len(self._character_mass), :3]
+        return (velocity * self._character_mass[None, :, None]).sum(1) / self._character_mass.sum()
+
     def use_last_solve_contacts(self):
         # SensorContact already reports the final solved substep. Partial resets
         # must preserve that snapshot for worlds which did not reset.

@@ -9,9 +9,11 @@ public partial class MimicPerturb : MimicTrial
     [ExportGroup("Experiment")]
     [Export(PropertyHint.Enum, "Ball collision,Force pulse")] public int Mode { get; set; }
     [Export(PropertyHint.Range, "1,8,0.1")] public float BallSpeed { get; set; } = 2;
-    [Export(PropertyHint.Enum, "Random,Head,Chest,Spine,Pelvis,UpperArm_L,Forearm_L,UpperArm_R,Forearm_R,Thigh_L,Shin_L,Thigh_R,Shin_R")]
+    [Export(PropertyHint.Enum, "Random,Head,Chest,Spine,Pelvis,UpperArm_L,Forearm_L,UpperArm_R,Forearm_R,Thigh_L,Shin_L,Thigh_R,Shin_R,RandomTorso")]
     public string BallTarget { get; set; } = "Random";
+    [Export] public bool RunIndefinitely { get; set; }
     [Export] public bool AutoFire { get; set; }
+    [Export] public bool TriggerStepOnImpact { get; set; }
     [Export(PropertyHint.Range, "1,10,0.5")] public float FireInterval { get; set; } = 2.5f;
     [ExportGroup("Push at chest center of mass")]
     [Export(PropertyHint.Range, "0,100,1")] public float ForceNewtons { get; set; } = 20;
@@ -23,6 +25,8 @@ public partial class MimicPerturb : MimicTrial
     private string _directionName = string.Empty;
     private Vector3 _activeDirection;
     private double _nextFireTime;
+    private int _loggedShots;
+    private int _loggedHits;
     private readonly Random _rng = new();
     // UI directions are authored in Godot's Y-up frame. Convert them to MuJoCo's
     // world frame at the force/ball boundary so labels and batch protocols agree.
@@ -30,11 +34,15 @@ public partial class MimicPerturb : MimicTrial
     private static readonly string[] DirectionNames = { "Forward (+X)", "Backward (-X)", "Left (-Y)", "Right (+Y)" };
     protected override string TrialName => "MimicPerturb";
     protected override string ViewerTask => "ball";
+    protected override bool WaitForBallHit => Mode == 0 && TriggerStepOnImpact;
+    protected override bool UnlimitedDuration => Mode == 0 && RunIndefinitely;
     protected override void ConfigureLaunch()
     {
         base.ConfigureLaunch();
         string? speed = LaunchOption("--ball-speed");
         if (speed != null) BallSpeed = float.Parse(speed, System.Globalization.CultureInfo.InvariantCulture);
+        string? direction = LaunchOption("--ball-direction");
+        if (direction != null) Direction = int.Parse(direction, System.Globalization.CultureInfo.InvariantCulture);
     }
 
     public override void _Ready()
@@ -69,7 +77,8 @@ public partial class MimicPerturb : MimicTrial
 
     private protected override void ResetTrial()
     {
-        if (Direction < 0 || Direction > 4 || !float.IsFinite(ForceNewtons) || ForceNewtons < 0)
+        if (Direction < 0 || Direction > 4 || !float.IsFinite(ForceNewtons) || ForceNewtons < 0
+            || !float.IsFinite(FireInterval) || FireInterval <= 0)
             throw new InvalidOperationException("Choose a valid direction and nonnegative finite push force.");
 
         if (Direction == 4)
@@ -85,9 +94,11 @@ public partial class MimicPerturb : MimicTrial
         }
 
         _trial = null; _ballTrial = null;
+        _loggedShots = 0; _loggedHits = 0;
         if (Mode == 0)
         {
-            if (PushStartStep < 0 || (PushStartStep * Driver.ControlTime + .65f / BallSpeed + .5f) >= ConfiguredDuration)
+            if (PushStartStep < 0 || (!UnlimitedDuration
+                && (PushStartStep * Driver.ControlTime + .65f / BallSpeed + .5f) >= ConfiguredDuration))
                 throw new InvalidOperationException("Ball launch must leave time for flight and recovery.");
             Driver.Reset(ConfiguredPhase);
             _ballTrial = new MjMimicBallTrial(Bridge, Driver, _activeDirection, BallSpeed, PushStartStep, BallTarget, _rng.Next());
@@ -114,6 +125,12 @@ public partial class MimicPerturb : MimicTrial
                 _directionName = $"AutoFire ({(int)(angle * 180 / Math.PI)}°)";
                 _ballTrial.Launch(randomDir);
             }
+            if (_ballTrial.ShotCount != _loggedShots || _ballTrial.ConfirmedHits != _loggedHits)
+            {
+                _loggedShots = _ballTrial.ShotCount;
+                _loggedHits = _ballTrial.ConfirmedHits;
+                GD.Print($"[MimicPerturb] {Driver.Time:F2}s shots={_loggedShots} hits={_loggedHits} target={_ballTrial.ActiveTargetName}");
+            }
         }
         else
         {
@@ -132,8 +149,10 @@ public partial class MimicPerturb : MimicTrial
                 string marginText = cp.StabilityMargin is float margin ? $"{margin * 100:F1} cm" : "no ground support";
                 return $"\nBall · {_directionName} · {BallSpeed:F1} m/s horizontal · target {targetDesc}"
                     + $"\n{(_ballTrial.Launched ? Driver.BallHit ? "Impact confirmed" : "Launched — in flight" : "Waiting to launch · B: launch now")}"
+                    + $" · shots {_ballTrial.ShotCount} · hits {_ballTrial.ConfirmedHits}"
+                    + (TriggerStepOnImpact ? $" · Recovery: {(Driver.RecoveryStarted ? $"{Driver.RecoveryTime:F2}s" : "waiting for hit")}" : string.Empty)
                     + $"\nApprox. capture-point margin: {marginText} (diagnostic only)"
-                    + "\n8 kg · radius 9 cm · ballistic flight, gravity enabled";
+                    + $"\n{Bridge.BodyMass(Bridge.BodyId("ball")):F2} kg · radius 9 cm · ballistic flight, gravity enabled";
             }
             if (_trial == null) return string.Empty;
             var result = _trial.Result;

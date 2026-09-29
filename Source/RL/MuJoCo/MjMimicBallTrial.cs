@@ -11,6 +11,7 @@ internal sealed class MjMimicBallTrial
         "UpperArm_L", "Forearm_L", "UpperArm_R", "Forearm_R",
         "Thigh_L", "Shin_L", "Thigh_R", "Shin_R",
     };
+    internal static readonly string[] TorsoBones = { "Chest", "Spine", "Pelvis" };
 
     private readonly MjBridge _bridge;
     private readonly MjMimicStandDriver _driver;
@@ -22,6 +23,9 @@ internal sealed class MjMimicBallTrial
     private Vector3 _direction;
 
     internal bool Launched { get; private set; }
+    internal int ShotCount { get; private set; }
+    internal int ConfirmedHits { get; private set; }
+    private bool _awaitingHit;
     internal string ActiveTargetName { get; private set; } = string.Empty;
 
     internal MjMimicBallTrial(MjBridge bridge, MjMimicStandDriver driver, Vector3 direction,
@@ -37,7 +41,8 @@ internal sealed class MjMimicBallTrial
         if (bridge != null)
         {
             _joint = MjPolicyObservation.Required(bridge.JointId("ball_free"), "ball_free");
-            if (!string.Equals(target, "Random", StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(target, "Random", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(target, "RandomTorso", StringComparison.OrdinalIgnoreCase))
                 MjPolicyObservation.Required(bridge.BodyId(target), target);
         }
     }
@@ -54,7 +59,8 @@ internal sealed class MjMimicBallTrial
 
         string targetName = overrideTarget ?? (string.Equals(_configuredTarget, "Random", StringComparison.OrdinalIgnoreCase)
             ? TargetBones[_rng.Next(0, TargetBones.Length)]
-            : _configuredTarget);
+            : string.Equals(_configuredTarget, "RandomTorso", StringComparison.OrdinalIgnoreCase)
+                ? TorsoBones[_rng.Next(0, TorsoBones.Length)] : _configuredTarget);
 
         int targetBodyId = _bridge.BodyId(targetName);
         if (targetBodyId < 0) targetBodyId = _bridge.BodyId("Chest");
@@ -66,6 +72,8 @@ internal sealed class MjMimicBallTrial
         _bridge.SetFreeJoint(_joint, MjMimicPush.ToGodot(position), MjMimicPush.ToGodot(velocity));
         _bridge.Forward();
         Launched = true;
+        ShotCount++;
+        _awaitingHit = true;
     }
 
     internal static (Vector3 Position, Vector3 Velocity) BallisticLaunch(Vector3 target, Vector3 direction, float speed)
@@ -79,5 +87,10 @@ internal sealed class MjMimicBallTrial
     internal void Step()
     {
         _driver.Step(_driver.StepCount == _launchStep ? () => Launch() : null);
+        if (_awaitingHit && _driver.BallContactThisStep)
+        {
+            ConfirmedHits++;
+            _awaitingHit = false;
+        }
     }
 }

@@ -162,7 +162,8 @@ def retention_regressions(candidate, incumbent):
 def evaluate_retention(task, actor):
     """Score the first continuous episode only, including a final settled window."""
     from envs.base_env import EnvMode, DoneFlags
-    if task.get_num_envs() != GATES['cases'] or task.observation_contract()['observation_contract'] != CONTRACT:
+    from .balance_observation import CONTRACT as CAPTURE_CONTRACT
+    if task.get_num_envs() != GATES['cases'] or task.observation_contract()['observation_contract'] not in (CONTRACT, CAPTURE_CONTRACT):
         raise ValueError('Retention requires eight worlds with the stationary contract')
     task.episode_seconds = GATES['seconds']
     task.set_mode(EnvMode.TEST)

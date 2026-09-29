@@ -1,5 +1,515 @@
 # MuJoCo track — status
 
+## 2026-09-28: Reactive stepping remains unadmitted at 5 kg / 2 m/s
+
+The Arena currently previews `reactive-ball-arena-continue-5min-03`, explicitly
+requested for inspection, at 2 m/s. It is not the admitted 2 kg actor described
+in the historical entries below. Its fixed 2 m/s result is 15/32 recoveries.
+
+The new experimental `step-capture-seed-01` reaches 27/32 fixed recoveries,
+8/8 uninterrupted 600-second quiet holds, and 51/64 unseen 33-second trials
+at exactly 2 m/s. It has zero measured recovery steps and is not loaded in Godot.
+The standing base is frozen while a separate neural branch learns reactive leg
+corrections. A versioned instantaneous balance input has native/GPU/Godot parity.
+The subsequent five-minute PPO continuation did not improve fixed recovery.
+
+The load-transfer reward experiment supplies feedback before liftoff and favors
+returning to two-foot support. See [REACTIVE_STEPPING.md](mimic/REACTIVE_STEPPING.md)
+for reproducible runs, training presets, parity evidence and remaining failures.
+Natural reactive stepping is not established; successful quiet holding and a
+foot lift alone do not satisfy that milestone.
+
+## 2026-09-27: Unlimited 5 kg repeat-hit scene and new curriculum
+
+`MimicPerturbArena.tscn` now runs without a trial timer and relaunches a physical
+5 kg ball every configurable 2.5 seconds from random angles at Chest, Spine or
+Pelvis. The HUD counts shots and confirmed contacts. A 20-second headless
+Godot smoke run recorded 8/8 ball contacts and no fall. The scene still loads
+the admitted 2 kg actor, and labels the 5 kg setting as experimental stress.
+The 5 kg setting is for Arena inspection with the existing 2 kg actor.
+Any future training actor must pass unseen hits and long quiet standing before
+its weights replace the scene actor.
+
+## 2026-09-27: Full update-time 3 kg curriculum remains gated
+
+The 2-to-3 kg continuation used 901.987 seconds of synchronized training-update
+wall time across two branches (434.783 and 467.204 seconds). Native CPU
+checkpoint evaluations were excluded from that budget; this metric includes
+CPU dispatch inside each update and is not a measurement of continuous GPU busy
+time. The first branch reached 29/32 cardinal 3 kg recoveries at update 48
+with the short quiet gate intact. Later checkpoints regressed, so the second
+branch continued from the retained checkpoint at a lower actor learning rate.
+Its selected actor remained the same update-48 weights and passed 64/64 unseen
+12-second hits, but only 3/8 uninterrupted 600-second standing cases passed.
+Posture 7 fell after 116 seconds; four other postures drifted or lost stable
+foot anchoring. The 3 kg actor is not loaded in Godot. The validated 2 kg scene
+selection below remains active.
+
+## 2026-09-27: Reactive 2 kg policy loaded in MimicPerturb; 5 kg stage rejected
+
+`MimicPerturbArena.tscn` now loads the stationary 2 kg physical-ball policy from
+`reactive-ball-training-2kg-01/scene-bundle`, with `TriggerStepOnImpact = false`.
+Its reference is constant, its policy is closed loop, and either foot may move.
+The scene uses a 2 kg ball at 2 m/s for a 33-second trial. The selected actor
+passes 32/32 cardinal and 64/64 independent 33-second randomized native hits,
+plus 8/8 uninterrupted 600-second quiet stands. ONNX action parity is
+2.98e-7. A headless Godot forward chest trial confirmed contact and completed
+33 seconds with 6.3 mm final root error; this is a scene smoke test, not a full
+Godot/native trajectory parity suite.
+
+The requested 5 kg fine-tune ran for 900 seconds of training-loop wall time
+(128 updates, 2,097,152 transitions), including CPU evaluation intervals.
+Update 32 was selected at 18/32 cardinal 2 m/s recoveries, the same count as
+its 2 kg parent. The final actor fell to 4/32 and failed quiet standing.
+Independent 5 kg unseen checks recovered 50/64 at 1–2 m/s and 59/64 at 1 m/s.
+The selected 5 kg actor survived all eight 600-second quiet trials but only
+four met the stable-foot gate. It was not exported or loaded into Godot.
+
+## 2026-09-27: Stationary Perturb training seed selected
+
+`reactive-ball-training-2kg-01/best.pt` is the update-32 physical-hit seed from
+the validated Stand checkpoint. It recovers 32/32 selected 2 kg, 2 m/s cardinal
+torso shots, up from 30/32 before PPO. A new 33-second suite confirms 64/64
+randomized 2 kg contacts and recoveries. Quiet standing passes 8/8 native and
+GPU short cases and 8/8 uninterrupted native ten-minute holds. Newton also
+confirms and recovers 8/8 forward torso hits. Later PPO updates
+lose quiet standing and are rejected.
+
+The 5 kg stress suite remains 18/32 and requires further training. Quiet foot
+motion reaches 0.733 mm during the final minute of the ten-minute check, inside
+the 1 mm gate but above the original Stand actor's 0.014 mm. The seed is ready
+for a heavier-hit curriculum, with a stricter long-standing check before Godot
+selection. The later section above records its current 2 kg scene selection.
+Evidence and continuation: [mimic/REACTIVE_PERTURB_SEED.md](mimic/REACTIVE_PERTURB_SEED.md).
+
+## 2026-09-27: Stationary Stand foundation passes sustained-standing gates
+
+The selected checkpoint is
+`logs/mimickit-training/stand-foundation-anchor-tight-01/best.pt` (update 16),
+with a stationary ONNX bundle in `export/`. It passes 8/8 uninterrupted native
+600-second holds, 64/64 fresh 60-second randomized velocity starts, and 8/8
+native/GPU 30-second checks. All long-hold post-startup samples are settled;
+minimum per-foot load is 219.51 N, maximum foot error 4.447 mm, and worst foot
+motion over the final minute is 0.0138 mm. ONNX action parity is within 8.94e-8.
+The 53 relevant protocol, normalization, checkpoint and native tests pass.
+
+The old selected finite-reference Stand v2 fails five of eight stationary
+30-second cases and seven of eight ten-minute cases. New training fixes a
+running-moment precision defect and late foot creep using stationary targets,
+quiet-standing foot penalties and real late-state starts. Regressing updates
+are rejected; the final `model.pt` is not the selected brain. Rig geometry,
+motor limits and physical support are unchanged.
+
+This clears the measured Stand foundation gate for the next reactive Perturb
+training milestone. It does not validate physical-hit recovery. Keep the
+standing gate, allow either foot after randomized hits, and validate unseen
+hits before Godot selection. The existing Godot selections and fixed left-step
+experiment are unchanged. Details and evidence:
+[mimic/STANDING_FOUNDATION.md](mimic/STANDING_FOUNDATION.md).
+
+## 2026-09-27: Perturb scene cold startup reduced
+
+The recovery scene export now saves the fixed 33-sample support schedule as a
+hash-checked bundle file. The Python scene adapter loads it instead of running
+33 SLSQP support solves on every F5. `MimicPerturbArena.tscn` selects
+`step-recovery-anchored-15min-01/scene-bundle-5kg-cached`; the earlier 5 kg
+bundle remains available for comparison. On this machine, cold Python controller
+initialization fell from about 10.0 s to 2.34 s, and headless Godot time to its
+`Loaded` message fell from 10.68 s to 2.81 s. The cached bundle reproduces all
+586 observations and actions of the earlier +X full-recovery Godot trial exactly,
+including confirmed contact and completion at 9.767 s. No checkpoint or
+controller parameter changed.
+
+## 2026-09-27: Perturb step begins on ball contact
+
+The default `MimicPerturbArena.tscn` now holds the recovery reference at phase zero
+while waiting for physical ball contact. On the first confirmed contact, it
+resets the recovery controller's state and starts the step clock. The scene
+continues to use the 5 kg projectile and the controller trained at 0.25 kg.
+
+The first headless +X trial confirms contact at about 1.63 s. Before contact,
+the left and right feet move at most 2.7 mm and 1.3 mm. The left foot then
+lifts 8.5 cm and finishes 22.7 cm forward. The scene completes the full
+8.15 s recovery reference at 9.77 s wall time; both feet carry at least 20 N
+continuously from 4.93 s to the end (4.83 s), and final root speed is
+0.0032 m/s. Complete headless scene trials
+pass the measured recovery gate in 2/4 cardinal directions at 5 kg: +X and +Y
+pass, -X falls at 3.08 s, and -Y falls at 5.42 s. The original 0.25 kg bundle
+passes the same contact-triggered scene gate in 4/4 directions. Reports are
+`step-recovery-anchored-15min-01/godot-reactive-5kg-report.json` and
+`godot-reactive-025kg-report.json`. The step remains a fixed left step with
+feedback, not a learned choice of stepping leg or target.
+
+## 2026-09-27: Perturb scene now loads a 5 kg projectile
+
+The default `MimicPerturbArena.tscn` loads `step-recovery-anchored-15min-01/scene-bundle-5kg`.
+It uses the same selected controller trained at 0.25 kg, with only the native
+projectile mass changed to 5 kg. The headless +X chest trial confirms the hit
+and survives to 8.151 s. Godot/native parity passes over 489 control steps
+(maximum observation/action errors 2.33e-5 / 4.13e-5).
+
+This is a stress test, not a 5 kg recovery admission. Continuous two-foot
+loading resumes at 4.83 s, after the 3.55 s recovery limit. Four early
+cardinal 5 kg native shots all contact the body; only +X survives and **0/4**
+pass the recovery gate in the earlier time-driven setup. The passing 0.25 kg
+scene bundle remains available.
+
+## 2026-09-27: Fifteen-minute anchored recovery run loaded in Perturb scene
+
+`step-recovery-anchored-15min-01` trained for 900.328 seconds and collected
+99,328 native transitions over 194 iterations. Of 202 completed episodes,
+194 survived and 84 had confirmed physical-ball contact. The actor accepted
+42 updates. Iteration 32 failed the native gate and rolled back; every gate
+from 64 through the final iteration 194 passed **5/5 0.25 kg ball** and
+**13/13 velocity/force** recovery cases. `best.pt` at iteration 194 is selected
+and hash-bound. Training return fell from 555.58 to 545.44, so the gate proves
+retention of recovery, not improved reward.
+
+The initial scene integration loaded a matching bundle with the short
+step reference, 0.25 kg projectile, scripted feedback controller, and selected
+400-input learned residual through a local Python adapter. The actual headless
+Godot scene completed an 8.151 s chest-hit trial. Its 489 control steps match
+native MuJoCo within 0.000884 observation and 0.0000335 action, with confirmed
+ball contact and recovery in both. The original 8 kg projectile has not passed
+this curriculum. See `mimic/RECOVERY_TRAINING.md` for commands and provenance.
+
+## 2026-09-27: Anchored recovery continuation passes both native gates
+
+`step-recovery-anchored-pilot-03` adds the missing 10 N force-pulse episodes
+to 0.25 kg physical-ball PPO training and delays actor updates until one full
+8.15 s recovery episode has completed. A fixed starting-policy anchor bounds
+action-distribution drift on recorded recovery states; the native gate selects
+`best.pt` only if all five ball and 13 velocity/force cases pass.
+
+After 24 iterations and 12,288 transitions, the learned iteration-24 actor
+passes **5/5 ball** and **13/13 velocity/force** cases and becomes the selected
+checkpoint. Earlier ball-only anchored pilots passed ball cases but failed the
+late positive-Y force pulse (12/13); a 0.002 KL anchor also stalled updates.
+The successful pilot uses a 0.02 anchor, actor warmup, and mixed force/ball
+episodes. An independent native probe confirms 13/13 recovery cases. A further
+32-iteration continuation accepts its iteration-16 actor, then rejects the
+iteration-32 actor at 12/13 velocity/force despite 5/5 ball recoveries. The
+trainer rolls back actor and Adam state to the selected checkpoint; the saved
+`best.pt` and report hashes match. The 15-minute drifted actor below remains
+rejected. This result
+admits the native 0.25 kg hybrid for continued curriculum training; it does
+not establish 8 kg recovery or compatibility with `MimicPerturbArena.tscn`.
+
+## 2026-09-27: Fifteen-minute recovery PPO continuation rejected
+
+`step-recovery-residual-ball-15min-01` resumed the accepted 0.25 kg hybrid
+controller and trained for 900.078 seconds: 590 PPO iterations, 302,080 native
+transitions, 2,862 accepted actor updates, 631 completed episodes, 469 confirmed
+ball-hit episodes, and 570 episode survivals. Mean training return declined from
+555.48 after 16 iterations to 527.86 at the end. The final actor fails nominal
+loaded landing at 7.60 s and the early negative-X ball case at 4.57 s; only 3/5
+fixed ball recovery cases pass.
+
+An earlier checkpoint at iteration 83 passes 3/5 ball cases. Iteration 255 passes
+5/5 ball cases but only 11/13 original velocity/force recovery cases. Iteration
+404 passes 4/5 ball cases and fails nominal landing. No checkpoint from this run
+passes both existing gates. The original accepted 0.25 kg checkpoint remains the
+selected native training baseline. The per-update KL guard limited each update
+but allowed cumulative policy drift across hundreds of updates; training survival
+and reward did not predict retained loaded contact. Future updates require a
+native gate for checkpoint selection and a constraint against drifting away from
+the accepted controller on nominal and recovery states.
+
+## 2026-09-27: Native physical-ball residual training runs successfully
+
+`step-recovery-residual-ball-01` runs the pinned MimicKit PPO implementation on
+native MuJoCo with a stateful recovery baseline and a learned bounded residual.
+It completes 8,192 transitions: all 16 training episodes survive and 12 include
+confirmed physical ball contact. Actor parameters change, and the final native
+gate passes nominal loaded touchdown plus four directional 0.25 kg, 1 m/s ball
+recoveries. This unblocks the initial native curriculum with a hybrid controller.
+It does not establish a standalone learned recovery expert or 8 kg robustness.
+
+The same trained hybrid passes all 13 original disturbed native recovery cases
+(`step-residual-push-validation-01`). A 0.5 kg continuation completes another
+16,384 transitions with 31/32 training survivals, but regresses from 4/5 to 3/5
+final native gate passes. It is rejected; the 0.25 kg checkpoint remains the
+accepted starting point. Training admission and ball-mass advancement are separate.
+
+The new 400-input contract explicitly includes the baseline action and remembered
+contact/capture decisions, and calibrates normalization on the step dataset.
+The old frozen Stand normalizer clips 68% of step future-reference samples;
+fixing that alone does not make cloning work. The motion-plus-feedback cloning
+prototype passes nominal landing but fails all disturbed cases. The existing
+8 kg projectile also defeats the scripted teacher in all four tested early
+directions, so the new training path records a physical ball-mass curriculum.
+
+See [the recovery training guide](mimic/RECOVERY_TRAINING.md) for the architecture,
+commands, acceptance criteria and limitations. `MimicPerturbArena.tscn` remains on its
+existing actor; the new residual requires its matching controller and a separate
+Godot adapter/parity check. The historical blocked entries below describe the
+standalone cloning and authored-reference route.
+
+## 2026-09-27: Fixed native recovery suite passes; learned step expert still blocked
+
+Native reference capture now reads contact forces from the forward solve at the
+stored pose without changing the policy's last-solve contact contract. Only
+three of 164 captured support frames change; the authored-reference checks
+still reject the native rollout. A quarter-size right-arm clearance correction
+keeps nominal landing intact and lowers maximum penetration to 3.44 mm
+(`native-step-arm-scale-025-audit-02`). The exact root-contact witness passes
+36/36 touchdown physics steps. Contact-point slip peaks at 0.376 m/s during
+impact, then stays below 0.111 m/s after 2.70 s. The native clip still fails
+the 1 mm support-corner limit, body-center slide limit, brief soft joint-limit
+excursions, and coarse delayed-actuation check. These authored-reference
+checks are not a valid admission path for an unmodified compliant rollout.
+
+An observation-only conditional controller now passes **13/13 fixed native
+recovery outcomes** (`step-conditional-arm-025-full-01`). It applies a bounded
+capture-point and landing-gain response to the early negative-X disturbance,
+and stronger coronal feedback to the early negative-Y disturbance. The quarter
+arm correction removes the nominal self-overlap. Ten cases retain uninterrupted
+first loaded contact. Three positive pushes unload briefly, then replant with
+over five seconds of final loaded two-foot support. The recovery gate requires
+full survival, a forward step, final slow motion, and at least two continuous
+seconds of loaded support starting no later than one second after planned
+touchdown; nominal and velocity-offset cases retain the strict first-contact
+gate. Held-out early 8 N pushes at 1.65 s pass both negative axes. At 12 N and
+1.85 s, negative-Y survives but settles too late and fails the recovery gate.
+This is a bounded scripted teacher, not a trained expert or ball result.
+
+`step-conditional-arm-dataset-01` saves 6,357 observation/action samples from
+the 13 passing teacher cases. A Stand-initialized actor with quiet-standing
+regularization still fails nominal loaded touchdown after 50 imitation epochs
+(`step-distill-robust-dataset-01`). Observation-teacher DAgger yields one actor
+that survives 8.15 s and finishes with 4.35 s of loaded support, but its first
+contact lasts only 0.183 s (`step-dagger-observation-dataset-01`); another
+continuation and a landing-weighted run regress. No learned step expert passes
+the nominal gate. The next architecture should train a residual around the
+state-conditioned teacher or retain its explicit contact/phase mode; further
+plain action cloning is not justified. Native demonstrations also need a
+separate exact-physics admission contract before use as training references.
+Perturb training, physical ball validation, and `MimicPerturbArena.tscn` selection
+remain blocked.
+
+## 2026-09-27: Heel-contact format implemented; physical and control gates still fail
+
+The v7 reference path now accepts independent `support_contact` bits for each
+foot box and toe box, so a heel-only loaded landing is representable. The
+v6 flat/toe contract and existing references remain unchanged. The v7 loader
+requires every physical check plus an explicit support schedule before a clip
+can be used for training. Native capture stores raw support beside its legacy
+v6 projection, and the dynamics audit compares both representations.
+
+Replaying the successful nominal controller and auditing its captured motion
+(`native-step-dynamics-audit-08`) confirms 40 left-heel-only frames. Exact
+contact-point forces satisfy the root wrench in all 36 examined touchdown
+physics steps. The four old 50 ms inverse-dynamics flags have a residual at
+most 0.000145 body weight. A 0.001 tolerance removes them; the authored step
+retains 16 failures up to 0.154 body weight. Thirteen captured frames still
+miss the 1 mm active contact-corner limit (maximum 2.77 mm). Penetration peaks
+at 13.13 mm from one right forearm–thigh overlap; floor penetration peaks near
+3.39 mm. Raw-support stance sliding is 0.154 m/s, three joint limits are
+exceeded briefly by at most 0.006 rad, and delayed actuation fails at seven
+frames. The clip is still unsuitable as a training reference.
+
+A bounded repair of the captured motion (`native-step-repair-arm-joints-03`)
+clips six small joint-limit excursions and moves the right arm through
+touchdown. It clears both joint-limit and penetration checks (maximum remaining
+penetration 3.39 mm). It does not clear support-corner failures, the
+0.154 m/s body-center slide measure, or the delayed-actuation check. The latter
+has a 0.054 body-weight constrained-force shortfall at touchdown, so it is not
+just the 0.001 tolerance issue that affected the root-wrench diagnostic.
+
+Applying the same right-arm correction in the native controller
+(`native-step-arm-clearance-live-01`) retains nominal loaded touchdown and
+reduces maximum penetration to 3.52 mm. Its complete disturbance suite passes
+only **4/13** (`step-observation-adaptive-arm-full-01`), down from 11/13.
+The correction cannot replace the current controller. Cleaning the nominal
+motion and making the recovery controller robust remain coupled problems.
+
+For the controller, a capture-point target shift plus stronger landing COM
+feedback passes the previously failing early negative-X push in isolation:
+5.617 s of continuous loaded contact and full 8.151 s survival
+(`step-observation-capture-3-gain-15-3`). That same stronger feedback makes the
+nominal case fall at 6.934 s; the early negative-Y push still unloads within
+0.45 s. A load-weighted bilateral roll correction restores the nominal case
+but still does not retain the negative-Y landing. Stronger world-space foot
+anchoring also fails both. These are diagnostic variants, not a controller that
+passes the whole 13-case suite. The current complete-suite result remains
+11/13, and no step actor or Perturb continuation is admitted.
+
+## 2026-09-27: Remaining recovery-step blocker
+
+An observation-state ankle correction raises the fixed 13-case native step probe
+from 8/13 to **11/13** (`step-observation-adaptive-ankle-full-01`). Nominal
+touchdown remains loaded through the 8.151 s trial. All four initial velocity
+offsets and all four 10 N pushes at 2.75 s pass. The 10 N negative-X and
+negative-Y pushes at 1.75 s still fail: first loaded contact lasts 0.017 s and
+0.400 s, respectively, followed by delayed falls. A fixed 0.2 ankle offset
+also fails both (`step-observation-early-negative-ankle-020`).
+
+Moving the swing target toward a measured COM capture point gives the early
+negative-X push 2.684 s of first loaded contact but it still falls at 6.00 s;
+the early negative-Y push retains only 0.433 s (`step-observation-capture-3`).
+World-space foot latching, post-contact sole leveling, stronger landing COM
+gains, a larger COM bias, and blending in the Stand actor do not pass those
+cases. The unresolved issue spans both touchdown placement and subsequent
+two-foot stabilization, so another fixed ankle or reward sweep is not justified.
+
+The outcome-based residual PPO pilot (`step-outcome-ppo-01`) used 90,112
+transitions and random early/late 10 N Chest pushes. Its unchanged initial
+actor passes the nominal step and quiet-stand check, but **none of the 11
+trained evaluations passes the native step**; the final actor falls at 3.867 s.
+The best checkpoint is the unchanged initial actor. The report and future
+pilots mark `passed: false` unless the best checkpoint was trained; they also
+record `best_iteration` and `learned_checkpoint_passed`.
+No learned step expert, admitted motion, ball-hit result, or Godot scene
+selection exists from this work. The next architecture needs contact-aware
+heel-strike representation and a state-conditioned landing/settling controller
+before another Perturb training run.
+
+## 2026-09-27: Native touchdown audit identifies heel support and an audit mismatch
+
+`mimic/audit_native_step_dynamics.py` replayed the observation-only teacher at
+all 1,956 physics substeps. At the four 50 ms reference frames previously
+flagged as root-wrench infeasible (61–64), MuJoCo measures at least 49 N on the
+left foot and 570 N on the right, with at least two ground contacts and solved
+root-force residual below 5.2e-16 body weight. The coarse inverse-dynamics
+test therefore does not establish that the simulated motion lacks support.
+The later calibrated audit above resolves those four diagnostic flags.
+
+The same replay finds **40 captured frames of heel-only contact** (left foot),
+including all four flagged frames. The v6 reference format represents flat-foot
+or toe-only contact and cannot describe that measured phase. The native capture
+now saves `measured_sole_contact` separately from the v6-compatible projected
+`sole_contact` schedule. Joint excursions (at most 0.006 rad), 13.1 mm peak
+penetration, 0.203 m/s stance sliding, and the representational contact mismatch
+still prevent treating the captured rollout as an admitted motion reference.
+Evidence: `logs/mimickit-steps/native-step-dynamics-audit-02/report.json` and
+`landing-action-forward-com-01/best_native_rollout.npz`.
+
+## 2026-09-27: Observation-only controller retains a loaded step; training gate remains closed
+
+`mimic/optimize_landing_actions.py` found a deterministic native controller on
+the fixed `short-loaded-step-36` reference. It combines a bounded five-joint
+landing correction with scheduled COM-center offsets. The first loaded left-foot
+touchdown occurs at 2.550 s, remains continuously loaded for 5.617 s, and ends
+22.4 cm forward; the dummy survives the 8.151 s episode and finishes slow.
+The bounded 13-case native teacher probe passes 8 cases. Nominal motor demand
+does not saturate.
+
+`mimic/observation_step_teacher.py` reconstructs the rig pose from the existing
+362-value support-v2 policy observation and runs that same controller without
+access to live MuJoCo state. On 489 recorded observations, maximum action error
+is 1.46e-6; independent native replay reproduces the full nominal landing and
+the same 8/13 disturbed-case result (`step-observation-robustness-01`).
+This proves that the controller's inputs are observable, but it remains a
+scripted model-based controller rather than a learned/exported step expert.
+
+The passing native rollout is not an admissible motion reference: the offline
+audit finds joint-limit violations, 13.1 mm penetration, 0.203 m/s stance
+sliding, sole-contact mismatch, four coarse root-wrench flags, and
+actuation failure. The physics-step audit above explains why those four flags
+do not imply missing support in native MuJoCo. Projecting one early landing creates 82 root failures;
+a local constrained fit around touchdown fails and increases them from 4 to 5.
+Distillation at 200 epochs reaches validation MSE 8.6e-5 yet falls at 3.38 s
+without touchdown and regresses quiet standing. Four DAgger rounds retain 8/8
+quiet phases but none passes the native step; the best survives 5.05 s. Exact
+action playback passes nominally, but a 2% student-action blend causes a delayed
+fall. An observation-driven playback with joint correction passes only 1/13
+disturbed cases. Evidence is under `logs/mimickit-steps/landing-action-forward-com-01`,
+`observation-step-teacher-01`, `step-teacher-robustness-03`,
+`step-observation-robustness-01`,
+`step-distill-native-02`, `step-dagger-native-01`, and
+`step-playback-{sensitivity-02,robustness-01}`.
+
+The remaining gate is a physically admissible short reference and an independently
+stable step policy, followed by ball-hit tests and Godot parity. No Perturb run,
+export, or scene selection follows from the current controller probe.
+
+## 2026-09-27: Feasible support poses do not form a trackable step yet
+
+`mimic/synthesize_recovery_step.py` builds a separate 5.5 s motion from six
+statically feasible poses: quiet stand, rightward transfer, raised left foot,
+forward swing, loaded touchdown, and two-foot settle. Every key pose has a
+feasible static support solve. The stopped interpolation (`static-keyframe-step-01`)
+has 12 infeasible dynamic root-wrench frames, 7.4 mm penetration, and native
+fall at 3.08 s before loaded touchdown. A bounded contact-constrained fit
+(`static-keyframe-fit-01`) still has 12 root failures and loses contact
+geometry. Unbounded cubic interpolation (`step-02`) creates 67 root failures.
+Shape-preserving pelvis interpolation (`step-03`) reduces the count to 10 and
+penetration to 4.2 mm but still falls at 3.27 s before touchdown.
+
+With full-strength foot anchoring, `step-03` still falls at 3.13 s; the anchor
+action saturates on 91% of samples. The native foot lifts about 22 cm against
+the 6 cm swing target. The static poses show that a forward landing is
+geometrically and statically possible on this rig. The missing piece is a
+dynamically feasible, trackable transition through single support and loaded
+touchdown. No candidate is admitted for step-expert or Perturb training.
+
+## 2026-09-27: Short-motion swing and touchdown remain coupled failures
+
+Fitting the authored 1.25–2.65 s swing/landing window directly
+(`authored-transition-fit-01`) reduces root-wrench failures only 17 -> 16
+after four SLSQP iterations; equilibrium constraints remain violated. Native
+replay survives the old late plant but unloads first touchdown after 0.033 s.
+The fit is rejected. The fitter can now take a hash-checked authored reference
+as its seed, so this result does not depend on the old long-swing rollout.
+
+A world-space foot anchor at first loaded contact (`short-loaded-step-42`)
+still unloads after 0.017 s. A newly authored swing path that completes
+horizontal travel before descending (`short-loaded-step-43`) extends first
+loaded contact to 0.367 s but falls at 5.20 s. The actual foot overshoots the
+15 cm target to roughly 26.5 cm as the pelvis moves forward at about
+0.47 m/s; the swing/anchor action saturates on 57% of samples. Holding the
+pelvis 4 cm farther back (`short-loaded-step-44`) cuts first contact to
+0.050 s and breaks support geometry. These are diagnostic failures, not a
+training motion. The reference needs a coupled pelvis/stance/foot trajectory
+whose actual foot has low horizontal velocity at touchdown and whose first
+loaded contact continues into two-foot balance.
+
+## 2026-09-27: Contact-aware seed still has no loaded touchdown
+
+`fit_recovery_transition.py` now audits a saved native rollout after assigning
+one swing and landing. The unshifted seed (`recovery-transition-seed-00`) has
+17.1 mm floor penetration and 8 root-wrench failures; its native replay falls
+at 3.87 s without a loaded touchdown. Leveling the swing sole and offsetting
+the pelvis 5 cm backward / 3.5 cm sideways (`seed-01`) reduces penetration to
+6.7 mm but increases root-wrench failures to 18. Native replay falls at 3.58 s
+without a loaded touchdown. The expanded constrained fit (`fit-04`) diverged
+before producing a candidate and was stopped after six callbacks. Saved
+candidate replay and audit are now available through
+`mimic/evaluate_recovery_candidate.py`; reports are under both seed directories.
+
+Shorter strides do not repair the original landing: 10 cm (`short-loaded-step-39`)
+retains first loaded contact for only 0.017 s and falls at 5.90 s; 5 cm
+(`short-loaded-step-40`) retains it for 0.20 s and falls at 4.48 s. The seed's
+2.35 s scheduled swing exceeds the measured 0.65–0.78 s right-leg support
+window, while the original 0.8 s swing can make contact but cannot retain it.
+Advancing 4 cm of lateral pelvis transfer into first touchdown
+(`short-loaded-step-41`) keeps first contact for only 0.033 s and falls at
+6.03 s; its reference still has 15 root-wrench failures and 19.2 mm
+penetration. A later plant again masks the failed first contact.
+The next motion must jointly plan the pelvis, right-leg support, left-foot
+descent, and load transfer over a brief swing. None of these candidates passes
+the physical audit plus native first-touchdown gate. No step expert, Perturb
+continuation, ball test, or Godot selection follows.
+
+## 2026-09-26: Corrected gate rejects the apparent loaded step
+
+The v1 native gate counted a late two-foot plant without checking that the
+first planned touchdown stayed loaded. The v2 replay at
+`short-loaded-step-38/report.json` shows first loaded contact at 2.55 s,
+immediate unloading, then a second plant around 3.7 s lasting 4.52 s.
+Survival and final placement pass, but this is not continuous touchdown and
+two-foot recovery. The authored reference also fails root-wrench, actuation,
+and foot-lift checks. Earlier v1 native `passed` flags are superseded.
+
+The same bounded teacher variation suite passes 8/13 cases under the old
+late-plant metric and 0/13 under continuous first touchdown. Nominal motor
+demand stays below 0.73 of the limit; three cases lose landing placement
+without motor saturation. Changes to COM timing, recovery timing, foot-anchor
+blend, and touchdown latching do not retain the first contact. No step expert,
+ball-hit evaluation, or viewer selection follows. Evidence:
+`logs/mimickit-steps/step-teacher-robustness-{01,02}/report.json` and
+`mimic/README.md`.
+
 ## 2026-09-26: Planned swing reaches contact but does not retain placement
 
 `mimic/probe_support_step.py` starts a fixed 0.55 s, 10 cm left-foot swing
@@ -646,7 +1156,7 @@ resolve both the unchanged default and new curriculum correctly.
 
 Godot Perturb now selects `perturb-front-back-15min-01/final-export` for review,
 with `perturb-resume-15min-01/export` preserved as its previous selection. Stand's
-selection and all source checkpoints are unchanged. Run `MimicPerturb.tscn` with
+selection and all source checkpoints are unchanged. Run `MimicPerturbArena.tscn` with
 F6; start at BallSpeed=1, BallTarget=Chest, and compare Forward/Backward. To restore
 the prior viewer, run `./mujoco_rig/mimic/scripts/select.ps1 -Experiment perturb -Previous`.
 
@@ -2199,8 +2709,8 @@ Reports: `logs/mimickit-contact-v2/stand-baselines-01` and `stand-trained-v2-01`
 This is one fresh seed compared with established legacy actors, not a controlled
 comparison proving the contact change alone caused the improvement.
 
-The export is automatically selected for `MimicStand.tscn` (F6). F5 remains
-`MimicPerturb.tscn` with its prior ball policy. Next: a bounded Perturb fine-tune
+The export is automatically selected for `MimicStandArena.tscn` (F6). F5 remains
+`MimicPerturbArena.tscn` with its prior ball policy. Next: a bounded Perturb fine-tune
 from the new v2 checkpoint with quiet-standing retention. No ball or Walk training
 started here; walking still requires force-aware reference retargeting.
 
@@ -2656,11 +3166,11 @@ extension: the current clip is finite and less than six seconds long.
 
 ## 2026-09-21: Physical-ball Perturb scaffold and experiment wrappers
 
-`MimicPerturb.tscn` now defaults to the physical projectile in
+`MimicPerturbArena.tscn` now defaults to the physical projectile in
 `mujoco_rig/dummy_ball.xml`, targeting the Chest with the retained
 `guarded-finetune-01/export` Stand actor. Press F6 with that scene open, or press B
 to launch from the live viewer; F5 currently runs this Perturb scene because it is
-the configured project main scene. Open `MimicStand.tscn` and press F6 to view Stand.
+the configured project main scene. Open `MimicStandArena.tscn` and press F6 to view Stand.
 
 The ball bridge, native/Newton construction probe and C# build are complete, but no
 ball collision parity run or ball training result has been accepted yet. The next
@@ -2678,7 +3188,7 @@ legacy MuJoCo training scripts.
 ## 2026-09-21: Controlled-force baseline (legacy diagnostic)
 
 This section records the historical force-mode configuration of
-`Scenes/RL/Isaac3/MuJoCo/MimicPerturb.tscn`. It used live physics with the retained
+`Scenes/RL/Isaac3/MuJoCo/MimicPerturbArena.tscn`. It used live physics with the retained
 `guarded-finetune-01/export` Stand policy, not a trained Perturb actor. At that time
 the main F5 scene was MimicStand; the current project main scene is MimicPerturb and
 defaults to the physical ball. The force diagnostic used 20 N at the Chest COM for
@@ -2806,7 +3316,7 @@ training. Do not treat best-checkpoint retention as a solution to generalization
 
 ## 2026-09-21: interactive MimicStand scene ready for F5
 
-`Scenes/RL/Isaac3/MuJoCo/MimicStand.tscn` is now the main scene. It runs live
+`Scenes/RL/Isaac3/MuJoCo/MimicStandArena.tscn` is now the main scene. It runs live
 policy-controlled native physics with the selected `evaluation_000833` bundle,
 configured through Inspector properties. Its MuJoCo library directory points to
 the isolated Mimic environment; no environment variables are required.
@@ -4215,7 +4725,7 @@ its gait is a shuffle. **Neither brain has been seen in the scenes since it chan
 | file | from | what it does |
 |---|---|---|
 | `balance_policy.onnx` | `p0911i_s1/model_503` | stands, and takes hits: survives **92.4%** of a single 30 N·s hit (512 envs); the brain it replaced survives 87.5% (paired z +2.93). Ends back in its stance: feet at the rest width (0.31 m), 0% crossed, leg error 0.24 rad. Under a hit every 3 s, 53% last 20 s |
-| `locomotion_policy.onnx` | `w0911f_s1/model_253` | **46.3% of the joystick** (32 envs, five manoeuvres): +6.0 m on a 0.25 m/s straight line, arcs −807° / +367°, stands still to 0.05 m; falls turning on the spot, and in some runs of the left arc. Its contract carries the heading hold; `MujocoWalk.tscn` commands 0.25 m/s |
+| `locomotion_policy.onnx` | `w0911f_s1/model_253` | **46.3% of the joystick** (32 envs, five manoeuvres): +6.0 m on a 0.25 m/s straight line, arcs −807° / +367°, stands still to 0.05 m; falls turning on the spot, and in some runs of the left arc. Its contract carries the heading hold; `MujocoWalkArena.tscn` commands 0.25 m/s |
 
 Promotion is automatic and measured: `scripts/promote.py` scores challenger against the incumbent
 read from the shipped contract, and exports only on a win. `overnight.py` calls it at the end of a

@@ -8,7 +8,10 @@ import numpy as np
 import torch
 import mujoco
 
-from .motion_dynamics import force_consistency, root_wrench_consistency, action_window_consistency, delayed_pd_bounds, frame_dynamics, audit
+from .motion_dynamics import (force_consistency, root_wrench_consistency,
+                              action_window_consistency, delayed_pd_bounds,
+                              frame_dynamics, support_wrench_residual,
+                              WRENCH_TOLERANCE_FRACTION, audit)
 from .target_control import DelayedTargetControl
 from .motion_protocol import REFERENCE_SCHEMA, validate_motion_reference
 from .rig import Rig
@@ -92,6 +95,16 @@ class MotionDynamicsTests(unittest.TestCase):
         poses[:, 2] += .1
         self.assertTrue(force_consistency(self.rig, poses, .03)["passed"])
         self.assertEqual(root_wrench_consistency(self.rig, poses, .03)["infeasible_frames"], [1])
+
+    def test_wrench_residual_separates_roundoff_from_missing_support(self):
+        columns = np.eye(6)
+        required = np.array([1., 0., 0., 0., 0., -5e-4])
+        residual = support_wrench_residual(columns, required)
+        self.assertLess(residual, WRENCH_TOLERANCE_FRACTION)
+        required[-1] = -.02
+        self.assertGreater(support_wrench_residual(columns, required),
+                           WRENCH_TOLERANCE_FRACTION)
+        self.assertIsNone(support_wrench_residual(np.empty((6, 0)), required))
 
     def test_static_reference_support_is_wrench_feasible(self):
         path = Path(__file__).parent / "assets/stand_reference.npz"

@@ -31,11 +31,11 @@ CONTROLLERS = {
 
 
 class EntryReference:
-    def __init__(self, poses, rig, dt):
+    def __init__(self, poses, rig, dt, device="cpu"):
         self.dt = dt
-        self.qpos = torch.as_tensor(poses, dtype=torch.float32)
+        self.qpos = torch.as_tensor(poses, dtype=torch.float32, device=device)
         self.qvel = torch.as_tensor(reference_velocities(rig.model, poses, dt),
-                                    dtype=torch.float32)
+                                    dtype=torch.float32, device=device)
         self.duration = (len(poses) - 1) * dt
 
     sample = StandReference.sample

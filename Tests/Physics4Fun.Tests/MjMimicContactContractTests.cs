@@ -13,11 +13,13 @@ public sealed class MjMimicContactContractTests
         Assert.False(MjMimicContactContract.IsCorrected(json.RootElement));
     }
 
-    [Fact]
-    public void CorrectedRequiresSamplingAndOrderedSupportBodies()
+    [Theory]
+    [InlineData("mimic_stand_target_pd_v2")]
+    [InlineData("mimic_stationary_stand_target_pd_v1")]
+    public void CorrectedRequiresSamplingAndOrderedSupportBodies(string schema)
     {
         using var json = JsonDocument.Parse(JsonSerializer.Serialize(new {
-            observation_contract = "mimic_stand_target_pd_v2",
+            observation_contract = schema,
             ground_contact_sampling = MjMimicContactContract.Sampling,
             support_bodies = new[] { new[] { "Foot_L", "Toe_L" }, new[] { "Foot_R", "Toe_R" } }
         }));
@@ -26,6 +28,7 @@ public sealed class MjMimicContactContractTests
 
     [Theory]
     [InlineData("mimic_stand_target_pd_v2")]
+    [InlineData("mimic_stationary_stand_target_pd_v1")]
     [InlineData("unknown")]
     public void MissingOrUnknownSemanticsFailClosed(string schema)
     {

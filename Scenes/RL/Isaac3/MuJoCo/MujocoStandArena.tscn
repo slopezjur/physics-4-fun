@@ -4,25 +4,22 @@
 [ext_resource type="Script" path="res://Source/Camera/CameraController.cs" id="2_cam"]
 
 [sub_resource type="PlaneMesh" id="Ground"]
-size = Vector2(16, 16)
+size = Vector2(10, 10)
 
 [sub_resource type="StandardMaterial3D" id="GroundMat"]
 albedo_color = Color(0.28, 0.30, 0.33, 1)
 
-[node name="MujocoPerturb" type="Node3D"]
+[node name="MujocoStandArena" type="Node3D"]
 script = ExtResource("1_mujoco")
-ModelPath = "res://mujoco_rig/dummy_ball.xml"
+ModelPath = "res://mujoco_rig/dummy.xml"
 LateralDamping = 0.05
 MaxLateralCorrection = 0.12
 FollowCamera = false
-CameraOffset = Vector3(3.0, 1.2, 3.5)
+CameraOffset = Vector3(2.5, 1.0, 3.0)
 Walk = false
 Passive = false
 PolicyPath = "res://mujoco_rig/balance_policy.onnx"
 WalkCommand = Vector3(0, 0, 0)
-BallGunEnabled = true
-BallInterval = 3.0
-BallFirstShot = 2.0
 AutoQuitSeconds = 0.0
 
 [node name="Ground" type="MeshInstance3D" parent="."]

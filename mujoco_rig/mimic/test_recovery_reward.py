@@ -32,6 +32,18 @@ class RecoveryRewardTests(unittest.TestCase):
         self.assertAlmostEqual(float(self.score(imitation=1.) - self.score(imitation=0.)), .25)
         self.assertGreaterEqual(float(self.score(height=0., up=-1., speed=100., imitation=0.)), 0.)
 
+    def test_sustained_settling_requires_continuous_supported_balance(self):
+        reward = RecoveryReward(sustained_settling_weight=.25)
+        inputs = (torch.tensor([.8]), torch.tensor([.9]), torch.tensor([.9]),
+                  torch.tensor([1.]), torch.zeros(1, 3), torch.zeros(1, 3),
+                  torch.tensor([[100., 100.]]))
+        early = reward(*inputs, torch.tensor([0.]))
+        held = reward(*inputs, torch.tensor([2.]))
+        self.assertAlmostEqual(float(held - early), .25, places=6)
+        self.assertAlmostEqual(float(reward(*inputs, torch.tensor([4.])) - held), 0., places=6)
+        self.assertEqual(reward.contract()["schema"], "ball_recovery_v2")
+        self.assertEqual(RecoveryReward().contract()["schema"], "ball_recovery_v1")
+
     def test_native_contact_gate_reset_and_translation_invariance(self):
         checkout = os.environ.get("MIMICKIT_PATH")
         if not checkout:

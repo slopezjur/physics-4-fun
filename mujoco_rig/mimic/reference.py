@@ -5,7 +5,8 @@ import numpy as np
 import torch
 
 from .baseline import sha256
-from .motion_contacts import TOE_REFERENCE_SCHEMA, validate_sole_schedule
+from .motion_contacts import (TOE_REFERENCE_SCHEMA, HEEL_REFERENCE_SCHEMA,
+                              validate_sole_schedule, validate_support_schedule)
 
 
 class StandReference:
@@ -36,6 +37,15 @@ class StandReference:
                 if "contact" not in data or "sole_contact" not in data or data["contact"].shape != (len(data["qpos"]), 2):
                     raise ValueError("v6 references require foot/sole contact phases for every pose")
                 validate_sole_schedule(data["contact"], data["sole_contact"])
+            if metadata.get("schema") == HEEL_REFERENCE_SCHEMA:
+                from .motion_protocol import validate_motion_reference
+                validate_motion_reference(metadata)
+                if ("contact" not in data or "support_contact" not in data
+                        or data["contact"].shape != (len(data["qpos"]), 2)):
+                    raise ValueError("v7 references require foot/support contact phases for every pose")
+                validate_support_schedule(data["contact"], data["support_contact"])
+                if not data["support_contact"].any(axis=1).all():
+                    raise ValueError("v7 references require ground support in every pose")
             self.qpos = torch.tensor(data["qpos"], dtype=torch.float32, device=device)
             self.qvel = torch.tensor(data["qvel"], dtype=torch.float32, device=device)
             self.dt = float(data["dt"])

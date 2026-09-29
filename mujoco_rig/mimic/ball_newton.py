@@ -10,13 +10,13 @@ from .target_control import DelayedTargetControl
 
 
 class BallNewtonEngine(DummyNewtonEngine):
-    def __init__(self, rig, num_envs, device="cuda:0", control_factory=DelayedTargetControl):
+    def __init__(self, rig, num_envs, device="cuda:0", control_factory=DelayedTargetControl, ball_path=None):
         self.character = rig
         # Keep hit state on the same device as the simulation.  Newton exposes contact
         # shape ids after each control interval; the sticky flag gives BallTask and the
         # parity probe the same observable that BallNativeEngine already provides.
         self.hit = torch.zeros(num_envs, dtype=torch.bool, device=device)
-        super().__init__(load_ball_rig(rig), num_envs, device, control_factory)
+        super().__init__(load_ball_rig(rig, ball_path), num_envs, device, control_factory)
         labels = self._sim_model.shape_label
         total_shapes = self._sim_model.shape_count
         if total_shapes % self.get_num_envs():

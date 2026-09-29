@@ -8,10 +8,12 @@ import mujoco
 import numpy as np
 
 from .contact_projection import StanceProjection, bounded_ik_step
-from .motion_contacts import (infer_toe_off, sole_schedule, validate_sole_schedule, TOE_REFERENCE_SCHEMA,
+from .motion_contacts import (infer_toe_off, sole_schedule, validate_sole_schedule,
+                              validate_support_schedule, TOE_REFERENCE_SCHEMA,
+                              HEEL_REFERENCE_SCHEMA,
                               stance_phase_ids, expand_landing_offsets)
 from .motion_dynamics import support_columns
-from .motion_protocol import validate_motion_reference
+from .motion_protocol import validate_motion_reference, V7_PHYSICAL_CHECKS
 from .retarget_steps import validate_motion
 from .rig import Rig
 from .baseline import sha256
@@ -127,6 +129,49 @@ class MotionContactTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             sole_schedule(np.zeros((3, 2), dtype=bool), np.ones((3, 2), dtype=bool))
 
+    def test_independent_support_accepts_heel_strike(self):
+        contact = np.array([[True, True], [True, True], [False, True]])
+        support = np.array([[True, True, False, True],
+                            [True, True, True, True],
+                            [False, True, False, True]])
+        with self.assertRaises(ValueError):
+            validate_sole_schedule(contact, support)
+        np.testing.assert_array_equal(validate_support_schedule(contact, support),
+                                      [[True, False], [False, False], [False, False]])
+        invalid = support.copy()
+        invalid[1, 2] = False
+        invalid[1, 0] = False
+        with self.assertRaises(ValueError):
+            validate_support_schedule(contact, invalid)
+
+    def test_v7_geometry_accepts_a_grounded_heel_with_raised_toe(self):
+        model = self.rig.model
+        data = mujoco.MjData(model)
+        pose = self.rig.rest.copy()
+        pose[model.jnt_qposadr[model.joint("Foot_L_rx").id]] += .3
+        data.qpos[:] = pose
+        mujoco.mj_forward(model, data)
+        heel = model.geom("g_Foot_L").id
+        corners = np.array([[x, y, -1.] for x in (-1., 1.) for y in (-1., 1.)])
+        corners *= model.geom_size[heel]
+        heights = (corners @ data.geom_xmat[heel].reshape(3, 3).T
+                   + data.geom_xpos[heel])[:, 2]
+        pose[2] -= heights.min()
+        data.qpos[:] = pose
+        mujoco.mj_forward(model, data)
+        feet = [model.body(name).id for name in ("Foot_L", "Foot_R")]
+        poses = np.tile(pose, (3, 1))
+        targets = np.tile(data.xpos[feet], (3, 1, 1))
+        contact = np.tile([True, False], (3, 1))
+        support = np.tile([True, False, False, False], (3, 1))
+        checks, _ = validate_motion(self.rig, poses, np.zeros((3, model.nv)),
+                                    targets, contact, .05,
+                                    support_contact=support)
+        self.assertTrue(checks["support_contact"])
+        with self.assertRaises(ValueError):
+            validate_motion(self.rig, poses, np.zeros((3, model.nv)),
+                            targets, contact, .05, sole_contact=support)
+
     def test_v6_cannot_claim_v5_validation_without_sole_checks(self):
         metadata = dict(schema=TOE_REFERENCE_SCHEMA, passed=True, checks={k: True for k in
                         ("ground_support", "stance_contact", "force_consistency", "root_wrench_consistency", "actuation_feasibility")})
@@ -176,6 +221,37 @@ class MotionContactTests(unittest.TestCase):
             write()
             loaded = StandReference(path, self.rig, "cpu")
             np.testing.assert_allclose(loaded.qpos.numpy(), arrays["qpos"], atol=1e-7)
+
+    def test_v7_loader_requires_independent_support_and_physical_checks(self):
+        asset = Path(__file__).parent / "assets/stand_reference.npz"
+        with np.load(asset) as source:
+            arrays = {key: source[key] for key in source.files}
+        metadata = json.loads(asset.with_suffix(".json").read_text())
+        metadata.update(schema=HEEL_REFERENCE_SCHEMA, passed=True,
+                        checks={key: True for key in V7_PHYSICAL_CHECKS})
+        frames = len(arrays["qpos"])
+        arrays["contact"] = np.ones((frames, 2), dtype=bool)
+        arrays["support_contact"] = np.ones((frames, 4), dtype=bool)
+        arrays["support_contact"][1, 2] = False
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "reference.npz"
+
+            def write():
+                np.savez_compressed(path, **arrays)
+                metadata["reference_sha256"] = sha256(path)
+                path.with_suffix(".json").write_text(json.dumps(metadata), encoding="utf-8")
+
+            write()
+            self.assertEqual(StandReference(path, self.rig, "cpu").qpos.shape[0], frames)
+            metadata["checks"]["support_contact"] = False
+            path.with_suffix(".json").write_text(json.dumps(metadata), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "independent support-contact"):
+                StandReference(path, self.rig, "cpu")
+            metadata["checks"]["support_contact"] = True
+            arrays["support_contact"][1, 0] = False
+            write()
+            with self.assertRaisesRegex(ValueError, "independent foot/toe"):
+                StandReference(path, self.rig, "cpu")
 
 
 if __name__ == "__main__":

@@ -112,8 +112,8 @@ from `env_config.POLICY_FAMILY`.
 
 | Family | Files | Tasks | Scenes |
 |---|---|---|---|
-| **balance** | `mujoco_rig/balance_policy.onnx` + `.contract.json` | `perturb`. Stand is the same env with the gun off (`--ball_every 1000000 1000000`) | `MujocoStand.tscn`, `MujocoPerturb.tscn` |
-| **locomotion** | `mujoco_rig/locomotion_policy.onnx` + `.contract.json` | `walk`, stages 1–5 (`walk_env_warp.STAGES`) | `MujocoWalk.tscn` |
+| **balance** | `mujoco_rig/balance_policy.onnx` + `.contract.json` | `perturb`. Stand is the same env with the gun off (`--ball_every 1000000 1000000`) | `MujocoStandArena.tscn`, `MujocoPerturbArena.tscn` |
+| **locomotion** | `mujoco_rig/locomotion_policy.onnx` + `.contract.json` | `walk`, stages 1–5 (`walk_env_warp.STAGES`) | `MujocoWalkArena.tscn` |
 
 What each file holds now, and how well it scores, is in `mujoco_rig/STATUS.md` — never in this prompt.
 

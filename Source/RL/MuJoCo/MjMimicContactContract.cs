@@ -17,7 +17,7 @@ internal static class MjMimicContactContract
                 throw new InvalidOperationException("Legacy contact semantics cannot be overridden");
             return false;
         }
-        if (schema != "mimic_stand_target_pd_v2"
+        if (schema is not ("mimic_stand_target_pd_v2" or "mimic_stationary_stand_target_pd_v1" or MjMimicBalanceObservation.Contract)
             || !contract.TryGetProperty("ground_contact_sampling", out var sampling) || sampling.GetString() != Sampling
             || !contract.TryGetProperty("support_bodies", out var bodies)
             || bodies.ValueKind != JsonValueKind.Array || bodies.GetArrayLength() != 2

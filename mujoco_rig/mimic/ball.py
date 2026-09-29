@@ -3,12 +3,27 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 import numpy as np
+import mujoco
 
 from .rig import Rig
 
 
-def load_ball_rig(character):
-    path = character.path.with_name("dummy_ball.xml")
+def set_curriculum_ball_mass(engine, mass):
+    """Scale only the projectile mass and inertia in an isolated native world."""
+    if not np.isfinite(mass) or not .1 <= mass <= 8.:
+        raise ValueError("Curriculum ball mass must be within 0.1–8 kg")
+    model = engine.rig.model
+    body = model.body("ball").id
+    ratio = mass / model.body_mass[body]
+    model.body_mass[body] = mass
+    model.body_inertia[body] *= ratio
+    mujoco.mj_setConst(model, engine.datas[0])
+    for data in engine.datas:
+        mujoco.mj_forward(model, data)
+
+
+def load_ball_rig(character, path=None):
+    path = Path(path) if path is not None else character.path.with_name("dummy_ball.xml")
     plain, world = ET.parse(character.path).getroot(), ET.parse(path).getroot()
     ball = world.find("./worldbody/body[@name='ball']")
     if ball is None:

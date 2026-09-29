@@ -10,7 +10,7 @@
 #
 # **The default is what SHIPS, not what is newest.** It resolves the checkpoint from
 # balance_policy.contract.json's `source_checkpoint`, so the window shows the same brain
-# MujocoStand.tscn and MujocoPerturb.tscn load. Watching one policy while shipping another is not a
+# MujocoStandArena.tscn and MujocoPerturbArena.tscn load. Watching one policy while shipping another is not a
 # display bug - it cost the Isaac track a wrong conclusion, where the viewer opened
 # stand/night13 at action_scale 0.4 while Godot ran stand_assist/night06 at 0.15. `-Latest` is the
 # opt-in for "what did I just make".

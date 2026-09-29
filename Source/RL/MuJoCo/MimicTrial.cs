@@ -14,7 +14,7 @@ public abstract partial class MimicTrial : Node3D
     [Export(PropertyHint.Dir)] public string BundleDirectory { get; set; } = string.Empty;
     [Export] public bool UseLatestExport { get; set; } = true;
     [Export(PropertyHint.Dir)] public string MujocoLibraryDirectory { get; set; } = string.Empty;
-    [Export(PropertyHint.Range, "3,6,0.1")] public float TrialSeconds { get; set; } = 5;
+    [Export(PropertyHint.Range, "3,3600,1")] public float TrialSeconds { get; set; } = 5;
     [Export(PropertyHint.Range, "0,3,0.01")] public float StartPhaseSeconds { get; set; }
 
     private MjBridge? _bridge;
@@ -32,6 +32,8 @@ public abstract partial class MimicTrial : Node3D
     protected bool CanAdvance => _driver != null && !_paused && !_finished;
     protected virtual string TrialName => "MimicStand";
     protected virtual string ViewerTask => "stand";
+    protected virtual bool WaitForBallHit => false;
+    protected virtual bool UnlimitedDuration => false;
     private protected virtual void ResetTrial() => Driver.Reset(ConfiguredPhase);
     private protected virtual void StepTrial() => Driver.Step();
     protected virtual string TrialDetails => string.Empty;
@@ -46,6 +48,8 @@ public abstract partial class MimicTrial : Node3D
     }
     protected virtual void ConfigureLaunch()
     {
+        string? model = LaunchOption("--mimic-model");
+        if (model != null) ModelPath = model;
         string? requested = LaunchOption("--mimic-bundle");
         if (requested != null) { BundleDirectory = requested; return; }
         string selection = ProjectSettings.GlobalizePath($"res://logs/mimickit-viewer/{ViewerTask}.json");
@@ -77,17 +81,20 @@ public abstract partial class MimicTrial : Node3D
                 ? string.Empty : ProjectSettings.GlobalizePath(MujocoLibraryDirectory);
             MjInterop.SetLibraryDirectory(library);
             _bridge = new MjBridge(model);
-            _driver = new MjMimicStandDriver(_bridge, model, bundle);
+            _driver = new MjMimicStandDriver(_bridge, model, bundle, WaitForBallHit);
             _trialSeconds = TrialSeconds;
             _startPhase = StartPhaseSeconds;
-            if (!float.IsFinite(_trialSeconds) || _trialSeconds < 3
+            if (!UnlimitedDuration && (!float.IsFinite(_trialSeconds) || _trialSeconds < 3)
                 || !float.IsFinite(_startPhase) || _startPhase < 0
-                || _startPhase + _trialSeconds > _driver.ReferenceDuration)
-                throw new InvalidOperationException("Trial must last at least three seconds and fit within the reference clip.");
+                || (!UnlimitedDuration && !_driver.StationaryReference && !WaitForBallHit
+                    && _startPhase + _trialSeconds > _driver.ReferenceDuration))
+                throw new InvalidOperationException("Trial must last at least three seconds; time-driven trials must fit within the reference clip.");
             _proxies = MjProxyBuilder.Build(_bridge, this, new MjModelDefinition(model).Document);
             Restart();
             if (_driver != null)
-                GD.Print($"[{TrialName}] Loaded {bundle}; live {_trialSeconds:F1}s trial. R: restart, P: pause.");
+                GD.Print($"[{TrialName}] Loaded {bundle}; "
+                    + (UnlimitedDuration ? "unlimited trial" : $"live {_trialSeconds:F1}s trial")
+                    + ". R: restart, P: pause.");
         }
         catch (Exception exception)
         {
@@ -135,7 +142,9 @@ public abstract partial class MimicTrial : Node3D
             {
                 StepTrial();
                 _accumulator -= _driver.ControlTime;
-                _finished = _driver.Fallen || _driver.Time >= _trialSeconds;
+                _finished = _driver.Fallen || (!UnlimitedDuration && _driver.Time >= _trialSeconds)
+                    || (WaitForBallHit && _driver.RecoveryStarted
+                        && _driver.RecoveryTime >= _driver.ReferenceDuration);
                 if (_finished)
                     GD.Print($"[{TrialName}] {(_driver.Fallen ? "Fallen" : "Completed")}: {_driver.Time:F3}s; root error {_driver.TrackingError:F4}m. {TrialDetails}");
             }
@@ -157,7 +166,9 @@ public abstract partial class MimicTrial : Node3D
     {
         string state = _driver!.Fallen ? "Fallen — press R to restart"
             : _finished ? "Trial complete — press R to restart" : _paused ? "Paused" : "Standing";
-        _status.Text = $"{state}\n{Math.Min(_driver.Time, _trialSeconds):F1} / {_trialSeconds:F1} s · Root error: {_driver.TrackingError * 100:F1} cm" + TrialDetails;
+        string elapsed = UnlimitedDuration ? $"{_driver.Time:F1} s elapsed"
+            : $"{Math.Min(_driver.Time, _trialSeconds):F1} / {_trialSeconds:F1} s";
+        _status.Text = $"{state}\n{elapsed} · Root error: {_driver.TrackingError * 100:F1} cm" + TrialDetails;
         _pauseButton.Text = _paused ? "Resume (P)" : "Pause (P)";
         _pauseButton.Disabled = _finished;
     }

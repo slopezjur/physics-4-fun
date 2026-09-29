@@ -77,6 +77,7 @@ class ContactContractTests(unittest.TestCase):
             data.qpos[2] += .1
             mujoco.mj_forward(engine.rig.model, data)
         torch.testing.assert_close(saved, engine.get_ground_contact_forces(0), rtol=0, atol=0)
+        self.assertTrue(np.allclose(engine.current_state_ground_contact_forces(0), 0.))
         engine.reset_envs(torch.tensor([1]), self.rig.rest[None], np.zeros((1, self.rig.model.nv)))
         updated = engine.get_ground_contact_forces(0)
         torch.testing.assert_close(saved[[0, 2]], updated[[0, 2]], rtol=0, atol=0)
@@ -94,8 +95,9 @@ class ContactContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "contract.json"
             args = Namespace(mimickit=Path(os.environ["MIMICKIT_PATH"]), envs=8, iterations=1,
-                             seconds=1., evaluation_interval=8, initialize_from=Path(directory) / "best.pt",
-                             source_contract=source, stability="guarded", contact_mode=SUPPORT_V2)
+                            seconds=1., evaluation_interval=8, initialize_from=Path(directory) / "best.pt",
+                            source_contract=source, stability="guarded", contact_mode=SUPPORT_V2,
+                            task="stand")
             source.write_text(json.dumps(self.task(LEGACY).observation_contract()))
             with self.assertRaisesRegex(ValueError, "not implicitly migrated"):
                 train(args)

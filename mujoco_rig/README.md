@@ -20,15 +20,15 @@ The trainer now supports guarded fine-tuning with frozen normalization and bound
 actor updates. New runs retain and export their best evaluated checkpoint separately
 from the final training state; see the experiment README for the explicit warm-start command.
 
-Open `Scenes/RL/Isaac3/MuJoCo/MimicStand.tscn` and press F6 to view the selected
+Open `Scenes/RL/Isaac3/MuJoCo/MimicStandArena.tscn` and press F6 to view the selected
 checkpoint. F5 runs the configured project main scene; in the current checkout that
-is `MimicPerturb.tscn`. It needs no environment variables.
+is `MimicPerturbArena.tscn`. It needs no environment variables.
 R restarts the five-second trial; P pauses/resumes. The result stays visible at the
 end rather than automatically resetting. Policy bundle and native library paths
 are configured on the root node in the Inspector. `MimicStandReplay.tscn` is for
 automated parity checks only.
 
-For physical-ball Perturb viewing, open `Scenes/RL/Isaac3/MuJoCo/MimicPerturb.tscn`
+For physical-ball Perturb viewing, open `Scenes/RL/Isaac3/MuJoCo/MimicPerturbArena.tscn`
 (or press F5). It defaults to the trained `guarded-perturb-04` policy with 12-bone
 multi-body targeting; direction buttons restart, Random picks a 360° azimuth and random
 limb, B launches immediately, AutoFire provides continuous fire, R repeats and P pauses.
@@ -553,9 +553,9 @@ CPU MuJoCo inside Godot. That is what "sim-to-sim" means here.
 ## Scenes
 
 ```
-Scenes/RL/Isaac3/MuJoCo/MujocoStand.tscn     stand / balance, no projectiles
-Scenes/RL/Isaac3/MuJoCo/MujocoPerturb.tscn   the ball gun, every 3 s
-Scenes/RL/Isaac3/MuJoCo/MujocoWalk.tscn      commanded locomotion, 0.25 m/s
+Scenes/RL/Isaac3/MuJoCo/MujocoStandArena.tscn     stand / balance, no projectiles
+Scenes/RL/Isaac3/MuJoCo/MujocoPerturbArena.tscn   the ball gun, every 3 s
+Scenes/RL/Isaac3/MuJoCo/MujocoWalkArena.tscn      commanded locomotion, 0.25 m/s
 ```
 
 Stand and Perturb load the SAME `balance_policy.onnx` - they are one environment with the gun off or

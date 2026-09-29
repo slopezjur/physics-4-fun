@@ -156,8 +156,10 @@ def refine_trajectory(rig, qpos, root, feet_target, feet_rot, contact, dt):
                         solver_message=fitted.message)
 
 
-def validate_motion(rig, qpos, qvel, foot_targets, contact, dt, sole_contact=None, self_clearance_m=0.):
-    from .motion_contacts import validate_sole_schedule, SOLE_NAMES
+def validate_motion(rig, qpos, qvel, foot_targets, contact, dt, sole_contact=None,
+                    self_clearance_m=0., support_contact=None):
+    from .motion_contacts import (validate_sole_schedule, validate_support_schedule,
+                                  SOLE_NAMES)
     model, data = rig.model, mujoco.MjData(rig.model)
     feet = [model.body(n).id for n in ("Foot_L", "Foot_R")]
     support_bodies = [model.body(n).id for n in SOLE_NAMES]
@@ -165,8 +167,13 @@ def validate_motion(rig, qpos, qvel, foot_targets, contact, dt, sole_contact=Non
     self_pairs = [pair for pair in sorted(collision_pairs(model)) if 0 not in pair]
     distance_query = CollisionClearance(model, self_pairs)
     min_clearance, closest_pair, closest_frame = .05, None, None
+    if sole_contact is not None and support_contact is not None:
+        raise ValueError("Specify one contact representation")
     if sole_contact is not None:
         validate_sole_schedule(contact, sole_contact)
+    if support_contact is not None:
+        validate_support_schedule(contact, support_contact)
+    active_support = support_contact if support_contact is not None else sole_contact
     positions, gaps, penetration = [], [], 0.
     for frame, pose in enumerate(qpos):
         data.qpos[:] = pose
@@ -177,7 +184,7 @@ def validate_motion(rig, qpos, qvel, foot_targets, contact, dt, sole_contact=Non
                 i = int(distances.argmin())
                 min_clearance, closest_pair, closest_frame = float(distances[i]), self_pairs[i], frame
         positions.append(data.xpos[feet].copy())
-        if sole_contact is not None:
+        if active_support is not None:
             support_positions.append(data.xpos[support_bodies].copy())
             corners = []
             for name in SOLE_NAMES:
@@ -192,8 +199,8 @@ def validate_motion(rig, qpos, qvel, foot_targets, contact, dt, sole_contact=Non
     stance_pairs = contact[1:] & contact[:-1]
     speed = np.linalg.norm(np.diff(positions[..., :2], axis=0), axis=-1) / dt
     slide = float(speed[stance_pairs].max()) if stance_pairs.any() else float("inf")
-    if sole_contact is not None:
-        supported_pairs = sole_contact[1:] & sole_contact[:-1]
+    if active_support is not None:
+        supported_pairs = active_support[1:] & active_support[:-1]
         support_speed = np.linalg.norm(np.diff(np.asarray(support_positions)[..., :2], axis=0), axis=-1) / dt
         slide = float(support_speed[supported_pairs].max()) if supported_pairs.any() else float("inf")
     fit = float(np.linalg.norm(positions - foot_targets, axis=-1).max())
@@ -209,19 +216,33 @@ def validate_motion(rig, qpos, qvel, foot_targets, contact, dt, sole_contact=Non
     if sole_contact is not None:
         checks["sole_contact"] = bool(sole_contact.any(axis=1).all() and
                                      (np.abs(np.asarray(support_corners)[sole_contact]) <= SOLE_HEIGHT_ERROR_M).all())
+    if support_contact is not None:
+        nearest_corner = np.abs(np.asarray(support_corners)).min(axis=2)
+        active_error = np.where(support_contact, nearest_corner, -np.inf)
+        missing_support = ~support_contact.any(axis=1)
+        contact_failures = missing_support | (active_error.max(axis=1) > SOLE_HEIGHT_ERROR_M)
+        checks["support_contact"] = not contact_failures.any()
+        support_geometry = dict(
+            max_active_corner_error_m=float(nearest_corner[support_contact].max())
+            if support_contact.any() else None,
+            failing_frames=np.flatnonzero(contact_failures).tolist())
+    else:
+        support_geometry = None
     if self_clearance_m > 0:
         checks["self_clearance"] = min_clearance >= self_clearance_m - 1e-5
     dynamics = force_consistency(rig, qpos, dt)
     checks["force_consistency"] = dynamics["passed"]
-    wrench = root_wrench_consistency(rig, qpos, dt, sole_contact)
+    wrench = root_wrench_consistency(rig, qpos, dt, active_support)
     checks["root_wrench_consistency"] = wrench["all_frames_feasible"]
-    actuation = action_window_consistency(rig, qpos, qvel, dt, sole_contact=sole_contact)
+    actuation = action_window_consistency(rig, qpos, qvel, dt,
+                                          sole_contact=active_support)
     checks["actuation_feasibility"] = bool(wrench["all_frames_feasible"] and actuation["root_supported_frames"]
                                            and not actuation["failing_frames"]["0.25"])
     clearance_metrics = (dict(minimum_m=min_clearance, required_m=self_clearance_m,
                               closest_pair=[model.geom(g).name for g in closest_pair] if closest_pair else None,
                               closest_frame=closest_frame) if self_clearance_m > 0 else None)
-    return checks, dict(force_consistency=dynamics, root_wrench_consistency=wrench, self_clearance=clearance_metrics,
+    return checks, dict(force_consistency=dynamics, root_wrench_consistency=wrench,
+                        support_geometry=support_geometry, self_clearance=clearance_metrics,
                         action_window_consistency=actuation,
                         max_penetration_m=penetration, max_stance_slide_m_s=slide,
                         max_support_gap_m=float(gaps.min(axis=1).max()),

@@ -1,5 +1,9 @@
 # RL scenes, grouped by brain
 
+Interactive policy viewing scenes use the `*Arena.tscn` suffix across the RL
+tracks, including MuJoCo. `*Training.tscn` runs training episodes, `*Replay.tscn`
+supports batch validation, and `*Check*.tscn` names bounded diagnostic scenes.
+
 The folders are not tidying. **Everything inside one folder shares an observation and action space
 *and* a compatible objective, so its checkpoints are interchangeable. Across folders they are not.**
 

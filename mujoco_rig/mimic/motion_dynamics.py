@@ -6,12 +6,33 @@ from pathlib import Path
 
 import mujoco
 import numpy as np
-from scipy.optimize import linprog
+from scipy.optimize import linprog, nnls
 
 from .baseline import sha256
 from .rig import Rig
 from .target_control import DelayedTargetControl
 from mujoco_rig.rl.env_config import ACTION_LATENCY_STEPS
+
+WRENCH_TOLERANCE_FRACTION = .001
+
+
+def support_wrench_residual(columns, required):
+    """Minimum residual in bodyweight units under nonnegative contact forces."""
+    if columns.shape[1] == 0:
+        return None
+    return float(nnls(columns, required, maxiter=10 * columns.shape[1])[1])
+
+
+def bounded_equilibrium_residual(matrix, required, bounds):
+    """Smallest maximum generalized-force error under motor/contact bounds."""
+    width = matrix.shape[1]
+    slack = -np.ones((len(required), 1))
+    result = linprog(np.r_[np.zeros(width), 1.],
+                     A_ub=np.vstack((np.hstack((matrix, slack)),
+                                     np.hstack((-matrix, slack)))),
+                     b_ub=np.r_[required, -required],
+                     bounds=bounds + [(0., None)], method="highs")
+    return float(result.x[-1]) if result.success else None
 
 
 def frame_dynamics(model, data, qpos, frame, dt):
@@ -42,7 +63,7 @@ def support_columns(model, data, active_soles=None):
             continue
         friction = max(model.geom_friction[geom, 0], model.geom_friction[0, 0])
         points = corners[np.argsort(corners[:, 2])[:4]]
-        # Explicit v6 phases cannot borrow projected support from a raised corner.
+        # Explicit support phases cannot borrow support from a raised corner.
         if active_soles is not None:
             points = points[points[:, 2] <= .001]
         for point in points:
@@ -94,24 +115,29 @@ def root_wrench_consistency(rig, qpos, dt, sole_contact=None):
     Central tangent differences estimate velocity/acceleration. Unlimited joint
     torque removes motor authority as a confounder. Each sole within 1 mm of the
     floor receives its entire projected footprint, and a square OUTSIDE the
-    circular friction cone supplies an optimistic force envelope. This ignores
-    actuator/contact compliance and is not a policy-learning feasibility verdict.
+    circular friction cone supplies an optimistic force envelope. A 0.001
+    body-weight residual tolerance absorbs coarse-sample/contact-point error.
+    This ignores actuator/contact compliance and is not a policy-learning
+    feasibility verdict.
     """
     model, data = rig.model, mujoco.MjData(rig.model)
     if len(qpos) < 3 or not np.isfinite(dt) or dt <= 0:
         raise ValueError("Root-wrench diagnosis requires three poses and a positive timestep")
     weight = model.body_mass.sum() * np.linalg.norm(model.opt.gravity)
     failures = []
+    residuals = []
     for frame in range(1, len(qpos) - 1):
         required = frame_dynamics(model, data, qpos, frame, dt)[:6] / weight
         columns = support_columns(model, data, None if sole_contact is None else sole_contact[frame])[:6]
-        feasible = columns.shape[1] > 0 and linprog(
-            np.zeros(columns.shape[1]), A_eq=columns, b_eq=required,
-            bounds=(0, None), method="highs").success
-        if not feasible:
+        residual = support_wrench_residual(columns, required)
+        if residual is not None:
+            residuals.append(residual)
+        if residual is None or residual > WRENCH_TOLERANCE_FRACTION:
             failures.append(frame)
     return dict(evaluated_frames=len(qpos) - 2, infeasible_frames=failures,
                 all_frames_feasible=not failures, joint_torque_limits="unbounded",
+                tolerance_fraction=WRENCH_TOLERANCE_FRACTION,
+                max_residual_fraction=max(residuals, default=None),
                 support=("explicit active sole corners within 1 mm of floor; outer-square friction cone" if sole_contact is not None
                          else "optimistic projected near-floor sole footprints and outer-square friction cone"),
                 derivatives="central tangent differences at interior frames")
@@ -159,6 +185,7 @@ def action_window_consistency(rig, qpos, qvel, dt, windows=(.25, .5), sole_conta
     delay = ACTION_LATENCY_STEPS * rig.decimation * model.opt.timestep
     times = np.arange(len(qpos)) * dt
     failures = {"torque": [], **{str(window): [] for window in windows}}
+    failure_residuals = {name: [] for name in failures}
     supported = []
     for frame in range(1, len(qpos) - 1):
         if times[frame] < delay:
@@ -177,7 +204,12 @@ def action_window_consistency(rig, qpos, qvel, dt, windows=(.25, .5), sole_conta
             if not linprog(np.zeros(matrix.shape[1]), A_eq=matrix, b_eq=required[controlled] / weight,
                            bounds=limits + [(0, None)] * columns.shape[1], method="highs").success:
                 failures[name].append(frame)
+                residual = bounded_equilibrium_residual(
+                    matrix, required[controlled] / weight,
+                    limits + [(0., None)] * columns.shape[1])
+                failure_residuals[name].append([frame, residual])
     return dict(root_supported_frames=supported, failing_frames=failures, command_delay_seconds=delay,
+                failure_residual_fractions=failure_residuals,
                 residual_windows_radians=list(windows),
                 scope="Optimistic inverse dynamics conditional on root support; exact delayed PD target intervals at reference tracking. Passive joint equilibrium, initial queue fill and between-frame dynamics are excluded.")
 
@@ -188,7 +220,8 @@ def audit(references, out):
     for path in references:
         with np.load(path, allow_pickle=False) as source:
             poses, velocities, dt = source["qpos"], source["qvel"], float(source["dt"])
-            soles = source["sole_contact"] if "sole_contact" in source else None
+            soles = (source["support_contact"] if "support_contact" in source
+                     else source["sole_contact"] if "sole_contact" in source else None)
         rows.append(dict(reference=str(path), reference_sha256=sha256(path),
                          force=force_consistency(rig, poses, dt),
                          root_wrench=root_wrench_consistency(rig, poses, dt, soles),

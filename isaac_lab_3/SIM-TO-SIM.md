@@ -4470,7 +4470,7 @@ Source/RL/MuJoCo/MjInterop.cs    P/Invoke surface; no GDExtension, no C++ toolch
 Source/RL/MuJoCo/MjLayout.cs     GENERATED struct offsets (mujoco_rig/gen_offsets.py)
 Source/RL/MuJoCo/MjBridge.cs     model + state, body poses converted into Godot's frame
 Source/RL/MuJoCo/MujocoDummy.cs  Godot node: steps MuJoCo, drives the gait, syncs transforms
-Scenes/RL/Isaac3/MuJoCo/MujocoWalk.tscn
+Scenes/RL/Isaac3/MuJoCo/MujocoWalkArena.tscn
 ```
 
 The rig is generated from Godot's own `[PLANT]` dump and the visual proxies are built by reading that
@@ -4702,9 +4702,9 @@ The scenes were unusable by hand: no ground at all (the dummy rendered in a void
 walk left within seconds, and an auto-quit.
 
 ```
-Scenes/RL/Isaac3/MuJoCo/MujocoStand.tscn     10 m pad,   dummy.xml
-Scenes/RL/Isaac3/MuJoCo/MujocoPerturb.tscn   16 m pad,   dummy_ball.xml   BallGun on
-Scenes/RL/Isaac3/MuJoCo/MujocoWalk.tscn     120 m field, dummy.xml
+Scenes/RL/Isaac3/MuJoCo/MujocoStandArena.tscn     10 m pad,   dummy.xml
+Scenes/RL/Isaac3/MuJoCo/MujocoPerturbArena.tscn   16 m pad,   dummy_ball.xml   BallGun on
+Scenes/RL/Isaac3/MuJoCo/MujocoWalkArena.tscn     120 m field, dummy.xml
 ```
 
 Each carries a ground mesh, a camera that follows the pelvis, and `AutoQuitSeconds = 0` so it runs

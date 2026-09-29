@@ -4,22 +4,26 @@
 [ext_resource type="Script" path="res://Source/Camera/CameraController.cs" id="2_cam"]
 
 [sub_resource type="PlaneMesh" id="Ground"]
-size = Vector2(10, 10)
+size = Vector2(120, 120)
 
 [sub_resource type="StandardMaterial3D" id="GroundMat"]
 albedo_color = Color(0.28, 0.30, 0.33, 1)
 
-[node name="MujocoStand" type="Node3D"]
+[node name="MujocoWalkArena" type="Node3D"]
 script = ExtResource("1_mujoco")
 ModelPath = "res://mujoco_rig/dummy.xml"
 LateralDamping = 0.05
 MaxLateralCorrection = 0.12
 FollowCamera = false
-CameraOffset = Vector3(2.5, 1.0, 3.0)
-Walk = false
+CameraOffset = Vector3(3.0, 1.5, 3.5)
+Walk = true
 Passive = false
-PolicyPath = "res://mujoco_rig/balance_policy.onnx"
-WalkCommand = Vector3(0, 0, 0)
+PolicyPath = "res://mujoco_rig/locomotion_policy.onnx"
+WalkCommand = Vector3(0.25, 0, 0)
+GaitFrequency = 0.6
+ShiftAmplitude = 0.25
+LiftAmplitude = -0.4
+KneeAmplitude = 0.4
 AutoQuitSeconds = 0.0
 
 [node name="Ground" type="MeshInstance3D" parent="."]

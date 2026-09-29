@@ -12,7 +12,7 @@ internal sealed class MjMimicStandDriver : IDisposable
     private readonly MjBridge _bridge;
     private readonly MjMimicWorld _world;
     private readonly MjMimicReference _reference;
-    private readonly MjOnnxPolicy _policy;
+    private readonly IMjPolicyInference _policy;
     private readonly MjMimicTargetControl? _targetControl;
     private readonly int[] _actuators, _allowedGround;
     private readonly float[] _scales;
@@ -22,12 +22,17 @@ internal sealed class MjMimicStandDriver : IDisposable
     private readonly Vector3[] _forces;
     private readonly int _left, _right;
     private readonly bool _correctedContacts;
+    private readonly bool _waitForBallHit;
+    private readonly bool _stationaryReference;
+    private readonly bool _captureObservation;
     private int _cursor, _steps;
+    private int? _recoveryStartStep;
     private float _offset;
     internal float ControlTime { get; }
     internal float Time => _steps * ControlTime;
     internal int StepCount => _steps;
     internal float ReferenceDuration => _reference.Duration;
+    internal bool StationaryReference => _stationaryReference;
     internal float[] Observation { get; }
     internal float[] Action { get; } = new float[30];
     internal double[] Pose => (double[])_q.Clone();
@@ -35,6 +40,11 @@ internal sealed class MjMimicStandDriver : IDisposable
     internal bool Fallen { get; private set; }
     internal float TrackingError { get; private set; }
     internal bool BallHit { get; private set; }
+    internal bool BallContactThisStep { get; private set; }
+    internal bool RecoveryStarted => !_waitForBallHit || _recoveryStartStep.HasValue;
+    internal float RecoveryTime => _waitForBallHit
+        ? _recoveryStartStep.HasValue ? Math.Max(0, _steps - _recoveryStartStep.Value) * ControlTime : 0
+        : _offset + Time;
     internal float GroundNormalLoad(int body) => Math.Abs(_forces[body].Z);
     // Observational only: never modifies the exported policy's targets or actions.
     internal CapturePointResult Balance => MjCapturePoint.Evaluate(
@@ -43,18 +53,26 @@ internal sealed class MjMimicStandDriver : IDisposable
         Math.Abs(_forces[_left].Z) + Math.Abs(_forces[_allowedGround[2]].Z),
         Math.Abs(_forces[_right].Z) + Math.Abs(_forces[_allowedGround[3]].Z));
 
-    internal MjMimicStandDriver(MjBridge bridge, string modelPath, string bundle)
+    internal MjMimicStandDriver(MjBridge bridge, string modelPath, string bundle, bool waitForBallHit = false)
     {
         _bridge = bridge;
+        _waitForBallHit = waitForBallHit;
         int ballId = bridge.BodyId("ball");
         if (ballId >= 0) bridge.ExcludeFromCom = ballId;
         _world = new MjMimicWorld(bridge, modelPath);
         using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(bundle, "contract.json")));
         var c = json.RootElement;
         _correctedContacts = MjMimicContactContract.IsCorrected(c);
-        bool targetPd = _correctedContacts || c.GetProperty("observation_contract").GetString() == "mimic_stand_target_pd_v1";
-        int numObs = targetPd ? 362 : 300;
-        if ((!targetPd && c.GetProperty("observation_contract").GetString() != "mimic_stand_v1")
+        string observationContract = c.GetProperty("observation_contract").GetString()!;
+        _captureObservation = observationContract == MjMimicBalanceObservation.Contract;
+        _stationaryReference = _captureObservation || observationContract == "mimic_stationary_stand_target_pd_v1";
+        if (_captureObservation) MjMimicBalanceObservation.Validate(c.GetProperty("balance_observation"));
+        if (_stationaryReference && (c.GetProperty("reference_semantics").GetProperty("phase").GetString() != "constant_zero"
+            || c.GetProperty("reference_semantics").GetProperty("target").GetString() != "constant_pose_per_case"))
+            throw new InvalidOperationException("Unsupported stationary reference semantics");
+        bool targetPd = _correctedContacts || observationContract == "mimic_stand_target_pd_v1" || _stationaryReference;
+        int numObs = _captureObservation ? 363 : targetPd ? 362 : 300;
+        if ((!targetPd && observationContract != "mimic_stand_v1")
             || c.GetProperty("num_obs").GetInt32() != numObs || c.GetProperty("latency_steps").GetInt32() != 2
             || c.GetProperty("decimation").GetInt32() != 4
             || c.GetProperty("action_mode").GetString() != (targetPd ? "reference_relative_target_pd" : "normalized_motor_torque"))
@@ -67,6 +85,12 @@ internal sealed class MjMimicStandDriver : IDisposable
         var widths = new[] { 3, 6, 3, 3, 39, 39, 2, 60, 144, 1 };
         if (targetPd) { names[7] = "pending_targets_q_v_valid_oldest_first"; widths[7] = 122; }
         if (_correctedContacts) names[6] = "foot_and_toe_normal_load_kN_L_R";
+        if (_stationaryReference) names[9] = "stationary_reference_phase_zero";
+        if (_captureObservation)
+        {
+            names = names.Append("loaded_capture_error_m").ToArray();
+            widths = widths.Append(1).ToArray();
+        }
         var layout = c.GetProperty("observation_layout");
         if (layout.GetArrayLength() != names.Length) throw new InvalidOperationException("Unknown observation layout");
         int offset = 0;
@@ -101,21 +125,33 @@ internal sealed class MjMimicStandDriver : IDisposable
             c.GetProperty("reference_frames_sha256").GetString()!, c.GetProperty("reference_sha256").GetString()!);
         if (Math.Abs(_reference.Duration - c.GetProperty("reference_duration").GetSingle()) > 1e-5)
             throw new InvalidOperationException("Reference duration mismatch");
-        string actor = Path.Combine(bundle, "stand.onnx");
-        MjMimicReference.VerifyHash(actor, c.GetProperty("actor_sha256").GetString()!);
         _forces = new Vector3[bridge.BodyCount];
         _left = bridge.BodyId("Foot_L"); _right = bridge.BodyId("Foot_R");
         _allowedGround = new[] { _left, _right, bridge.BodyId("Toe_L"), bridge.BodyId("Toe_R") };
-        _policy = new MjOnnxPolicy(File.ReadAllBytes(actor), numObs, 30);
+        string recovery = Path.Combine(bundle, "recovery.json");
+        if (_waitForBallHit && !File.Exists(recovery))
+            throw new InvalidOperationException("Impact-triggered stepping requires a recovery controller");
+        if (File.Exists(recovery)) _policy = new MjRecoveryPolicy(bundle);
+        else
+        {
+            string actor = Path.Combine(bundle, "stand.onnx");
+            MjMimicReference.VerifyHash(actor, c.GetProperty("actor_sha256").GetString()!);
+            _policy = new MjOnnxPolicy(File.ReadAllBytes(actor), numObs, 30);
+        }
     }
 
     internal void Reset(float offset)
     {
-        if (!float.IsFinite(offset) || offset < 0 || offset > _reference.Duration - 3 + 1e-5)
+        if (!float.IsFinite(offset) || offset < 0 || offset > _reference.Duration - 3 + 1e-5
+            || (_stationaryReference && offset != 0))
             throw new ArgumentOutOfRangeException(nameof(offset));
-        _offset = offset; _steps = _cursor = 0; Fallen = false; TrackingError = 0; BallHit = false;
+        if (_waitForBallHit && offset != 0)
+            throw new ArgumentException("Impact-triggered recovery starts at reference phase zero", nameof(offset));
+        _offset = offset; _steps = _cursor = 0; _recoveryStartStep = null;
+        Fallen = false; TrackingError = 0; BallHit = false; BallContactThisStep = false;
         foreach (var pending in _pending) Array.Clear(pending);
         _targetControl?.Reset();
+        if (_policy is MjRecoveryPolicy recovery) recovery.Reset();
         Array.Clear(Action);
         _reference.Sample(offset, _q, _v);
         _world.Reset(_q, _v);
@@ -141,20 +177,26 @@ internal sealed class MjMimicStandDriver : IDisposable
         else
             for (int slot = 0; slot < 2; slot++)
                 foreach (float value in _pending[(_cursor + slot) % 2]) Observation[index++] = value;
-        float phase = _offset + Time;
+        float phase = _stationaryReference ? 0 : RecoveryTime;
         for (int future = 1; future <= 3; future++)
         {
             _reference.Sample(phase + future * ControlTime, _targetQ, _targetV);
             Put(_targetQ, 0, 3, ref index); PutRotation(_targetQ, ref index);
             Put(_targetQ, 7, 39, ref index);
         }
-        Observation[index++] = phase / _reference.Duration;
+        Observation[index++] = _stationaryReference ? 0 : phase / _reference.Duration;
+        if (_captureObservation)
+            Observation[index++] = MjMimicBalanceObservation.Evaluate(
+                _bridge.CenterOfMass(), _bridge.CenterOfMassVelocity(),
+                _bridge.BodyTransform(_left).Origin, _bridge.BodyTransform(_right).Origin,
+                Observation[93] * 1000, Observation[94] * 1000);
         if (index != Observation.Length || Observation.Any(x => !float.IsFinite(x)))
             throw new InvalidOperationException("Invalid Mimic observation");
     }
 
     internal void Step(System.Action? beforePhysics = null)
     {
+        BallContactThisStep = false;
         Observe();
         _policy.Predict(Observation, Action);
         if (Action.Any(x => !float.IsFinite(x))) throw new InvalidOperationException("Nonfinite Mimic action");
@@ -168,7 +210,7 @@ internal sealed class MjMimicStandDriver : IDisposable
         }
         if (_targetControl != null)
         {
-            _reference.Sample(_offset + Time, _targetQ, _targetV);
+            _reference.Sample(RecoveryTime, _targetQ, _targetV);
             _targetControl.Enqueue(_targetQ, _targetV, Action);
         }
         _cursor = (_cursor + 1) % 2;
@@ -184,11 +226,20 @@ internal sealed class MjMimicStandDriver : IDisposable
             }
             _bridge.Step();
             int ball = _bridge.BodyId("ball");
-            if (ball >= 0) BallHit |= _bridge.HasCharacterContact(ball, _world.CharacterBodyCount);
+            if (ball >= 0 && _bridge.HasCharacterContact(ball, _world.CharacterBodyCount))
+            {
+                BallContactThisStep = true;
+                BallHit = true;
+            }
         }
         if (_correctedContacts) _bridge.ReadNativeGroundForces(_forces);
         _bridge.Forward();
         _steps++;
+        if (_waitForBallHit && BallHit && !_recoveryStartStep.HasValue)
+        {
+            _recoveryStartStep = _steps;
+            if (_policy is MjRecoveryPolicy recovery) recovery.Reset();
+        }
         _world.Read(_q, _v);
         if (!_correctedContacts) _bridge.ReadNativeGroundForces(_forces);
         Fallen = _q[2] < 0.65;
@@ -198,7 +249,7 @@ internal sealed class MjMimicStandDriver : IDisposable
             if (!_allowedGround.Contains(body) && Math.Max(force.X, Math.Max(force.Y, force.Z)) > 1)
                 Fallen = true;
         }
-        _reference.Sample(_offset + Time, _targetQ, _targetV);
+        _reference.Sample(RecoveryTime, _targetQ, _targetV);
         TrackingError = new Vector3((float)(_q[0] - _targetQ[0]), (float)(_q[1] - _targetQ[1]),
             (float)(_q[2] - _targetQ[2])).Length();
     }
