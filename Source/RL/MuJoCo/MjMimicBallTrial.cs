@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Godot;
 
 namespace Physics4Fun.RL.MuJoCo;
@@ -15,7 +16,8 @@ internal sealed class MjMimicBallTrial
 
     private readonly MjBridge _bridge;
     private readonly MjMimicStandDriver _driver;
-    private readonly int _joint;
+    private readonly List<(int Joint, int Body)> _projectiles = new();
+    private readonly bool _independentProjectiles;
     private readonly string _configuredTarget;
     private readonly float _speed;
     private readonly int _launchStep;
@@ -25,11 +27,15 @@ internal sealed class MjMimicBallTrial
     internal bool Launched { get; private set; }
     internal int ShotCount { get; private set; }
     internal int ConfirmedHits { get; private set; }
-    private bool _awaitingHit;
+    private readonly HashSet<int> _awaitingHits = new();
+    private readonly HashSet<int> _launchedBodies = new();
+    internal bool HasLaunchedBody(int body) => _launchedBodies.Contains(body);
+    internal int Capacity => _projectiles.Count;
+    internal bool CapacityReached => _independentProjectiles && ShotCount >= Capacity;
     internal string ActiveTargetName { get; private set; } = string.Empty;
 
     internal MjMimicBallTrial(MjBridge bridge, MjMimicStandDriver driver, Vector3 direction,
-        float speed, int launchStep, string target, int seed = 1)
+        float speed, int launchStep, string target, int seed = 1, bool independentProjectiles = false)
     {
         if (!direction.IsFinite() || direction.LengthSquared() < .5f || Math.Abs(direction.Y) > 1e-6
             || !float.IsFinite(speed) || speed < 1 || speed > 8 || launchStep < 0)
@@ -38,18 +44,22 @@ internal sealed class MjMimicBallTrial
         _speed = speed; _launchStep = launchStep;
         _configuredTarget = target;
         _rng = new Random(seed);
+        _independentProjectiles = independentProjectiles;
         if (bridge != null)
         {
-            _joint = MjPolicyObservation.Required(bridge.JointId("ball_free"), "ball_free");
+            _projectiles.Add((MjPolicyObservation.Required(bridge.JointId("ball_free"), "ball_free"),
+                MjPolicyObservation.Required(bridge.BodyId("ball"), "ball")));
+            for (int i = 1; bridge.JointId($"ball_free_{i}") >= 0; i++)
+                _projectiles.Add((bridge.JointId($"ball_free_{i}"), bridge.BodyId($"ball_{i}")));
             if (!string.Equals(target, "Random", StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(target, "RandomTorso", StringComparison.OrdinalIgnoreCase))
                 MjPolicyObservation.Required(bridge.BodyId(target), target);
         }
     }
 
-    internal void Launch(Vector3? overrideDirection = null, string? overrideTarget = null)
+    internal bool Launch(Vector3? overrideDirection = null, string? overrideTarget = null)
     {
-        if (_bridge == null) return;
+        if (_bridge == null || CapacityReached) return false;
         if (overrideDirection.HasValue)
         {
             Vector3 dir = overrideDirection.Value;
@@ -69,11 +79,14 @@ internal sealed class MjMimicBallTrial
         Vector3 target = MjBridge.GodotToMj(_bridge.BodyTransform(targetBodyId).Origin);
         Vector3 direction = MjBridge.GodotToMj(_direction).Normalized();
         var (position, velocity) = BallisticLaunch(target, direction, _speed);
-        _bridge.SetFreeJoint(_joint, MjMimicPush.ToGodot(position), MjMimicPush.ToGodot(velocity));
+        var projectile = _projectiles[_independentProjectiles ? ShotCount : 0];
+        _bridge.SetFreeJoint(projectile.Joint, MjMimicPush.ToGodot(position), MjMimicPush.ToGodot(velocity));
         _bridge.Forward();
         Launched = true;
         ShotCount++;
-        _awaitingHit = true;
+        _launchedBodies.Add(projectile.Body);
+        _awaitingHits.Add(projectile.Body);
+        return true;
     }
 
     internal static (Vector3 Position, Vector3 Velocity) BallisticLaunch(Vector3 target, Vector3 direction, float speed)
@@ -87,10 +100,9 @@ internal sealed class MjMimicBallTrial
     internal void Step()
     {
         _driver.Step(_driver.StepCount == _launchStep ? () => Launch() : null);
-        if (_awaitingHit && _driver.BallContactThisStep)
+        foreach (int body in _driver.ProjectileContactsThisStep)
         {
-            ConfirmedHits++;
-            _awaitingHit = false;
+            if (_awaitingHits.Remove(body)) ConfirmedHits++;
         }
     }
 }

@@ -48,6 +48,19 @@ All of them are written up honestly, including the things that did not work and 
 
 **The MuJoCo track** is where learning finally worked. The body's physics moved to MuJoCo, driven from Godot through P/Invoke, and a policy trained on MuJoCo is scored and shipped on the same engine: the balance brain survives about 69% of single 30 N·s ball hits, and the walk brain walks straight at 0.25 m/s, upright. See **[mujoco_rig/README.md](mujoco_rig/README.md)** for how it works and **[mujoco_rig/STATUS.md](mujoco_rig/STATUS.md)** for where it stands.
 
+### Current Mimic Perturb Arena preview (2026-09-30)
+
+`Scenes/RL/Isaac3/MuJoCo/MimicPerturbArena.tscn` selects final AMP Perturb actor
+`9d109137` from `amp-heavy-10kg-4mps-30min-02-continue`, after 60.229 cumulative
+training minutes across two windows (78.003 minutes combined trainer wall time).
+The second window improves fixed 10 kg / 4 m/s hit recovery from 2/32 to 3/32 and
+survival from 3/32 to 5/32; eight 30-second quiet standing cases pass. This is an
+experimental preview; natural stepping and final unseen-hit admission remain
+unestablished. The Arena retains 64 independent balls, B countdown reset, editable
+repeating auto-launch every 30 seconds by default, unlimited duration, and R reset.
+Restart the scene to load the selection. See [AMP_RECOVERY.md](mujoco_rig/mimic/AMP_RECOVERY.md)
+for checkpoint provenance and the scope of the built-in assessments.
+
 ## Requirements
 
 * **Godot Engine 4.x** (Mono / .NET version)

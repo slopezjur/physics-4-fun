@@ -1,0 +1,88 @@
+{
+  "schema": "chest_learning_screen_v1",
+  "question": "Does the qualifying 200-update baseline impact recipe reproduce with independent optimization randomness from the same two original Stand parents?",
+  "seeds": [
+    301027,
+    301028
+  ],
+  "actors": [
+    "source"
+  ],
+  "arms": [
+    "quiet",
+    "single_ball"
+  ],
+  "envs": 64,
+  "rollout_steps": 64,
+  "updates_per_arm": 200,
+  "maximum_training_seconds_per_arm": 480,
+  "checkpoint_interval": 100,
+  "maximum_updates": 800,
+  "maximum_transitions": 3276800,
+  "maximum_evaluation_cases": 320,
+  "training_mass_kg": 5,
+  "training_speed_m_s": 1.4,
+  "quiet_fraction": 0.5,
+  "seconds": 12,
+  "launch_seconds": 5,
+  "launch_distance_m": 0.25,
+  "quiet_retention_seconds": 120,
+  "assessment_levels": [
+    [
+      5,
+      1
+    ],
+    [
+      5,
+      1.4
+    ]
+  ],
+  "config_overrides": {},
+  "baseline_impacts": [
+    {
+      "root": "logs/mimickit-training/stand-ball-stage03-geometry-completion-20261006-01",
+      "verification": "verification.json",
+      "rows_root": "logs/mimickit-training/stand-ball-stage03-geometry-20261006-01",
+      "condition": "distance025"
+    },
+    {
+      "root": "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01",
+      "condition": "speed140"
+    }
+  ],
+  "decision": "Keep the original task/AMP 0.8/0.2 reward, root-velocity scale 1, TD lambda 0.98 and all physical/training settings. Train matched quiet/ball arms for 200 updates with optimization seeds 311027/311028 (parent labels 301027/301028). Assess all four endpoints on both doses/directions/backends, then 120-second Stand only for an arm with strict absolute target gain on both parents, no direction/level regression, all hits Chest-first/no-Head, and backend admission. Report absolute recipe gain and additional impact-practice gain separately. No automatic promotion.",
+  "reuse": "Verified source 120-second Stand from the earlier pilot and frozen impact baselines from Stages 3 and 5; actor identity must match. These are not new evaluation cases.",
+  "evidence": [
+    "logs/mimickit-training/stand-ball-pilot-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-pilot-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage03-geometry-completion-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage03-geometry-completion-20261006-01/verification.json",
+    "logs/mimickit-training/stand-ball-stage03-geometry-20261006-01/progress.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage06-sustained-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage06-sustained-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage10-momentum-source-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage10-momentum-source-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage10-momentum-quiet-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage10-momentum-quiet-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage10-momentum-single_ball-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage10-momentum-single_ball-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage11-velocity-reward-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage11-velocity-reward-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage14-completion-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage14-completion-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage15-learning-curve-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage15-learning-curve-20261007-01/final-verification.json"
+  ],
+  "root_velocity_reward_scale": 1,
+  "rationale": "Stage 15 is checkpoint selection. Replicate the selected budget with different optimization/reset RNG while retaining both original Stand parent identities. This is not replication on new Stand parents.",
+  "run_condition": "Execute only after Stage 15 verifies replicated impact-practice gain and retained 120-second Stand at update 200.",
+  "optimization_seed_offset": 10000,
+  "actual_training_seeds": {
+    "301027": 311027,
+    "301028": 311028
+  }
+}

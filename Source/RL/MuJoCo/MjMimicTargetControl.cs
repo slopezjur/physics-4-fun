@@ -10,12 +10,20 @@ internal sealed class MjMimicTargetControl
     private readonly int[] _qIndices, _vIndices;
     private readonly float[] _lower, _upper;
     private readonly float _residual, _gain, _damping;
-    private readonly float[][] _pending = { new float[61], new float[61] };
-    private readonly float[] _active = new float[61];
+    private readonly int _motorCount;
+    private readonly float[][] _pending;
+    private readonly float[] _active;
     private int _cursor;
 
-    internal MjMimicTargetControl(JsonElement contract)
+    internal MjMimicTargetControl(JsonElement contract, int motorCount = 30)
     {
+        if (motorCount is not (30 or 33)
+            || (motorCount == 33 && contract.GetProperty("motor_count").GetInt32() != motorCount))
+            throw new InvalidOperationException("Unsupported target-PD motor count");
+        _motorCount = motorCount;
+        int width = 2 * motorCount + 1;
+        _pending = new[] { new float[width], new float[width] };
+        _active = new float[width];
         _qIndices = contract.GetProperty("target_qpos_indices").EnumerateArray().Select(x => x.GetInt32()).ToArray();
         _vIndices = contract.GetProperty("target_qvel_indices").EnumerateArray().Select(x => x.GetInt32()).ToArray();
         _lower = Floats(contract, "target_lower_radians");
@@ -23,12 +31,12 @@ internal sealed class MjMimicTargetControl
         _residual = contract.GetProperty("residual_radians").GetSingle();
         _gain = contract.GetProperty("pd_gain_per_torque_limit").GetSingle();
         _damping = contract.GetProperty("pd_damping_time").GetSingle();
-        if (_qIndices.Length != 30 || _vIndices.Length != 30 || _lower.Length != 30 || _upper.Length != 30
-            || _qIndices.Distinct().Count() != 30 || _vIndices.Distinct().Count() != 30
+        if (_qIndices.Length != motorCount || _vIndices.Length != motorCount || _lower.Length != motorCount || _upper.Length != motorCount
+            || _qIndices.Distinct().Count() != motorCount || _vIndices.Distinct().Count() != motorCount
             || _qIndices.Any(x => x < 7 || x >= 46) || _vIndices.Any(x => x < 6 || x >= 45)
             || !float.IsFinite(_residual) || _residual <= 0 || !float.IsFinite(_gain) || _gain <= 0
             || !float.IsFinite(_damping) || _damping < 0
-            || Enumerable.Range(0, 30).Any(i => !float.IsFinite(_lower[i]) || !float.IsFinite(_upper[i])
+            || Enumerable.Range(0, motorCount).Any(i => !float.IsFinite(_lower[i]) || !float.IsFinite(_upper[i])
                 || _lower[i] >= _upper[i] || _qIndices[i] != _vIndices[i] + 1)
             || contract.GetProperty("target_timing").GetString() != "sample_at_issue_hold_after_delay"
             || contract.GetProperty("initial_motor_control").GetString() != "zero_until_valid_target"
@@ -58,22 +66,23 @@ internal sealed class MjMimicTargetControl
 
     internal void Enqueue(double[] referenceQ, double[] referenceV, float[] action)
     {
-        Array.Copy(_pending[_cursor], _active, 61);
+        if (action.Length != _motorCount) throw new ArgumentException("Target-PD action count mismatch", nameof(action));
+        Array.Copy(_pending[_cursor], _active, _active.Length);
         var target = _pending[_cursor];
-        for (int i = 0; i < 30; i++)
+        for (int i = 0; i < _motorCount; i++)
         {
             target[i] = Math.Clamp((float)referenceQ[_qIndices[i]] + action[i] * _residual, _lower[i], _upper[i]);
-            target[i + 30] = (float)referenceV[_vIndices[i]];
+            target[i + _motorCount] = (float)referenceV[_vIndices[i]];
         }
-        target[60] = 1;
+        target[2 * _motorCount] = 1;
         _cursor = (_cursor + 1) % 2;
     }
 
     internal float Torque(int motor, double[] q, double[] v, float limit)
     {
         float error = _active[motor] - (float)q[_qIndices[motor]];
-        float velocityError = _active[motor + 30] - (float)v[_vIndices[motor]];
-        return Math.Clamp(_gain * error + (_gain * _damping) * velocityError, -1, 1) * limit * _active[60];
+        float velocityError = _active[motor + _motorCount] - (float)v[_vIndices[motor]];
+        return Math.Clamp(_gain * error + (_gain * _damping) * velocityError, -1, 1) * limit * _active[2 * _motorCount];
     }
 
     private static float[] Floats(JsonElement c, string name) =>

@@ -1,0 +1,66 @@
+{
+  "seeds": [
+    301027,
+    301028
+  ],
+  "actors": [
+    "quiet"
+  ],
+  "checkpoints": {
+    "301027": {
+      "root": "logs/mimickit-training/stand-ball-stage25-small-rate-learning-20261007-01",
+      "checkpoint": "logs/mimickit-training/stand-ball-stage25-small-rate-learning-20261007-01/301027/quiet/final/model.pt"
+    },
+    "301028": {
+      "root": "logs/mimickit-training/stand-ball-stage25-small-rate-learning-20261007-01",
+      "checkpoint": "logs/mimickit-training/stand-ball-stage25-small-rate-learning-20261007-01/301028/quiet/final/model.pt"
+    }
+  },
+  "evidence": [
+    "logs/mimickit-training/stand-ball-stage09-quiet-replay-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage09-quiet-replay-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage08-feedback-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage08-feedback-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage12-task-reward-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage12-task-reward-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage15-learning-curve-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage15-learning-curve-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage14-completion-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage16-seed-replication-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage16-seed-replication-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage20-decision-20261007-01/decision.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-source-20261007-01/protocol.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-source-20261007-01/301027-source-two-+1-native/report.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-source-20261007-01/301027-source-two-+1-gpu/report.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-source-20261007-01/301027-source-two-+1-native/body-report.json",
+    "logs/mimickit-training/stand-ball-batch-final-review-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-batch-final-review-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage18-sustained-candidate-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage18-sustained-candidate-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-candidate-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-candidate-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage20-delayed-candidate-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage20-delayed-candidate-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage13-onset-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage13-onset-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-followup21-review-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-followup21-review-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage23-onset-learning-20261007-02/report.json",
+    "logs/mimickit-training/stand-ball-stage23-onset-learning-20261007-02/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage22-onset-candidate-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage22-onset-candidate-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage25-small-rate-learning-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage25-small-rate-learning-20261007-01/final-verification.json"
+  ],
+  "schema": "chest_stand_retention_v1",
+  "question": "Does smaller-update quiet continuation retain120secondStand?",
+  "seconds": 120,
+  "maximum_cases": 32,
+  "training_updates": 0,
+  "decision": "Prospectively gated retention: execute only if this step25 arm has admitted Chest-first/no-Head results, all hits, no per-condition count regression against the original selected pair at1/3/5/9s and a strict total recovery gain. Keep per-pose tradeoffs explicit. Assess both parents/eight poses/native+GPU for full-interval120second naturalStand,32cases. Relative advantage over matched quiet/fixed controls is reported separately. If no arm qualifies, do not execute or count a retention step; choose a different substantive question. No automatic Arena replacement.",
+  "run_condition": "Absolute impact gain and no condition regression; conditions frozen before step25 endpoint results exist."
+}

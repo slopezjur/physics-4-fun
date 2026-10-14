@@ -1,0 +1,9 @@
+{
+  "roots": {
+    "strong_timing": "logs/mimickit-training/stand-ball-stage32-strong-timing-20261007-01",
+    "easier_early": "logs/mimickit-training/stand-ball-stage22-onset-candidate-20261007-01",
+    "easier_heldout": "logs/mimickit-training/stand-ball-stage28-baseline-timing-20261007-01",
+    "strong_five": "logs/mimickit-training/stand-ball-stage29-baseline-strength-20261007-01"
+  },
+  "comparisons": []
+}

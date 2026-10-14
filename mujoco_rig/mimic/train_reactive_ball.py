@@ -19,6 +19,11 @@ from .runtime import activate, MIMICKIT_REVISION
 
 
 def train(args):
+    amp_demonstrations = getattr(args, "amp_demonstration", None)
+    if (args.amp_calibration_steps < 0 or args.amp_disc_learning_rate <= 0
+            or not np.isfinite(args.amp_disc_learning_rate)
+            or (args.amp_calibration_steps and not amp_demonstrations)):
+        raise ValueError("Require valid AMP calibration settings")
     if args.envs < 32 or args.envs % 8 or args.iterations < 1 or args.seconds <= 0 \
             or args.evaluation_interval < 1 or args.actor_warmup < 0 \
             or args.quiet_anchor_max_kl < 0 or args.quiet_anchor_samples < 1 \
@@ -47,6 +52,31 @@ def train(args):
     from .stable_normalizer import install as install_normalizer
     from .guarded_ppo import GuardedPPO
     from .quiet_anchor import QuietAnchor
+    AgentBase = GuardedPPO if args.quiet_anchor_max_kl or args.actor_max_kl else PPOAgent
+    if amp_demonstrations:
+        from learning.amp_agent import AMPAgent
+        from .amp_recovery import AMPRecoveryMixin, actor_state_dict, amp_sidecar, validate_sidecar
+        from .train_amp_step import load_stand_into_amp
+
+        class RecoveryAMP(GuardedPPO, AMPAgent):
+            def _record_disc_demo_data(self):
+                count = self._exp_buffer.get_data_flat("disc_obs").shape[0]
+                self._exp_buffer.set_data_flat("disc_obs_demo", self._env.fetch_disc_obs_demo(count))
+
+            def save(self, out_file):
+                torch.save(self.state_dict(), amp_sidecar(out_file))
+                torch.save(actor_state_dict(self.state_dict()), out_file)
+
+            def load(self, in_file):
+                sidecar = amp_sidecar(in_file)
+                if sidecar.exists():
+                    validate_sidecar(torch.load(in_file, map_location="cpu", weights_only=True),
+                                     torch.load(sidecar, map_location="cpu", weights_only=True))
+                    super().load(str(sidecar))
+                else:
+                    load_stand_into_amp(self, Path(in_file))
+
+        AgentBase = RecoveryAMP
 
     torch.set_num_threads(1)
     torch.manual_seed(args.seed)
@@ -101,7 +131,8 @@ def train(args):
         admitted = (admission.get("checkpoint_sha256") == sha256(source)
                     and admission.get("stationary_stand_gate_passed") is True)
         source_kind = "validated_stationary_stand"
-    if (not args.resume_experimental_final and metadata["checkpoint_sha256"] != sha256(source)) or not admitted:
+    if (not (args.resume_experimental_final or args.initialize_from_quiet_report)
+            and metadata["checkpoint_sha256"] != sha256(source)) or not admitted:
         raise ValueError("Require a selected, admitted stationary checkpoint")
     contract = json.loads((source.parent / "contract.json").read_text())
     from .balance_observation import task_classes
@@ -109,10 +140,17 @@ def train(args):
     reference = args.reference
     quiet = ContinuousStandTask(rig, reference, engine_factory=NativeDummyEngine)
     validate_contract(contract, quiet.observation_contract())
-    native = ReactiveBallTask(rig, reference, 32, "cpu", ball_path=args.ball_model,
+    NativeTask = ReactiveBallTask
+    amp_options = {}
+    if amp_demonstrations:
+        class NativeTask(AMPRecoveryMixin, ReactiveBallTask):
+            pass
+        amp_options = dict(demonstrations=amp_demonstrations, demo_weights=args.amp_demo_weights,
+                           mirror_demos=args.amp_mirror_demos, foot_motion_weight=args.amp_foot_motion_weight)
+    native = NativeTask(rig, reference, 32, "cpu", ball_path=args.ball_model,
                               speed_min=args.speed_min, speed_max=args.speed_max,
                               quiet_fraction=args.quiet_fraction, episode_seconds=args.episode_seconds,
-                              recovery_mode=args.recovery_mode, target_set=args.target_set)
+                              recovery_mode=args.recovery_mode, target_set=args.target_set, **amp_options)
     validate_contract(contract, native.observation_contract())
     if seed_manifest.exists() and not (args.resume_selected_same_mass or args.resume_experimental_final or args.initialize_from_quiet_report) and not float(native.engine.rig.model.body_mass[
             native.engine.rig.model.body("ball").id]) > admission["ball_mass_kg"]:
@@ -135,8 +173,20 @@ def train(args):
     if args.risk_leg_std is not None:
         config["risk_leg_std"] = args.risk_leg_std
         config["risk_exploration_gate"] = args.risk_exploration_gate
+    deployment_config = dict(config)
+    if amp_demonstrations:
+        amp_config = yaml.safe_load((args.mimickit / "data/agents/amp_task_humanoid_agent.yaml").read_text())
+        for key in ("disc_optimizer", "disc_epochs", "disc_batch_size", "disc_buffer_size",
+                    "disc_replay_samples", "disc_logit_reg", "disc_grad_penalty", "disc_reward_scale"):
+            config[key] = amp_config[key]
+        config["model"] = {**config["model"], "disc_net": amp_config["model"]["disc_net"]}
+        config.update(agent_name="AMP", task_reward_weight=.8, disc_reward_weight=.2,
+                      disc_epochs=1, disc_batch_size=8, disc_eval_batch_size=16384)
+        config["disc_optimizer"]["learning_rate"] = args.amp_disc_learning_rate
     args.out.mkdir(parents=True, exist_ok=False)
-    (args.out / "agent.yaml").write_text(yaml.safe_dump(config))
+    (args.out / "agent.yaml").write_text(yaml.safe_dump(deployment_config if amp_demonstrations else config))
+    if amp_demonstrations:
+        (args.out / "amp_agent.yaml").write_text(yaml.safe_dump(config))
     (args.out / "contract.json").write_text(json.dumps(contract, indent=2))
     cases = selection_cases(args.speed_max, args.episode_seconds, native.dt)
     protocol = dict(schema="mimic_reactive_ball_seed_training_v1", seed=args.seed,
@@ -174,26 +224,41 @@ def train(args):
                         ("train_reactive_ball.py", "reactive_ball_task.py", "reactive_ball_eval.py", "ball_protocol.py",
                          "ball.py", "ball_native.py", "ball_newton.py", "recovery_reward.py",
                          "target_control.py", "newton_adapter.py", "checkpoints.py",
-                         "guarded_ppo.py", "quiet_anchor.py", "impact_replay.py", "capture_reward.py", "step_reward.py", "recovery_steps.py",
+                         "guarded_ppo.py", "quiet_anchor.py", "impact_replay.py", "capture_reward.py", "step_reward.py", "recovery_steps.py", "support_motion.py", "recovery_signals.py",
                          "risk_exploration.py", "runtime.py", "gated_recovery_net.py",
                          "balance_observation.py", "native_engine.py", "training_quiet_admission.py",
                          "validate_stand_foundation.py")})
+    if amp_demonstrations:
+        for name in ("amp_recovery.py", "amp_step.py", "train_amp_step.py", "recovery_quality.py",
+                     "foot_motion.py", "calibrate_amp_recovery.py"):
+            protocol["source_hashes"][name] = sha256(Path(__file__).with_name(name))
     (args.out / "protocol.json").write_text(json.dumps(protocol, indent=2))
     (args.out / "runner.py").write_text(Path(__file__).read_text())
     (args.out / "source").mkdir()
     for name in protocol["source_hashes"]:
         (args.out / "source" / name).write_bytes(Path(__file__).with_name(name).read_bytes())
-    task = ReactiveBallTask(rig, reference, args.envs, "cuda:0", ball_path=args.ball_model,
+    TrainingTask = ReactiveBallTask
+    training_options = {}
+    if amp_demonstrations:
+        class TrainingTask(AMPRecoveryMixin, ReactiveBallTask):
+            pass
+        training_options.update(amp_options)
+    task = TrainingTask(rig, reference, args.envs, "cuda:0", ball_path=args.ball_model,
                             speed_min=args.speed_min, speed_max=args.speed_max,
                             quiet_fraction=args.quiet_fraction, seed=args.seed,
                             episode_seconds=args.episode_seconds,
                             second_shot_fraction=args.second_shot_fraction,
                             recovery_mode=args.recovery_mode, forward_fraction=args.forward_fraction,
-                            recovery_reset_fraction=args.recovery_reset_fraction, target_set=args.target_set)
+                            recovery_reset_fraction=args.recovery_reset_fraction, target_set=args.target_set,
+                            **training_options)
+    if amp_demonstrations:
+        protocol["motion_prior"] = task.discriminator_contract()
+        protocol["checkpoint_format"] = "PPO-compatible actor/critic .pt plus full training .amp.pt sidecar"
+        (args.out / "protocol.json").write_text(json.dumps(protocol, indent=2))
     if args.recovery_reset_bank:
         task.load_recovery_resets(args.recovery_reset_bank)
 
-    class SeedAgent(GuardedPPO if args.quiet_anchor_max_kl or args.actor_max_kl else PPOAgent):
+    class SeedAgent(AgentBase):
         quiet_teacher = None
         impact_teacher = None
 
@@ -234,6 +299,7 @@ def train(args):
     curve = []
     started = time.monotonic()
     initial_quiet_traces = None
+    native_disc_samples = dict(train=[], heldout=[])
 
     def assess(iteration):
         nonlocal initial_quiet_traces
@@ -241,7 +307,21 @@ def train(args):
         quiet_metrics, quiet_traces = evaluate_retention(quiet, actor)
         if iteration == 0:
             initial_quiet_traces = quiet_traces
-        hit_metrics, traces = evaluate_ball(native, actor, cases)
+        quality = None
+        if amp_demonstrations:
+            from .recovery_quality import RecoveryQuality
+            quality = RecoveryQuality(native, actor)
+        def record_native(task, step, active, done):
+            if quality is not None:
+                quality.record(task, step, active, done)
+            if iteration == 0 and args.amp_calibration_steps and step % 6 == 0:
+                for split, worlds in (("train", task.ids < 24), ("heldout", task.ids >= 24)):
+                    ids = active & worlds
+                    if ids.any():
+                        native_disc_samples[split].append(task._history.values[ids].flatten(1).clone())
+        hit_metrics, traces = evaluate_ball(native, quality or actor, cases, record_native)
+        if quality is not None:
+            hit_metrics["motion_quality"] = quality.report()
         hit_metrics["quiet_standing_passed"] = bool(quiet_metrics["passed"])
         hit_metrics["quiet_native"] = quiet_metrics
         accepted = best.consider(agent.save, hit_metrics, iteration=iteration,
@@ -259,6 +339,19 @@ def train(args):
 
     agent.save(str(args.out / "initial.pt"))
     initial = assess(0)
+    if args.amp_calibration_steps:
+        from .calibrate_amp_recovery import calibrate
+        calibration = calibrate(agent, task, native_disc_samples, args.out, args.amp_calibration_steps, args.seed + 97)
+        (args.out / "discriminator-calibration.json").write_text(json.dumps(calibration, indent=2))
+        print(json.dumps(dict(discriminator_calibrated=calibration["passed"],
+                              before=calibration["source_mapping"], after=calibration["calibrated"])), flush=True)
+        if not calibration["passed"]:
+            agent.save(str(args.out / "calibration_failed.pt"))
+            raise RuntimeError("Discriminator held-out calibration gate failed; policy training not started")
+        agent.save(str(args.out / "calibrated.pt"))
+        protocol["discriminator_calibration"] = dict(steps=args.amp_calibration_steps,
+            report_sha256=sha256(args.out / "discriminator-calibration.json"), actor_unchanged=True)
+        (args.out / "protocol.json").write_text(json.dumps(protocol, indent=2))
     if args.quiet_anchor_max_kl or args.quiet_replay_weight:
         observations = torch.as_tensor(initial_quiet_traces["observations"][initial_quiet_traces["active"]])
         from .gated_recovery_net import GatedRecoveryNet, quiet_rehearsal_indices
@@ -309,9 +402,15 @@ def train(args):
                    training_iteration_wall_seconds=training_iteration_wall_seconds,
                    actor_parameter_change_l2=actor_change,
                    **{k: float(v) for k, v in info.items()})
-        for key in ("capture_error_m", "swing_quality"):
+        for key in ("capture_error_m", "swing_quality", "foot_motion_cost", "foot_acceleration_m_s2",
+                    "rapid_contact_reversals", "useful_placement_events", "loaded_sole_slip_proxy_m_s"):
             if key in task._diagnostics:
                 row["last_batch_" + key] = float(task._diagnostics[key])
+        if task.recovery_signals is not None:
+            signals = task.recovery_signals.drain()
+            row.update({'rollout_'+key:value for key,value in signals.items() if key != 'scope'})
+            with (args.out/'recovery_signals.jsonl').open('a') as file:
+                file.write(json.dumps(dict(iteration=agent._iter,**signals))+'\n')
         if getattr(agent._model._actor_layers, "damping_activation", False):
             from .gated_recovery_net import damping_recovery_gate
             with torch.no_grad():
@@ -369,6 +468,11 @@ def train(args):
         repeated_hits_complete=(repeated is not None and repeated["repeated_recoveries"] == 32),
         godot_selected=False,
         scope="First physical-ball fine-tuning seed. Further mass/angle and long-hold admission precedes Godot")
+    if amp_demonstrations:
+        report["motion_prior"] = protocol["motion_prior"]
+        report["natural_stepping_gate"] = False
+        report["scope"] = "Motion-prior pilot; paired slip/oscillation diagnostics are not proof of natural stepping; no Arena promotion"
+        report["amp_selected_checkpoint_sha256"] = sha256(amp_sidecar(best.path))
     (args.out / "report.json").write_text(json.dumps(report, indent=2))
     print(json.dumps(dict(complete=True, quiet_retained=report["quiet_standing_retained"],
                           selected_recovered=selected["recovered_hits"],
@@ -382,7 +486,7 @@ if __name__ == "__main__":
     resume = parser.add_mutually_exclusive_group()
     resume.add_argument("--resume-selected-same-mass", action="store_true")
     resume.add_argument("--initialize-from-quiet-report", type=Path,
-                        help="Experimental curriculum from a selected actor with exact 8x600s quiet evidence; not hit admission")
+                        help="Experimental curriculum from an actor with exact 8x600s quiet evidence; not hit admission")
     resume.add_argument("--resume-experimental-final", action="store_true",
                         help="Continue the explicitly previewed final Arena actor with matching provenance")
     parser.add_argument("--reference", type=Path, required=True)
@@ -413,7 +517,7 @@ if __name__ == "__main__":
     parser.add_argument("--actor-max-kl", type=float, default=0.,
                         help="Per-iteration rollout KL guard, separate from cumulative quiet-state retention")
     parser.add_argument("--actor-stall-iterations", type=int, default=8)
-    parser.add_argument("--recovery-mode", choices=("settling_v2", "capture_v3", "step_v4", "step_v5"), default="settling_v2")
+    parser.add_argument("--recovery-mode", choices=("settling_v2", "capture_v3", "step_v4", "step_v5", "step_v6", "step_v7"), default="settling_v2")
     parser.add_argument("--steps-per-iter", type=int)
     parser.add_argument("--discount", type=float)
     parser.add_argument("--td-lambda", type=float)
@@ -427,4 +531,11 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=270933)
     parser.add_argument("--validation-seed", type=int,
                         help="Fresh held-out seed; omitted draws and records an independent seed")
+    parser.add_argument("--amp-demonstration", type=Path, action="append",
+                        help="Optional licensed idle/forward/backward style histories; preserves the stationary recovery objective")
+    parser.add_argument("--amp-demo-weights", type=float, nargs="+")
+    parser.add_argument("--amp-mirror-demos", action="store_true")
+    parser.add_argument("--amp-foot-motion-weight", type=float, default=0.)
+    parser.add_argument("--amp-disc-learning-rate", type=float, default=2.5e-4)
+    parser.add_argument("--amp-calibration-steps", type=int, default=0)
     train(parser.parse_args())

@@ -1,18 +1,567 @@
 # MimicKit Stand and reactive Perturb experiments
 
+Current primary **StandArena** selection (2026-10-05): seed **301026**, final
+1,200-update actor `96e786ca`, in `stand-arena-301026-20261005-01`. This learned
+33-motor target-PD policy passed all 16 native/GPU 60-second standing cases;
+the result was independently reproduced by seed 301025. Passive springs remain
+off. The updated Arena adapter was built with explicit approval and the viewer
+was opened successfully. The twenty substantive Stand experiments are now
+complete and verified; the later seeds 301027/301028 retain 120-second Stand,
+but the tested push curriculum did not replicate a recovery improvement.
+See [STAND_LEARNING_PLAN.md](STAND_LEARNING_PLAN.md) for the evidence and
+[PERTURB_LEARNING_PLAN.md](PERTURB_LEARNING_PLAN.md) for the separately configured
+warm-start Perturb pilot. All four pilot arms and 896 assessments completed:
+final quiet Stand passes 64/64, but extra recovery improvement occurs on only
+one seed. The report also preserves a failed initial-state fingerprint guard
+and its reset diagnostic. No pilot brain is promoted. The older direct-torque
+Arena remains a separate historical preview.
+
+Current **PerturbArena inspection preview** (2026-10-06): seed 301028's final
+small-push continuation, checkpoint `87bdc325`, is loaded from
+`perturb-arena-301028-20261006-01`. Automatic throws start off; B launches,
+R restarts and P pauses. The 10 kg / 4 m/s balls are an inspection disturbance,
+not the 60 N training pulse. This user-requested selection does not promote
+the pilot or validate physical-ball recovery. The existing C# build was reused.
+
+Earlier StandArena and TorqueArena selection was final actor `35bae24d` from
+`stand-torque-reference-fresh-60s-60min-13/arena-preview`. This run began with
+untrained actor `aab3797d`, whose actor, critic, discriminator and normalization
+were initialized from scratch. Preset `TorqueStandReferenceFreshHour` starts
+from that saved initial state and preserves the reference-hour settings:
+60 minutes, 60-second episodes/checks, Envs=2048, EvaluationInterval=64,
+`reference_v9`, 80% task imitation and 20% AMP style prior. Spring-free direct
+torques, damping, limits, contacts and reference poses are unchanged. Training
+completed 3603.608 synchronized update seconds, 606 updates and 79,429,632
+transitions. Native survival duration increases from 0.317-0.383 to 2.033-3.150
+seconds, but all eight final cases fall. One-minute survival, balanced standing
+and upright pose gates remain 0/8. Sustained standing and natural pose are not
+established. The user explicitly selected the final actor for inspection;
+source/best checkpoints and prior scene selections are preserved. Restart
+StandArena to load the trained final actor. No extra tests, compilation or Godot
+execution ran during selection.
+
+The authorized one-hour Stand experiment is `TorqueStandReferenceHour`, run
+`stand-torque-reference-60s-60min-11`. It starts from the primary StandArena actor
+`7f270019` and its matching AMP sidecar. `reference_v9` calls upstream DeepMimic's
+additive pose, velocity, root and keypoint reward, with learned neck torque and the
+existing 20% AMP style prior. Training episodes and initial/scheduled/final native
+checks last 60 seconds. Physical falls terminate episodes; posture mismatch only
+reduces reward. There are no passive springs, pose servos, bracing/occupancy costs
+or short posture-reset curriculum. Envs remains 2048 and EvaluationInterval 64.
+The run completed 3600.196 synchronized training-update seconds and 1051 updates,
+excluding intrinsic checks and export. The user-requested final actor `801c1a18`
+was selected in both StandArena and TorqueArena before the fresh reset above. One-minute survival remains 6/8;
+balanced cases decrease from 6/8 to 5/8, and upright pose remains 0/8. The source
+selection and prior StandArena scene are preserved in the final preview bundle.
+Completion metrics and per-body errors are recorded in the run's `report.json`,
+with a dated outcome appended to `AMP_RECOVERY.md`. No standalone tests,
+compilation or Godot execution were run.
+
+The current natural-motion experiment is documented in [AMP_RECOVERY.md](AMP_RECOVERY.md).
+It adds a licensed motion discriminator to stationary, state-based recovery;
+it does not use the historical fixed left-foot objective.
+
 This directory preserves the existing Godot/native MuJoCo bridge for two
 experimental tasks through MimicKit's Newton/MuJoCo-Warp engine: stationary
 **Stand** and physical-ball **Perturb**. Historical motion-guided experiments
 are retained below. Stand uses the reference-relative
 target/PD contract with 362 observations. Perturb reuses that Stand actor and
 adds a simulated ball in `dummy_ball.xml`; its training and cross-engine impact
-parity are still experimental. `MimicPerturbArena.tscn` now previews the final
-actor from `reactive-ball-arena-continue-5min-03/model.pt`, explicitly selected
-for manual inspection. It recovers 26/32 fixed 1.5 m/s hits, and 15/32 at the
-Arena's current 2 m/s speed, but fails directional and
-quiet-settling retention; it is not an admitted replacement for the validated
-2 kg seed. Physical 5 kg balls recur every configurable 2.5 seconds from random
-angles and torso targets, with no time limit.
+parity are still experimental. `MimicPerturbArena.tscn` previously previewed
+`amp-heavy-10kg-4mps-30min-02-continue/model.pt` (`9d109137`), explicitly
+requested for manual inspection after two 30-minute training windows: 60.229 minutes
+of cumulative synchronized training-update time (78.003 minutes cumulative trainer
+wall time, excluding the failed startup). This continues the latest actual Perturb
+checkpoint with AMP and the state-based `step_v7` objective. In the second window,
+fixed heavy-hit recovery improves from 2/32 to 3/32 and survival from 3/32 to 5/32;
+eight 30-second quiet checks pass. Natural stepping and final unseen-hit admission
+remain unestablished. The built-in short unseen suite gives 23/64 recovery and
+survival for `best.pt` (`11830846`, update 127); it does not establish final actor
+admission. Prior Arena bundles, including `4c26be5d`, remain preserved.
+Arena physical 10 kg balls at 4 m/s recur every configurable 30 seconds, with random
+angles and all supported body targets, with no time limit. B launches an independent
+ball without replacing earlier balls. The Arena-only `dummy_ball_arena.xml` contains
+64 projectiles hidden until launch; B also resets the automatic countdown. The Arena
+has an editable repeating launch interval and toggle. R clears all balls and restores
+capacity. Balls are never automatically
+recycled. Regenerate this model from the unchanged single-ball training model with
+`arena_ball_pool.py source/dummy_ball.xml destination/dummy_ball_arena.xml`.
+The paired unseen suite
+for the prior `ad7f73dc` actor improved recovery from 56/64 to 61/64 and survival from 60/64 to 64/64. Current AMP results
+and the calibrated 15-minute follow-up are tracked in `AMP_RECOVERY.md`.
+
+## Spring-free direct-torque Stand experiment (2026-09-30)
+
+`train-torque-stand.ps1` reads `TorqueStandTraining`, `Envs=2048` and
+`EvaluationInterval=64` from `scripts/config.ps1`. The authorized first run is
+`logs/mimickit-training/stand-torque-spring-free-30min-01`: originally 1,800 synchronized
+training-update seconds, later reduced by the user to 900. The cutoff was missed;
+actual training was 1,103.014 seconds (18.384 minutes). It starts fresh
+MimicKit AMP networks and normalization; old pose-offset policies are incompatible.
+The isolated body removes all passive joint springs and converts neck position
+actuators to zero-command torque motors. The policy controls the original 30
+bounded torque channels. Damping, joint limits, torque authority and contacts
+remain. There is no standing-pose servo, fixed stepping leg, foot anchor, or
+ongoing external support force. Reset poses and AMP clips retain their licensed
+provenance; their old physical admission is not claimed for this new plant.
+
+Quiet assessments allow either foot to reposition. Eight-case 30-second holds
+are measured at startup, every 64 updates and completion. A final 600-second
+hold is attempted only if all final short standing cases pass. Checkpoint
+selection and previews do not constitute natural-movement admission. The final
+actor is exported to a dedicated unlimited `MimicStandTorqueArena.tscn` after
+the run, preserving the existing passive ball Arena. The user subsequently requested primary
+`MimicStandArena.tscn`; the first preview selected final `e1d4a99f`, with 0/8 standing passes
+and survival of 1.77–2.95 seconds. New C# observation-contract
+support must be built by the user before inspection; no compilation or standalone
+tests were authorized. Completion preparation is a silent local helper, with
+no recurring chat messages.
+
+`MimicPerturbArena.tscn` now selects the same final spring-free Stand actor
+`708a8ac0` through `stand-torque-spring-free-15min-03/perturb-preview`. The existing
+ONNX actor and character are copied unchanged; 64 independent 10 kg, 0.09 m
+projectiles are appended. Launch speed remains 4 m/s, with repeating automatic
+launches every editable 30 seconds and manual B launches resetting the countdown.
+Motors are enabled, with direct learned torques and no passive springs or pose
+servo. This actor has 4/8 short standing passes and no impact-recovery training or
+unseen-hit admission. The prior passive Arena and the Stand Arena remain available.
+
+### Whole-body objective correction
+
+The next torque Stand training uses `mimic_stationary_stand_torque_v2`: 33 learned
+motor torques including the neck, and 306 observations. Legacy 30-action exports
+remain supported in Godot. No passive springs or position servos are introduced.
+
+The existing pelvis/balance reward is multiplied by a soft upper-body score:
+40% spine/chest/head orientation, 35% height above the pelvis, and 25% upper-body
+joint preference. Hips, knees and foot placement are free. Body vertical axes
+allow unrestricted heading. The gate additionally checks upper-body tilt below
+20/20/30 degrees and relative clearance deficits below 0.05/0.06/0.10 m during
+the final two-second stable interval. These criteria do not prove natural movement.
+
+`TorqueStandWholeBodyTraining` continues from `708a8ac0`.
+Migration preserves existing actor outputs, critic and complete AMP state, remaps
+pending-action inputs/normalization, and initializes neck means and new input
+columns to zero. New neck exploration uses the configured action standard deviation.
+Historical 4/8 results used the pelvis-only gate; they are not whole-body passes.
+The correction itself did not run training, tests, compilation or Godot. The
+subsequent authorized training window is recorded below.
+
+### Worst-body posture continuation (2026-10-01)
+
+`TorqueStandWorstPostureTraining` runs a 30-minute window with `worst_v4`,
+2,048 environments and assessment every 64 updates. It starts from the measured
+update-128 actor and full AMP sidecar of `stand-torque-staged-posture-15min-05`:
+checkpoint `295ac2b4`, initial native balance 8/8, fixed upright posture 0/8.
+Both tensor states match that run's recorded best checkpoint. Warm-start time
+excludes the discarded updates after 128; optimizer/RNG start a new window.
+
+The physical posture score uses the largest normalized torso/head tilt or height
+deficit, rather than averaging across bodies. Body tilt targets world upright,
+matching the fixed admission axes; height only penalizes deficits below the
+reference. This score contributes 75% of posture preference, with 25% from the
+existing upper-joint preference. The existing measured posture-pressure curriculum
+and quiet-standing retention guard remain. Neither hips, knees nor feet receive
+pose targets. Passive springs and pose servos remain absent. The final actor is
+selected as an experimental StandArena preview after built-in assessment/export.
+
+This attempt stopped at update 192 after two consecutive quiet-retention failures:
+810.906 synchronized training seconds (13.515 minutes), 25,165,824 transitions,
+864.515 seconds logged trainer elapsed time. The requested 30-minute budget was
+not completed. Initial-to-final balanced survival fell from 8/8 to 7/8; fixed
+upright posture remained 0/8. Case 7 fell at 3.650 seconds in the final assessment.
+Mean native head tilt across all cases worsened from 57.999 to 74.542 degrees.
+Pressure never advanced beyond 10%. The worst-error change did not correct the
+folded posture. No 600-second assessment was attempted because upright admission
+failed. Final `7369bb90` is the current experimental `MimicStandArena.tscn`
+selection; the 8/8 source, retained update-64 state, previous bundle and full AMP
+sidecars remain available. Whole-device GPU activity averaged 56.80% (p95 78%,
+peak 100%), including built-in assessments. No standalone tests, compilation or
+Godot execution were run. PerturbArena remains unchanged.
+
+### Whole-body quiet-Stand imitation (2026-10-01)
+
+Prepared mode `whole_pose_v6` and preset `TorqueStandWholePoseTraining` continue
+from the balanced `1c9238f8` final actor and matching AMP sidecar of
+`stand-torque-short-upright-15min-07`. The prepared budget is 15 training minutes,
+with 2,048 environments and evaluation interval 64. The implementation initially
+started no run; the subsequently authorized window is recorded below.
+
+This Stand-only mode rewards the coherent reference pose across every actuated
+body: spine, chest, head, shoulders, elbows, hips, knees, ankles and toes. It uses
+parent-relative quaternion angular errors, combining all hinge axes belonging to
+each body. Unactuated wrists receive no unreachable pose objective. The global
+pose score is `exp(-weighted_mean_squared_normalized_error)`, with errors inside
+the region's angular tolerance contributing zero penalty. Tolerances are 3 degrees
+for spine/chest, 5 for head, 10 for arms/knees/toes and 8 for hips/ankles.
+Torso weights are strongest; limbs retain room for small balance adjustments.
+Initial scales and weights are configuration choices, not validated naturalness.
+
+The reward is `balance * whole_body_pose * worst_alignment - action_cost -
+joint_velocity_cost`. The existing worst torso/head tilt/clearance term prevents
+other matched joints from compensating for a folded torso. Learned-torque effort
+and action-change costs remain; a bounded joint-speed cost discourages rapid
+motion. Reference rotations are cached for the immutable eight poses. Per-body
+reference errors, pose score and velocity cost are logged during training.
+
+No world-space root position, foot location or heading is included in the new
+imitation term. Pose preferences affect reward only; the 33-torque motor contract,
+306 observations, zero passive stiffness and physical limits remain unchanged.
+The measured 2/5/10/30-second curriculum, major-collapse training termination,
+independent quiet-retention checks and fixed upright gate remain active. Existing
+Arena selection stays `1c9238f8`; no export, training, tests or compilation was run.
+Future Perturb must explicitly relax stance matching when destabilized and restore
+it as balance returns; this mode is not installed as an impact-recovery objective.
+
+`stand-torque-whole-pose-15min-08` completed 904.185 synchronized training seconds
+(15.070 minutes), 153 updates and 20,054,016 transitions. Logged trainer elapsed
+time was 955.594 seconds. Final `7f270019` is now selected as experimental in
+StandArena, preserving the prior `1c9238f8` bundle and all source/AMP checkpoints.
+Initial-to-final 30-second balanced survival regresses 8/8 to 7/8; case 1 falls at
+4.000 seconds. Fixed upright and two-second readiness remain 0/8. No longer
+training horizon or conditional 600-second hold is reached.
+
+Among the seven cases surviving both assessments, mean terminal local shoulder-L
+error improves 85.236 to 48.755 degrees. Shoulder-R worsens 81.324 to 82.699 degrees.
+Spine/chest/head errors are 39.788/44.293/68.912 degrees initially and
+39.801/43.662/68.914 finally. Whole-body imitation improves one region, without
+correcting the torso/neck or retaining all quiet cases. GPU rollout score gains
+must not be treated as native admission. Device samples average 54.51% (p95 72%,
+peak 99%), including built-in assessments. No standalone tests or build ran.
+
+A read-only control/checkpoint audit found all 33 motor channels routed through
+the shared torque controller, including the neck. Action normalization has zero
+mean and unit scale for every channel in the migrated and latest checkpoints;
+normalization does not suppress neck actions. Applied torque and joint-limit
+saturation were unmeasured at that point; the subsequently authorized diagnostic
+below supplies those measurements. No additional training window was started.
+
+`diagnose_torque_stand` was explicitly authorized and executed for a bounded
+paired motor diagnostic of `1c9238f8` and `7f270019`. It records all 33 normalized
+commands at control frequency and
+delayed controls, actual actuator forces, generalized actuator/bias/passive/
+constraint torques and hinge positions at every native physics substep. Each of
+the eight fixed cases stops recording at physical failure or 30 seconds.
+Two-degree limit proximity and 98% command saturation are descriptive thresholds,
+not admission gates. Constraint torque contains both contacts and limits; bias
+contains gravity and velocity terms. Neither alone proves a motor-authority defect.
+The script binds checkpoint/export/model/reference hashes, requires identical
+plants and references, refuses existing output, and changes no training or Arena
+selection. The two final exports are evaluated through CPU ONNX inference.
+
+Results are preserved in `logs/mimickit-training/stand-torque-motor-diagnostic-01`.
+The source survives all eight trials; the latest actor survives seven, with case 1
+ending at 3.984 seconds. Among the seven paired survivors, after five seconds all
+spine and neck axes remain within two degrees of a joint limit for 100% of samples.
+Their delayed torque drives farther into the corresponding limit for 100% of
+those samples. Latest neck signed mean torques are +6.366/+2.110/-2.157 Nm for
+rx/ry/rz, below the 18 Nm normalized-policy authority. Actual actuator forces
+match controls exactly across all 33 motors in both runs. These traces support
+learned end-stop bracing rather than disconnected neck motors. The native
+constraint trace includes contacts and limits, so it does not isolate stop loads.
+This diagnostic performed no training, compilation or Arena selection change.
+
+```powershell
+# Run only after explicit authorization to execute the diagnostic.
+& mujoco_rig/mimic/.venv/Scripts/python.exe -B -m mujoco_rig.mimic.diagnose_torque_stand `
+  --mimickit D:/Proyectos/Juegos/Tools/MimicKit `
+  --run logs/mimickit-training/stand-torque-short-upright-15min-07 `
+  --run logs/mimickit-training/stand-torque-whole-pose-15min-08 `
+  --out logs/mimickit-training/stand-torque-motor-diagnostic-01
+```
+
+### Limit-aware corrective reward (2026-10-01)
+
+Prepared mode `limit_aware_v7` and preset `TorqueStandLimitAwarePilot` warm-start
+the diagnosed final `7f270019` actor and its full AMP sidecar. The prepared budget
+is five synchronized training-update minutes, with 2,048 environments and
+evaluation interval 64. No corrective training or tests have been executed.
+
+The objective combines 50% balanced whole-body imitation with 50% dense upper-body
+pose reward, minus the existing effort/smoothness and joint-speed costs and a new
+bracing cost. The dense reward scores spine, chest and neck independently, then
+averages their scores: 75% local quaternion reference alignment and 25% physical
+upright/clearance alignment per body. Reciprocal squared-error scores provide a
+non-exponential signal at the measured large deviations. Small-error tolerances
+and regional scales retain the v6 contract. The local term is additive so its
+contribution is not multiplied by balance or errors elsewhere in the body.
+
+Bracing cost is 0.5 times the mean proximity-weighted outward normalized torque
+over the nine spine/chest/neck motors. Proximity increases linearly during the
+last five degrees before a limit and saturates at one beyond it. The cost uses
+the delayed control held through the completed physics interval and its ending
+joint positions. Torque away from a limit receives zero bracing cost, as does
+zero torque. Legs and feet receive no new limit penalty. This is a reward change;
+it does not clamp or modify torques, limits, observations or zero spring stiffness.
+These initial coefficients require measurement in the corrective pilot.
+
+Training logs include each body's dense scores, bracing cost and limit proximity.
+Native assessments record mean per-joint proximity/outward drive and terminal
+outward drive for finite samples up to each case's termination. These are reward
+diagnostics, not new admission gates. The short-horizon curriculum, quiet-retention
+guard and fixed upright gates remain active. The recognized v6-to-v7 transition
+requires explicit reward-change permission and preserves checkpoint provenance.
+StandArena remains selected to `7f270019`; no pilot result has been exported.
+
+The subsequently authorized `stand-torque-limit-aware-5min-09` pilot completed
+300.374 synchronized training-update seconds (5.006 minutes), 50 updates and
+6,553,600 transitions; trainer elapsed time was 326.422 seconds. Final actor
+`efaf60dc` is exported as experimental to `MimicStandTorqueArena.tscn` only.
+Primary `MimicStandArena.tscn` remains on `7f270019`. ONNX conversion parity during
+the required export has maximum action error 1.788e-7. No standalone diagnostic,
+tests, application build or Godot execution was run during this pilot.
+
+Balanced survival regresses from 7/8 to 5/8; previously surviving cases 2 and 6
+fall at 8.551 and 2.584 seconds. Upright admission and two-second readiness remain
+0/8. Update 50 is below the evaluation interval of 64, so this short run has only
+the mandatory initial/final assessments; there is no scheduled retention stop or
+horizon advancement. No conditional 600-second hold was attempted.
+
+Across the five paired surviving cases (0, 3, 4, 5, 7), mean normalized upper-joint
+outward drive decreases 0.202108 to 0.140765 (30.35%). Mean five-degree proximity
+ramp decreases 0.982602 to 0.935784; this is a ramp average, not an occupancy
+fraction. Terminal local spine/chest/head errors change from
+39.726/44.353/68.914 to 39.610/42.397/73.392 degrees. Mean head world tilt worsens
+24.756 to 33.741 degrees. The actor reduces outward torque while retaining
+near-limit posture, losing quiet retention. These are paired-survivor measurements;
+early failed cases are excluded to avoid rewarding shortened trajectories.
+Whole-device GPU activity averages 53.09% (p95 69%, peak 99%), including intrinsic
+assessments. An unchanged longer run is not supported by this pilot. Proposed
+next change: penalize sustained upper-joint limit occupancy as well as outward
+drive; implementation and any subsequent run require authorization.
+
+### Sustained limit-occupancy reward (2026-10-01)
+
+User-approved mode `limit_occupancy_v8` adds a state cost to the immutable v7
+objective: `limit_occupancy_cost = 0.25 * mean(proximity ** 2)`, where proximity is
+the existing five-degree ramp for the nine spine/chest/neck hinges. It is zero
+outside those limit regions and reaches a maximum aggregate cost of 0.25 at the
+limits. It applies regardless of torque direction or magnitude, including zero
+torque, so lowering torque while remaining near a stop no longer removes this
+part of the penalty. Every occupied control interval incurs the cost; episode
+return accumulates the effect of sustained occupancy. There is no dwell timer,
+new observation, pose actuator or altered joint/torque limit.
+
+All existing v7 pose/balance weights, outward-drive cost, physical damping, zero
+passive springs, collapse termination and native admission criteria remain.
+The new coefficient is an unmeasured pilot setting. Training logs add occupancy
+cost and the actual fraction of upper hinges within five degrees of a limit.
+Native reports add per-joint mean near-limit sample fraction and mean/final
+occupancy cost, alongside the previous proximity ramp and outward-drive values.
+Sample fractions are calculated through each finite case's termination; paired
+survivors must still be used when comparing improvements after falls.
+
+Prepared preset `TorqueStandLimitOccupancyPilot` continues final `efaf60dc` from
+`stand-torque-limit-aware-5min-09` and its matching full AMP state for five training
+minutes, seed 301000, Envs 2048 and EvaluationInterval 64. The source baseline is
+5/8 balanced and 0/8 upright. Reward transition v7-to-v8 requires the existing
+explicit reward-change flag, which the preset inherits. Optimizer/RNG state starts
+a new warm-start window. No new training, tests, compilation or Arena update has
+been performed. With a similar update rate to the prior pilot, a five-minute run
+may finish before its first scheduled update-64 check; mandatory initial/final
+checks still apply. Execution requires authorization.
+
+The subsequently authorized `stand-torque-limit-occupancy-5min-10` completed
+304.938 synchronized training-update seconds (5.082 minutes), 51 updates and
+6,684,672 transitions; trainer elapsed time was 320.516 seconds. Final actor
+`f7f089d8` and its AMP sidecar are preserved, with an experimental export in
+`MimicStandTorqueArena.tscn`. Primary StandArena remains on `7f270019`. Required
+ONNX conversion parity is 2.980e-7 maximum action error. No standalone tests,
+new physical diagnostic, application compilation or Godot execution ran.
+
+The candidate fails every native 30-second case after 1.400 to 2.417 seconds:
+balanced survival regresses 5/8 to 0/8 and upright admission remains 0/8. Every
+case ends below the physical pelvis-height threshold; cases 0 and 5 also have
+non-foot ground contact. Best native checkpoint remains iteration zero, with
+the source's 5/8 balanced result. Two-second assessment has only two survivors
+and zero upright cases. No scheduled update-64 check, horizon advance or
+conditional 600-second hold occurred. The quiet-retention failure is recorded.
+
+There are no paired surviving cases, so lower final proximity or pose error
+cannot be interpreted as sustained improvement. The last training snapshot has
+15.70% near-limit hinge samples and spine/chest/head local errors of
+21.072/20.284/20.493 degrees, but the logged average completed episode is only
+43.613 control steps (0.727 seconds). The upstream return tracker counts steps;
+the task uses a 0.016668-second control interval. Frequent early posture/physical
+resets and the two-second horizon make brief pose averages insufficient evidence
+of standing. These are rollout statistics, not matched 30-second outcomes.
+
+Whole-device GPU activity averages 54.92% (p95 71%, peak 99%), including intrinsic
+assessments. No further run was started. The experiment does not establish active
+balance without end-stop support. Proposed next work: revise the early posture
+reset/episode design, use longer physical balance episodes with soft posture
+preferences and explicit fall cost, then assess retained quiet balance. This
+proposal has not been implemented or tested.
+
+### Short-horizon upright curriculum (2026-10-01)
+
+`TorqueStandShortUprightTraining` runs an isolated 15-minute `short_upright_v5`
+pilot from preserved update 128 (`295ac2b4`) and its full AMP state. Training starts
+at two-second holds. Two consecutive native readiness passes extend the hold to
+five, ten and finally thirty seconds. Each readiness pass requires all eight cases
+to survive and finish upright/balanced for `min(2, horizon/4)` seconds.
+
+The reward is `balance * posture - action_cost`, removing the previous 90% reward
+floor independent of posture. Training-only posture failures end an episode when
+spine/chest/head tilt exceeds 35/35/45 degrees or reference-relative height deficits
+exceed 0.07/0.09/0.13 m. This prevents a persistently folded pose becoming a rewarded
+training trajectory. The thresholds do not modify native assessment termination,
+Arena physics or the fixed upright gate. Reference goals remain reward/observation
+data, never motor targets. All 33 actuators remain learned torques; hips, knees and
+foot placement remain free, and passive springs remain zero.
+
+Separate native 30-second quiet checks run at startup, every 64 updates and at
+completion. Every source case remains a retention requirement; two consecutive
+retention failures stop the pilot. Short readiness is recorded separately from the
+fixed 30-second upright gate and conditional 600-second assessment. Environment
+count remains 2,048. No standalone tests, compilation or Godot execution are run.
+
+`stand-torque-short-upright-15min-07` completed 901.393 synchronized training
+seconds (15.023 minutes), 154 updates and 20,185,088 transitions. Logged trainer
+elapsed time was 947.094 seconds. Final `1c9238f8` is now selected in StandArena
+as an experimental preview, with the previous bundle preserved. Native 30-second
+survival and balance finish at 8/8, retaining every source case; update 64 temporarily
+fell to 4/8 before update 128 recovered 8/8. Upright admission remains 0/8.
+
+All eight final cases survive, making their mean-tilt comparison with the eight
+initial survivors meaningful: head improves from 57.999 to 24.873 degrees, chest
+from 30.064 to 24.004 degrees, and spine from 22.556 to 22.195 degrees. Final head
+angles are 25.29–25.86 degrees; spine/chest are still above their 20-degree limits.
+No short readiness pass or horizon extension was earned; final training horizon
+remains two seconds. No 600-second admission is claimed. Whole-device GPU samples
+average 55.98% (p95 70%, peak 100%), including intrinsic assessments. Head posture
+improved without final balance loss, but natural upright movement is not established.
+
+### Whole-body Stand training outcome (2026-10-01)
+
+`stand-torque-whole-body-15min-04` completed 901.692 synchronized training-update
+seconds, 159 updates and 20,840,448 transitions. Trainer elapsed time was 931.734 s,
+excluding setup before its timer. Envs=2048 and EvaluationInterval=64 were retained.
+The rollout uses cached immutable stationary goals and live physics observations;
+no standalone benchmark rerun was performed.
+
+Under the corrected gate, both initial and final actors score 0/8 upright standing
+passes. Thirty-second survival falls from 4/8 to 3/8. Final sampled chest tilt is
+still about 35 degrees. No 600-second hold was attempted, and natural movement
+remains unvalidated. Higher training returns did not establish robust upright
+standing.
+
+`MimicStandArena.tscn` selects the final actor `ab234b41`, with 33 learned torque
+channels and 306 observations, for experimental inspection. The previous bundle
+is preserved. `MimicPerturbArena.tscn` still uses the older Stand actor `708a8ac0`;
+this run adds no ball-recovery training. Export conversion maximum action error
+is 1.79e-07. Whole-device GPU samples average 57.43%, with p95 75% and peak 99%;
+these include built-in assessments and are not exclusive PPO utilization.
+No standalone tests, compilation or Godot execution were run.
+
+### Staged posture objective (2026-10-01)
+
+`TorqueStandStagedPostureTraining` prepares a 15-minute continuation from final
+`ab234b41`, with Envs=2048 and EvaluationInterval=64. It explicitly enables the
+`whole_body_v2` to `staged_v3` reward transition. The 33-action/306-observation
+contract, direct torques, physical body and AMP configuration stay compatible.
+Legacy reward mode remains the default for existing presets and benchmarks.
+
+The new task reward is
+`balance * ((1 - posture_weight) + posture_weight * posture) - action_cost`.
+The balance term retains pelvis height/uprightness, capture, settling and support.
+Posture uses bounded per-coordinate `1/(1 + normalized_error^2)` scores, so
+strong folding does not flatten the posture signal as sharply as the exponential
+score. Posture pressure starts at 10%, then rises through 25%, 50% and 70%.
+At the first stage, even a zero posture score retains 90% of balance credit.
+
+Advancement requires two consecutive scheduled native assessments with all eight
+cases surviving 30 seconds and ending with two stable seconds at the current
+stage. The initial stage requires balance; subsequent stages require progressively
+tighter upper-body tilt/clearance limits. These relaxed readiness criteria never
+replace the fixed whole-body admission gate. Stage progression uses measured
+state, not elapsed training time or an action/step clock.
+
+Each run records every initially surviving and balance-settled case. Losing one
+reduces posture pressure; two consecutive retention losses end the run with
+`quiet_retention_regression`. `initial.pt`, separate `retention.pt` with its full
+AMP sidecar, evaluation checkpoints and final `model.pt` remain available.
+The final candidate is never silently replaced by the retention checkpoint.
+Training can still regress before a scheduled assessment; this guard detects
+and bounds that regression rather than guaranteeing successful learning.
+
+Native reports now separate balance, stage readiness and fixed upright passes.
+Each case records final/mean spine, chest and head tilt and clearance deficit,
+foot loads, pelvis motion, non-foot ground contacts, failed criteria and violation
+durations. Terminal measurements freeze when that case ends. This distinguishes
+falling from surviving in the wrong posture without weakening the final gate.
+
+The implementation itself ran no training, tests or compilation. The subsequent
+authorized `stand-torque-staged-posture-15min-05` window completed 903.667
+training-update seconds, 178 updates and 23,330,816 transitions (945.766 s logged
+trainer elapsed time). Final `f4aeaa6e` is selected in `MimicStandArena.tscn`.
+
+Initial-to-final 30-second survival and balanced settling improve from 3/8 to 7/8;
+fixed whole-body upright standing remains 0/8. The initially surviving and balanced
+cases are retained. Update 128 (`best.pt` and its evaluation checkpoint) passes
+8/8 survival and balance, but the final actor loses case 7. The latest final actor
+is loaded as requested; it is not silently replaced with the intermediate one.
+The curriculum remains at 10% posture pressure: update 64 passes only 7/8 balance,
+and update 128 supplies one complete readiness pass. No higher-pressure stage
+receives training in this window.
+
+For the three initially balanced cases, chest tilt improves while head tilt gets
+worse. Every final surviving case fails the spine/chest/head tilt and head-clearance
+criteria. Survival and balance are improving, but natural upright posture remains
+unestablished. The conditional 600-second hold is not attempted because the fixed
+upright gate fails. Whole-device GPU activity averages 56.87% (p95 73%, peak 99%).
+The previous Arena bundle and all checkpoints remain available; PerturbArena
+continues to use `708a8ac0`. No standalone tests, compilation or Godot execution
+were run.
+
+### One-minute throughput measurements (2026-10-01)
+
+`logs/mimickit-training/stand-torque-throughput-1min-01/report.json` records
+CUDA-synchronized, isolated PPO/AMP measurements with the whole-body objective,
+33-action migration from `708a8ac0`, and one warmup update excluded. Each case ran
+until the first complete update after 60 seconds. No weights were promoted.
+
+At 2,048 environments, 9 updates took 62.514 s: 18,870 transitions/s, 49.0% average
+whole-device GPU activity, and 9,378 MiB peak device memory. At 4,096 environments,
+6 updates took 61.316 s: 25,652 transitions/s, 61.1% GPU activity, and 15,267 MiB
+peak memory. Experience throughput increased 35.9%, while updates/minute decreased
+from 8.64 to 5.87. Both runs spent about 90% of their measured time in rollouts
+and about 9% updating the networks; process CPU time was approximately 89% of
+wall time. Phase timing introduces synchronization overhead; these short runs
+measure throughput, not standing quality or convergence speed.
+
+The unchanged 4,096-environment configuration first failed during warmup because
+its 262,144-sample rollout exceeded AMP's 200,000-entry replay buffer. The successful
+measurement scaled that buffer to 400,000 entries, preserving capacity per world.
+This change was confined to the benchmark. A production increase needs matching
+replay capacity and continuation-config handling; Envs alone is insufficient.
+
+The earlier 45-minute report spends 18.853 s (0.69% of logged trainer time) outside
+training updates, including assessments and checkpoint handling. Increasing
+EvaluationInterval is therefore unlikely to improve throughput substantially.
+Keep the production defaults at Envs=2048 and EvaluationInterval=64 for now.
+4,096 is a measured faster Stand sampling option with little memory headroom;
+its learning quality and Perturb memory footprint remain unmeasured. The next
+performance candidate is reducing rollout host overhead, including repeated
+kinematics of the constant reference pose. No Godot execution or compilation ran.
+
+The subsequent rollout optimization computes reference-body kinematics only once
+for the eight immutable standing poses, caches each world's posture goals and
+three identical future-reference observation blocks, and allocates posture/gate
+constants once. Reward calculations reuse live body transforms, native pose and
+foot loads within the same call. Observations retain their field order and contact
+arithmetic. Live state is not cached across physics steps or resets. The reward,
+standing criteria, torque contract, Envs=2048 and EvaluationInterval=64 are
+retained. This optimization has not been benchmarked or tested; no training,
+compilation or Arena selection accompanied it.
+
+The requested 45-minute continuation uses `TorqueStandContinue45min` and writes
+`logs/mimickit-training/stand-torque-spring-free-45min-02`. It warm-starts the final
+`e1d4a99f` actor and full AMP sidecar, preserving physics, demonstrations, reward,
+2,048 environments and assessment interval 64. Its 2,700-second budget counts
+additional synchronized training updates; optimizer/RNG state starts a new window.
+The silent completion helper selects the final export in `MimicStandArena.tscn`
+and records actual duration and standing outcomes. No chat heartbeat is created.
 
 ## Stationary reactive Perturb seed (2026-09-27)
 

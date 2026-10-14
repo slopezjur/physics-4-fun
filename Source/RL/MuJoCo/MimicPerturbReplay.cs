@@ -20,6 +20,13 @@ public partial class MimicPerturbReplay : Node
                 ?? throw new InvalidOperationException("Set P4F_MIMIC_REPLAY_OUTPUT for batch validation.");
             using var document = JsonDocument.Parse(File.ReadAllText(input));
             var protocol = document.RootElement;
+            if (protocol.GetProperty("schema").GetString() == "mimic_arena_ball_pool_test_v1")
+            {
+                MjMimicBallPoolReplay.Run(protocol, output);
+                GD.Print("[MimicPerturbReplay] Arena ball-pool validation complete.");
+                GetTree().Quit();
+                return;
+            }
             if (protocol.GetProperty("schema").GetString() == "mimic_ball_validation_v2")
             {
                 MjMimicBallReplay.Run(protocol, output);

@@ -18,13 +18,24 @@ internal sealed class MjMimicWorld
         _bridge = bridge;
         bool ball = bridge.BodyId("ball") >= 0;
         CharacterPath = ball ? Path.Combine(Path.GetDirectoryName(modelPath)!, "dummy.xml") : modelPath;
-        CharacterBodyCount = bridge.BodyCount - (ball ? 1 : 0);
+        CharacterBodyCount = ball ? bridge.BodyId("ball") : bridge.BodyCount;
+        bridge.ComBodyCount = CharacterBodyCount;
         if (!ball) return;
         var world = new XmlDocument(); world.Load(modelPath);
         var character = new XmlDocument(); character.Load(CharacterPath);
-        var projectile = world.SelectSingleNode("/mujoco/worldbody/body[@name='ball']")
-            ?? throw new InvalidOperationException("Missing projectile definition.");
-        projectile.ParentNode!.RemoveChild(projectile);
+        var projectiles = world.SelectNodes("/mujoco/worldbody/body")!.Cast<XmlNode>()
+            .Where(n => n.Attributes?["name"]?.Value == "ball"
+                || n.Attributes?["name"]?.Value?.StartsWith("ball_", StringComparison.Ordinal) == true).ToArray();
+        for (int i = 0; i < projectiles.Length; i++)
+        {
+            string suffix = i == 0 ? string.Empty : $"_{i}";
+            if (projectiles[i].Attributes?["name"]?.Value != "ball" + suffix
+                || bridge.BodyId("ball" + suffix) != 19 + i
+                || bridge.JointId("ball_free" + suffix) != 40 + i
+                || projectiles[i].SelectSingleNode("freejoint/@name")?.Value != "ball_free" + suffix)
+                throw new InvalidOperationException("Projectiles must be ordered free bodies after the character.");
+            projectiles[i].ParentNode!.RemoveChild(projectiles[i]);
+        }
         foreach (var doc in new[] { world, character })
         {
             doc.DocumentElement!.RemoveAttribute("model");
@@ -34,9 +45,11 @@ internal sealed class MjMimicWorld
                 comment.ParentNode!.RemoveChild(comment);
         }
         if (world.DocumentElement!.OuterXml != character.DocumentElement!.OuterXml
-            || bridge.JointId("ball_free") != 40 || bridge.BodyId("ball") != 19)
+            || CharacterBodyCount != 19 || projectiles.Length != bridge.BodyCount - 19
+            || bridge.PositionCount != 46 + projectiles.Length * 7
+            || bridge.VelocityCount != 45 + projectiles.Length * 6)
             throw new InvalidOperationException("Ball world must append a projectile without changing the character.");
-        _fullQ = new double[53]; _fullV = new double[51];
+        _fullQ = new double[bridge.PositionCount]; _fullV = new double[bridge.VelocityCount];
         bridge.ReadNativeState(_fullQ, _fullV); // Validate the complete native layout.
     }
 
@@ -52,7 +65,14 @@ internal sealed class MjMimicWorld
         if (_fullQ == null) { _bridge.ResetNativeState(q, v); return; }
         Array.Clear(_fullQ); Array.Clear(_fullV!);
         Array.Copy(q, _fullQ, q.Length); Array.Copy(v, _fullV!, v.Length);
-        _fullQ[46] = _fullQ[47] = 40; _fullQ[48] = 2; _fullQ[49] = 1;
+        for (int i = 0; i < (_fullQ.Length - 46) / 7; i++)
+        {
+            int start = 46 + 7 * i;
+            _fullQ[start] = 40 + .4 * (i % 8);
+            _fullQ[start + 1] = 40 + .4 * (i / 8);
+            _fullQ[start + 2] = 2;
+            _fullQ[start + 3] = 1;
+        }
         _bridge.ResetNativeState(_fullQ, _fullV!);
     }
 }

@@ -1,0 +1,15 @@
+{
+  "schema": "stand_ball_checkpoint_curve_v1",
+  "prior": "logs/mimickit-training/stand-ball-pilot-20261006-01",
+  "seeds": [301027, 301028],
+  "arms": ["quiet", "single_ball"],
+  "checkpoints": [100, 200],
+  "seconds": 12.0,
+  "launch_seconds": 5.0,
+  "launch_distance_m": 0.65,
+  "quiet_retention_seconds": 120.0,
+  "screen_cases": 256,
+  "maximum_conditional_cases": 384,
+  "maximum_evaluation_cases": 640,
+  "training_updates": 0
+}

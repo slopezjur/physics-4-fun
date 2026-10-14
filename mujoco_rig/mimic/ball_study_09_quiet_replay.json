@@ -1,0 +1,29 @@
+{
+  "schema": "chest_quiet_replay_v1",
+  "question": "Does reactive actor feedback specifically improve chest-impact recovery compared with replaying this actor's own time-varying quiet-standing commands?",
+  "seeds": [
+    301027,
+    301028
+  ],
+  "actors": [
+    "source"
+  ],
+  "training_root": "logs/mimickit-training/stand-ball-stage07-learning-20261006-01",
+  "baseline_root": "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01",
+  "calibration_root": "logs/mimickit-training/stand-ball-replay-calibration-20261006-01",
+  "maximum_cases": 384,
+  "training_updates": 0,
+  "intervention": "Collect a 12-second live quiet sequence in the ball world for each of six actors on each backend. Replay its exact backend/pose-matched quiet commands after the final pre-launch frame, retaining live policy before that frame, unchanged PD/delay/physics, and quiet/+X/-X conditions at 5 kg / 1.4 m/s from 0.25 m.",
+  "admission": "Live quiet must pass 8/8 on each backend. Native prefix tolerance 1e-10; GPU uses the previously locked calibration envelope. Replay original actor on each actual pre-switch observation (2e-6); post-switch live-world commands must exactly equal the saved quiet sequence. Require backend comparisons. Preserve every rejected admission.",
+  "decision": "An impact-specific comparison requires admitted prefixes/backends and all replayed quiet cases retaining Stand. If quiet replay fails, the intervention remains confounded and no isolated impact-feedback claim is made. Changes in delivered impulses remain part of the encounter. No learning or promotion.",
+  "evidence": [
+    "logs/mimickit-training/stand-ball-pilot-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage08-feedback-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage08-feedback-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-replay-calibration-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-replay-calibration-20261006-01/final-verification.json"
+  ]
+}

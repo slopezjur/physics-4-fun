@@ -1,0 +1,86 @@
+{
+  "schema": "frozen_ball_study_v1",
+  "question": "Does equal nominal horizontal projectile momentum imply similar recovery when mass and speed differ?",
+  "seeds": [
+    301027,
+    301028
+  ],
+  "actors": [
+    "baseline"
+  ],
+  "signs": [
+    1,
+    -1
+  ],
+  "conditions": [
+    {
+      "name": "light_fast",
+      "mass_kg": 2,
+      "speed_m_s": 4,
+      "distance_m": 0.25,
+      "launch_seconds": 5,
+      "seconds": 12
+    },
+    {
+      "name": "heavy_slow",
+      "mass_kg": 8,
+      "speed_m_s": 1,
+      "distance_m": 0.25,
+      "launch_seconds": 5,
+      "seconds": 12
+    }
+  ],
+  "maximum_cases": 128,
+  "training_updates": 0,
+  "checkpoint_group": "baseline",
+  "decision": "Step36: equal nominal horizontal momentum8kg*m/s with2kg4m/s and8kg1m/s; compare original5kg1.6m/s.128new cases. Flight compensation, energy and actual collision impulse differ; measure actual vector impulse/body contact and report differences, do not call these equivalent doses. All physical gates retained.",
+  "evidence": [
+    "logs/mimickit-training/stand-ball-stage09-quiet-replay-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage09-quiet-replay-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage08-feedback-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage08-feedback-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage12-task-reward-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage12-task-reward-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage15-learning-curve-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage15-learning-curve-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage14-completion-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage16-seed-replication-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage16-seed-replication-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage20-decision-20261007-01/decision.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-source-20261007-01/protocol.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-source-20261007-01/301027-source-two-+1-native/report.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-source-20261007-01/301027-source-two-+1-gpu/report.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-source-20261007-01/301027-source-two-+1-native/body-report.json",
+    "logs/mimickit-training/stand-ball-batch-final-review-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-batch-final-review-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage18-sustained-candidate-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage18-sustained-candidate-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-candidate-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-candidate-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage20-delayed-candidate-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage20-delayed-candidate-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage13-onset-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage13-onset-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-followup21-review-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-followup21-review-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage27-endpoint-review-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage27-endpoint-review-20261007-01/final-verification.json"
+  ],
+  "feedback": "live",
+  "checkpoints": {
+    "301027": {
+      "root": "logs/mimickit-training/stand-ball-stage14-completion-20261007-01",
+      "checkpoint": "logs/mimickit-training/stand-ball-stage14-completion-20261007-01/301027/single_ball/updates-200/model.pt"
+    },
+    "301028": {
+      "root": "logs/mimickit-training/stand-ball-stage14-completion-20261007-01",
+      "checkpoint": "logs/mimickit-training/stand-ball-stage14-completion-20261007-01/301028/single_ball/updates-200/model.pt"
+    }
+  },
+  "direction_degrees": 0,
+  "scope": "May overlap the independent frozen timing sweep; separate worlds, no learning or timing benchmark."
+}

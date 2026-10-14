@@ -26,8 +26,8 @@ class StandTask(BaseEnv):
         if control_mode not in ("torque", "target_pd"):
             raise ValueError(f"Unknown control mode: {control_mode}")
         self.target_pd = control_mode == "target_pd"
-        if contact_mode not in (LEGACY, SUPPORT_V2) or contact_mode == SUPPORT_V2 and not self.target_pd:
-            raise ValueError("support_v2 contacts require target PD")
+        if contact_mode not in (LEGACY, SUPPORT_V2):
+            raise ValueError("Unknown ground-contact sampling mode")
         self.contact_mode = contact_mode
         if self.target_pd:
             self.engine = engine_factory(rig, num_envs, device, control_factory=DelayedTargetControl)
@@ -148,7 +148,7 @@ class StandTask(BaseEnv):
         groups = [("root_position_world", 3), ("root_rotation_tangent_normal", 6),
                   ("root_linear_velocity_world", 3), ("root_angular_velocity_world", 3),
                   ("all_hinge_positions", 39), ("all_hinge_velocities_scaled_0.1", 39),
-                  ("foot_normal_load_kN_L_R", 2), ("pending_actions_oldest_first", 60),
+                  ("foot_normal_load_kN_L_R", 2), ("pending_actions_oldest_first", 2*len(self.rig.actuators)),
                   ("future_reference_poses_1_2_3", 144), ("reference_phase", 1)]
         offset, layout = 0, []
         if self.target_pd:

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Godot;
 
@@ -25,6 +26,9 @@ internal sealed class MjBridge : IDisposable, IMjPolicyPlant, IMjFoundationSenso
 
     /// <summary>Actuators in the model.</summary>
     internal int ActuatorCount { get; }
+    internal int PositionCount { get; }
+    internal int VelocityCount { get; }
+    internal int ComBodyCount { get; set; }
 
     /// <summary>Loads a model, or throws carrying MuJoCo's own compiler error.</summary>
     internal MjBridge(string xmlPath)
@@ -48,6 +52,9 @@ internal sealed class MjBridge : IDisposable, IMjPolicyPlant, IMjFoundationSenso
             ActuatorCount = (int)Marshal.ReadInt64(_model, MjLayout.ModelNu);
             long nq = Marshal.ReadInt64(_model, MjLayout.ModelNq);
             long nv = Marshal.ReadInt64(_model, MjLayout.ModelNv);
+            PositionCount = checked((int)nq);
+            VelocityCount = checked((int)nv);
+            ComBodyCount = BodyCount;
 
             // **The offsets are generated, so verify them rather than trust them.** Hand-computed offsets
             // on this struct already returned plausible wrong values once - nq=52, nv=0, nu=51 against the
@@ -118,6 +125,26 @@ internal sealed class MjBridge : IDisposable, IMjPolicyPlant, IMjFoundationSenso
             if (wrench[0] > 0) return true;
         }
         return false;
+    }
+
+    internal void ReadCharacterProjectileContacts(int characterBodyCount, ISet<int> destination)
+    {
+        EnsureAlive();
+        IntPtr contacts = Marshal.ReadIntPtr(_data, MjLayout.DataContact);
+        IntPtr bodies = Marshal.ReadIntPtr(_model, MjLayout.ModelGeomBodyid);
+        var wrench = new double[6];
+        int count = Marshal.ReadInt32(_data, MjLayout.DataNcon);
+        for (int i = 0; i < count; i++)
+        {
+            int offset = i * MjLayout.ContactStride + MjLayout.ContactGeom;
+            int a = Marshal.ReadInt32(bodies, Marshal.ReadInt32(contacts, offset) * sizeof(int));
+            int b = Marshal.ReadInt32(bodies, Marshal.ReadInt32(contacts, offset + sizeof(int)) * sizeof(int));
+            int projectile = a >= characterBodyCount && b > 0 && b < characterBodyCount ? a
+                : b >= characterBodyCount && a > 0 && a < characterBodyCount ? b : -1;
+            if (projectile < 0) continue;
+            MjInterop.mj_contactForce(_model, _data, i, wrench);
+            if (wrench[0] > 0) destination.Add(projectile);
+        }
     }
 
     private void ValidateStateSize(double[] qpos, double[] qvel)
@@ -388,7 +415,7 @@ internal sealed class MjBridge : IDisposable, IMjPolicyPlant, IMjFoundationSenso
         EnsureAlive();
         IntPtr mass = Marshal.ReadIntPtr(_model, MjLayout.ModelBodyMass);
         double total = 0.0;
-        for (int b = 0; b < BodyCount; b++)
+        for (int b = 0; b < ComBodyCount; b++)
         {
             if (b == ExcludeFromCom)
             {
@@ -419,7 +446,7 @@ internal sealed class MjBridge : IDisposable, IMjPolicyPlant, IMjFoundationSenso
         IntPtr xipos = Marshal.ReadIntPtr(_data, MjLayout.DataXipos);
         IntPtr mass = Marshal.ReadIntPtr(_model, MjLayout.ModelBodyMass);
         double total = 0.0, x = 0.0, y = 0.0, z = 0.0;
-        for (int b = 0; b < BodyCount; b++)
+        for (int b = 0; b < ComBodyCount; b++)
         {
             if (b == ExcludeFromCom)
             {
@@ -451,7 +478,7 @@ internal sealed class MjBridge : IDisposable, IMjPolicyPlant, IMjFoundationSenso
         EnsureAlive();
         IntPtr mass = Marshal.ReadIntPtr(_model, MjLayout.ModelBodyMass);
         double total = 0.0, x = 0.0, y = 0.0, z = 0.0;
-        for (int b = 0; b < BodyCount; b++)
+        for (int b = 0; b < ComBodyCount; b++)
         {
             if (b == ExcludeFromCom)
             {

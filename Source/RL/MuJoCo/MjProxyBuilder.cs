@@ -92,7 +92,8 @@ internal static class MjProxyBuilder
                 // limb on its side, which is what made the rendered dummy look like scattered parts.
                 var material = new StandardMaterial3D
                 {
-                    AlbedoColor = palette.TryGetValue(name, out Color c) ? c : limbColor,
+                    AlbedoColor = palette.TryGetValue(name.StartsWith("ball_", StringComparison.Ordinal) ? "ball" : name,
+                        out Color c) ? c : limbColor,
                 };
                 // **The geom's own offset within its body.** Ignoring this was harmless while every
                 // geom sat on its body origin, and became visible the moment the foot was split: the

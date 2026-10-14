@@ -1,0 +1,19 @@
+{
+  "schema": "frozen_ball_study_v1",
+  "question": "Where is the recovery boundary for actual chest-first impacts from the admitted 0.25 m geometry?",
+  "seeds": [301027, 301028],
+  "actors": ["source"],
+  "signs": [1, -1],
+  "conditions": [
+    {"name": "speed15", "mass_kg": 5, "speed_m_s": 1.5, "distance_m": 0.25},
+    {"name": "speed20", "mass_kg": 5, "speed_m_s": 2, "distance_m": 0.25},
+    {"name": "speed30", "mass_kg": 5, "speed_m_s": 3, "distance_m": 0.25}
+  ],
+  "maximum_cases": 192,
+  "training_updates": 0,
+  "decision": "Choose the lowest speed that has both recovery and failure on both seeds/backends, with every shot hitting Chest first without Head and backend parity passing. No selection if none qualifies.",
+  "evidence": [
+    "logs/mimickit-training/stand-ball-stage03-geometry-completion-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage03-geometry-completion-20261006-01/verification.json"
+  ]
+}

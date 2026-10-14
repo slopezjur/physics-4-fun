@@ -1,0 +1,12 @@
+{
+  "roots": {
+    "source": "logs/mimickit-training/stand-ball-stage13-onset-20261006-01",
+    "candidate": "logs/mimickit-training/stand-ball-stage22-onset-candidate-20261007-01"
+  },
+  "comparisons": [
+    [
+      "source",
+      "candidate"
+    ]
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "roots": {
+    "candidate_mild": "logs/mimickit-training/stand-ball-stage38-candidate-mild-timing-20261007-01",
+    "candidate_strong": "logs/mimickit-training/stand-ball-stage38-candidate-strong-timing-20261007-01",
+    "baseline_mild": "logs/mimickit-training/stand-ball-stage22-onset-candidate-20261007-01",
+    "baseline_strong": "logs/mimickit-training/stand-ball-stage32-strong-timing-20261007-01"
+  },
+  "comparisons": [
+    [
+      "baseline_mild",
+      "candidate_mild"
+    ],
+    [
+      "baseline_strong",
+      "candidate_strong"
+    ]
+  ]
+}

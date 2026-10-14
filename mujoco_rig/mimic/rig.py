@@ -21,10 +21,11 @@ class Rig:
     decimation: int = 4
 
     @classmethod
-    def load(cls, path: Path) -> "Rig":
+    def load(cls, path: Path, *, policy_exclude=None) -> "Rig":
         model = mujoco.MjModel.from_xml_path(str(path))
+        excluded = POLICY_EXCLUDE if policy_exclude is None else policy_exclude
         actuators = np.array([i for i in range(model.nu)
-                              if model.actuator(i).name.split("_")[0] not in POLICY_EXCLUDE])
+                              if model.actuator(i).name.split("_")[0] not in excluded])
         if not ((model.actuator_gaintype[actuators] == mujoco.mjtGain.mjGAIN_FIXED).all()
                 and (model.actuator_biastype[actuators] == mujoco.mjtBias.mjBIAS_NONE).all()
                 and np.allclose(model.actuator_gear[actuators, 0], 1.0)):

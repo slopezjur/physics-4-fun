@@ -9,10 +9,30 @@ import numpy as np
 from scipy.optimize import linprog, minimize, Bounds, LinearConstraint
 
 from .rig import Rig
+from .target_control33 import DelayedTargetControl33
+
+
+def target_motor_bounds(rig, qpos):
+    """Torque available at rest through physically clipped joint-position targets.
+
+    This necessary envelope omits any narrower source-relative action bound.
+    It must not be used as a dynamic bound when joint/target velocities differ.
+    """
+    model = rig.model
+    joints = model.actuator_trnid[rig.actuators, 0]
+    if len(joints) != 33 or not model.jnt_limited[joints].all():
+        raise ValueError('Target-PD support requires 33 limited motor joints')
+    angles = np.asarray(qpos)[model.jnt_qposadr[joints]]
+    return np.clip(DelayedTargetControl33.gain*(model.jnt_range[joints]-angles[:, None]), -1., 1.)
+
+
+def solve_target_support(rig, qpos, **kwargs):
+    """Static support constrained by the actual zero-velocity target-PD envelope."""
+    return solve_support(rig, qpos, normalized_motor_bounds=target_motor_bounds(rig, qpos), **kwargs)
 
 
 def solve_support(rig, qpos, actual_contacts=False, passive_tolerance=0.5, minimum_norm=False,
-                  support_names=("Foot_L", "Foot_R", "Toe_L", "Toe_R")):
+                  support_names=("Foot_L", "Foot_R", "Toe_L", "Toe_R"), normalized_motor_bounds=None):
     model, data = rig.model, mujoco.MjData(rig.model)
     data.qpos[:] = qpos
     mujoco.mj_forward(model, data)
@@ -38,6 +58,13 @@ def solve_support(rig, qpos, actual_contacts=False, passive_tolerance=0.5, minim
     if not contacts:
         return {"feasible": False, "contacts": 0, "solver_message": "No supporting contacts"}
     dofs = model.jnt_dofadr[model.actuator_trnid[rig.actuators, 0]]
+    motor_bounds = np.tile((-1., 1.), (len(dofs), 1))
+    if normalized_motor_bounds is not None:
+        motor_bounds = np.asarray(normalized_motor_bounds, dtype=float)
+        if (motor_bounds.shape != (len(dofs), 2) or not np.isfinite(motor_bounds).all()
+                or (motor_bounds[:, 0] > motor_bounds[:, 1]).any()
+                or (motor_bounds < -1).any() or (motor_bounds > 1).any()):
+            raise ValueError('Expected finite ordered normalized motor bounds within [-1, 1]')
     motors = np.zeros((model.nv, len(dofs)))
     motors[dofs, np.arange(len(dofs))] = rig.action_scale
     columns = []
@@ -64,9 +91,11 @@ def solve_support(rig, qpos, actual_contacts=False, passive_tolerance=0.5, minim
     objective = np.zeros(matrix.shape[1]); objective[-1] = 1
     result = linprog(objective, A_ub=np.array(inequality), b_ub=np.array(bound),
                      A_eq=matrix[controlled] / weight, b_eq=required[controlled] / weight,
-                     bounds=[(-1, 1)] * len(dofs) + [(0, None)] * len(columns) + [(0, 1)], method="highs")
+                     bounds=motor_bounds.tolist() + [(0, None)] * len(columns) + [(0, 1)], method="highs")
     report = {"feasible": bool(result.success), "contacts": len(contacts),
               "com_world": data.subtree_com[1].tolist(), "passive_residual_tolerance_nm": passive_tolerance}
+    if normalized_motor_bounds is not None:
+        report['normalized_motor_bounds'] = motor_bounds.tolist()
     if result.success:
         if minimum_norm:
             weights = np.r_[np.ones(len(dofs)), np.full(len(columns), 0.001), 0.001]
@@ -75,8 +104,8 @@ def solve_support(rig, qpos, actual_contacts=False, passive_tolerance=0.5, minim
                                constraints=[LinearConstraint(matrix[controlled] / weight, required[controlled] / weight,
                                                              required[controlled] / weight),
                                             LinearConstraint(np.array(inequality), -np.inf, np.array(bound))],
-                               bounds=Bounds(np.r_[np.full(len(dofs), -1.), np.zeros(len(columns) + 1)],
-                                             np.r_[np.ones(len(dofs)), np.full(len(columns), np.inf), 1.]),
+                               bounds=Bounds(np.r_[motor_bounds[:, 0], np.zeros(len(columns) + 1)],
+                                             np.r_[motor_bounds[:, 1], np.full(len(columns), np.inf), 1.]),
                                options={"maxiter": 200, "ftol": 1e-10})
             if not refined.success:
                 raise RuntimeError("Support torque refinement failed: " + refined.message)

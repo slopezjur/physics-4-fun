@@ -1,0 +1,60 @@
+{
+  "schema": "frozen_ball_study_v1",
+  "question": "What recovery coverage remains across directions with a single insertion-clear launch distance for all actors and poses?",
+  "seeds": [
+    301027,
+    301028
+  ],
+  "actors": [
+    "candidate"
+  ],
+  "signs": [
+    1,
+    -1
+  ],
+  "conditions": [
+    {
+      "name": "clear046",
+      "mass_kg": 5,
+      "speed_m_s": 1.3,
+      "distance_m": 0.46,
+      "seconds": 12,
+      "launch_seconds": 5
+    }
+  ],
+  "maximum_cases": 64,
+  "training_updates": 0,
+  "checkpoint_group": "candidate",
+  "decision": "Static preflight found insertion penetration at 0.25-0.40 m in some angles. Use 0.46 m globally (first clear 0.05-m grid point 0.45 plus 0.01 margin), including new X controls. Both source and fixed Stage 15 update-200 pair, both parents/signs/backends, eight poses and angles 0/+30/-30/90, 512 cases. Require actual native insertion clearance and unchanged backend admission. Record actual first bodies; this longer ballistic flight may hit different body parts and is not the original 0.25-m chest dose. Reject mismatches rather than tune outcomes. No training or promotion. Earlier 0.25-m roots stay separate; unadmitted outcomes do not establish directional skill.",
+  "evidence": [
+    "logs/mimickit-training/stand-ball-stage09-quiet-replay-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage09-quiet-replay-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage08-feedback-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage08-feedback-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage12-task-reward-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage12-task-reward-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage15-learning-curve-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage15-learning-curve-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage14-completion-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage17-geometry-preflight-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage17-geometry-preflight-20261007-01/inputs.json",
+    "logs/mimickit-training/stand-ball-stage17-direction-source-0-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage17-direction-source-30-20261007-01/final-verification.json"
+  ],
+  "feedback": "live",
+  "checkpoints": {
+    "301027": {
+      "root": "logs/mimickit-training/stand-ball-stage14-completion-20261007-01",
+      "checkpoint": "logs/mimickit-training/stand-ball-stage14-completion-20261007-01/301027/single_ball/updates-200/model.pt"
+    },
+    "301028": {
+      "root": "logs/mimickit-training/stand-ball-stage14-completion-20261007-01",
+      "checkpoint": "logs/mimickit-training/stand-ball-stage14-completion-20261007-01/301028/single_ball/updates-200/model.pt"
+    }
+  },
+  "direction_degrees": -30
+}

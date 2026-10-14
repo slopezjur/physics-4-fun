@@ -14,7 +14,8 @@ public partial class MimicPerturb : MimicTrial
     [Export] public bool RunIndefinitely { get; set; }
     [Export] public bool AutoFire { get; set; }
     [Export] public bool TriggerStepOnImpact { get; set; }
-    [Export(PropertyHint.Range, "1,10,0.5")] public float FireInterval { get; set; } = 2.5f;
+    [Export] public bool IndependentBalls { get; set; }
+    [Export(PropertyHint.Range, "1,3600,0.5")] public float FireInterval { get; set; } = 2.5f;
     [ExportGroup("Push at chest center of mass")]
     [Export(PropertyHint.Range, "0,100,1")] public float ForceNewtons { get; set; } = 20;
     [Export(PropertyHint.Range, "0,240,1")] public int PushStartStep { get; set; } = 60;
@@ -27,6 +28,7 @@ public partial class MimicPerturb : MimicTrial
     private double _nextFireTime;
     private int _loggedShots;
     private int _loggedHits;
+    private int _firstProjectileBody = -1;
     private readonly Random _rng = new();
     // UI directions are authored in Godot's Y-up frame. Convert them to MuJoCo's
     // world frame at the force/ball boundary so labels and batch protocols agree.
@@ -57,6 +59,26 @@ public partial class MimicPerturb : MimicTrial
             }
         }
         GetNode<Button>("Hud/Margin/Controls/Launch").Pressed += FireBall;
+        var autoFire = GetNodeOrNull<CheckButton>("Hud/Margin/Controls/AutoLaunch/Enabled");
+        if (autoFire != null)
+        {
+            autoFire.ButtonPressed = AutoFire;
+            autoFire.Toggled += enabled =>
+            {
+                AutoFire = enabled;
+                if (HasSimulation) ResetAutoFireTimer();
+            };
+        }
+        var interval = GetNodeOrNull<SpinBox>("Hud/Margin/Controls/AutoLaunch/Interval");
+        if (interval != null)
+        {
+            interval.Value = FireInterval;
+            interval.ValueChanged += seconds =>
+            {
+                FireInterval = (float)seconds;
+                if (HasSimulation) ResetAutoFireTimer();
+            };
+        }
         base._Ready();
     }
 
@@ -72,8 +94,14 @@ public partial class MimicPerturb : MimicTrial
 
     private void FireBall()
     {
-        if (CanAdvance && _ballTrial != null) _ballTrial.Launch();
+        if (CanAdvance && _ballTrial != null && _ballTrial.Launch()) ResetAutoFireTimer();
     }
+
+    private void ResetAutoFireTimer() => _nextFireTime = Driver.Time + FireInterval;
+
+    private protected override bool IsBodyVisible(int body) =>
+        _firstProjectileBody < 0 || body < _firstProjectileBody
+        || (_ballTrial?.HasLaunchedBody(body) ?? false);
 
     private protected override void ResetTrial()
     {
@@ -94,6 +122,7 @@ public partial class MimicPerturb : MimicTrial
         }
 
         _trial = null; _ballTrial = null;
+        _firstProjectileBody = Bridge.BodyId("ball");
         _loggedShots = 0; _loggedHits = 0;
         if (Mode == 0)
         {
@@ -101,8 +130,10 @@ public partial class MimicPerturb : MimicTrial
                 && (PushStartStep * Driver.ControlTime + .65f / BallSpeed + .5f) >= ConfiguredDuration))
                 throw new InvalidOperationException("Ball launch must leave time for flight and recovery.");
             Driver.Reset(ConfiguredPhase);
-            _ballTrial = new MjMimicBallTrial(Bridge, Driver, _activeDirection, BallSpeed, PushStartStep, BallTarget, _rng.Next());
-            _nextFireTime = PushStartStep * Driver.ControlTime + FireInterval;
+            _ballTrial = new MjMimicBallTrial(Bridge, Driver, _activeDirection, BallSpeed,
+                UnlimitedDuration ? int.MaxValue : PushStartStep, BallTarget,
+                _rng.Next(), independentProjectiles: IndependentBalls);
+            _nextFireTime = UnlimitedDuration ? FireInterval : PushStartStep * Driver.ControlTime + FireInterval;
             return;
         }
         if (Mode != 1) throw new InvalidOperationException("Unknown perturb mode.");
@@ -117,13 +148,12 @@ public partial class MimicPerturb : MimicTrial
         if (_ballTrial != null)
         {
             _ballTrial.Step();
-            if (AutoFire && !Driver.Fallen && Driver.Time >= _nextFireTime)
+            if (AutoFire && !Driver.Fallen && !_ballTrial.CapacityReached && Driver.Time >= _nextFireTime)
             {
-                _nextFireTime += FireInterval;
                 float angle = (float)(_rng.NextDouble() * 2.0 * Math.PI);
                 Vector3 randomDir = new((float)Math.Cos(angle), 0, (float)Math.Sin(angle));
                 _directionName = $"AutoFire ({(int)(angle * 180 / Math.PI)}°)";
-                _ballTrial.Launch(randomDir);
+                if (_ballTrial.Launch(randomDir)) ResetAutoFireTimer();
             }
             if (_ballTrial.ShotCount != _loggedShots || _ballTrial.ConfirmedHits != _loggedHits)
             {
@@ -150,6 +180,11 @@ public partial class MimicPerturb : MimicTrial
                 return $"\nBall · {_directionName} · {BallSpeed:F1} m/s horizontal · target {targetDesc}"
                     + $"\n{(_ballTrial.Launched ? Driver.BallHit ? "Impact confirmed" : "Launched — in flight" : "Waiting to launch · B: launch now")}"
                     + $" · shots {_ballTrial.ShotCount} · hits {_ballTrial.ConfirmedHits}"
+                    + (IndependentBalls ? $" · balls {_ballTrial.ShotCount}/{_ballTrial.Capacity}"
+                        + (_ballTrial.CapacityReached ? " · R: clear balls" : string.Empty) : string.Empty)
+                    + (AutoFire && !_ballTrial.CapacityReached
+                        ? $"\nAuto launch every {FireInterval:F1}s · next in {Math.Max(0, _nextFireTime - Driver.Time):F1}s"
+                        : "\nAuto launch off" )
                     + (TriggerStepOnImpact ? $" · Recovery: {(Driver.RecoveryStarted ? $"{Driver.RecoveryTime:F2}s" : "waiting for hit")}" : string.Empty)
                     + $"\nApprox. capture-point margin: {marginText} (diagnostic only)"
                     + $"\n{Bridge.BodyMass(Bridge.BodyId("ball")):F2} kg · radius 9 cm · ballistic flight, gravity enabled";

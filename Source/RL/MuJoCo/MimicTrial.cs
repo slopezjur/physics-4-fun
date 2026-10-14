@@ -29,6 +29,7 @@ public abstract partial class MimicTrial : Node3D
     private protected MjMimicStandDriver Driver => _driver!;
     protected float ConfiguredPhase => _startPhase;
     protected float ConfiguredDuration => _trialSeconds;
+    protected bool HasSimulation => _driver != null;
     protected bool CanAdvance => _driver != null && !_paused && !_finished;
     protected virtual string TrialName => "MimicStand";
     protected virtual string ViewerTask => "stand";
@@ -36,6 +37,7 @@ public abstract partial class MimicTrial : Node3D
     protected virtual bool UnlimitedDuration => false;
     private protected virtual void ResetTrial() => Driver.Reset(ConfiguredPhase);
     private protected virtual void StepTrial() => Driver.Step();
+    private protected virtual bool IsBodyVisible(int body) => true;
     protected virtual string TrialDetails => string.Empty;
     protected static string? LaunchOption(string name)
     {
@@ -159,7 +161,11 @@ public abstract partial class MimicTrial : Node3D
 
     private void UpdateProxies()
     {
-        foreach (var (body, node) in _proxies) node.Transform = _bridge!.BodyTransform(body);
+        foreach (var (body, node) in _proxies)
+        {
+            node.Visible = IsBodyVisible(body);
+            node.Transform = _bridge!.BodyTransform(body);
+        }
     }
 
     private void UpdateStatus()

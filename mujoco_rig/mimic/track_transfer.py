@@ -29,6 +29,7 @@ class CalibrationReference(StandReference):
         report_path = directory / "report.json"
         metadata = json.loads(report_path.read_text())
         self.placed_step = metadata.get("schema") == "mimic_placed_step_diagnostic_v1"
+        self.stepping_foot = metadata.get("stepping_foot", "L")
         self.requested_step_m = metadata.get("requested_step_m") if self.placed_step else None
         self.path = directory / "diagnostic_poses.npz"
         source = Path(__file__).parent / "assets/stand_reference.npz"
@@ -38,7 +39,8 @@ class CalibrationReference(StandReference):
                 or metadata.get("source_reference_sha256") != sha256(source)
                 or metadata.get("diagnostic_sha256") != sha256(self.path)
                 or metadata.get("source", {}).get("license") != "CC-BY-4.0"
-                or self.placed_step and (metadata.get("placement_passed") is not True
+                or self.placed_step and (self.stepping_foot not in ("L", "R")
+                    or metadata.get("placement_passed") is not True
                     or metadata.get("direction") not in ("forward", "backward")
                     or not isinstance(self.requested_step_m, (float, int))
                     or not np.isfinite(self.requested_step_m)
@@ -65,14 +67,15 @@ class CalibrationReference(StandReference):
         if self.placed_step:
             from .placed_step import single_step_checks
             data = mujoco.MjData(rig.model)
-            foot = rig.model.body("Foot_L").id
+            foot_index = 0 if self.stepping_foot == "L" else 1
+            foot = rig.model.body("Foot_" + self.stepping_foot).id
             data.qpos[:] = q[0]
             mujoco.mj_kinematics(rig.model, data)
             start_x = float(data.xpos[foot, 0])
             data.qpos[:] = q[-1]
             mujoco.mj_kinematics(rig.model, data)
             measured = float(data.xpos[foot, 0] - start_x)
-            gates = single_step_checks(self.checks, self.metrics, measured, self.requested_step_m)
+            gates = single_step_checks(self.checks, self.metrics, measured, self.requested_step_m, foot_index)
             physical = all(gates.values()) and abs(measured - metadata["measured_step_m"]) < 1e-6
         else:
             physical = all(self.checks.values())

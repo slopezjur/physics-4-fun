@@ -1,0 +1,104 @@
+{
+  "schema": "frozen_ball_study_v1",
+  "question": "Matched onset-learning endpoint: quiet",
+  "seeds": [
+    301027,
+    301028
+  ],
+  "actors": [
+    "quiet"
+  ],
+  "signs": [
+    1,
+    -1
+  ],
+  "conditions": [
+    {
+      "name": "onset1",
+      "mass_kg": 5,
+      "speed_m_s": 1.4,
+      "distance_m": 0.25,
+      "launch_seconds": 1,
+      "seconds": 8
+    },
+    {
+      "name": "onset3",
+      "mass_kg": 5,
+      "speed_m_s": 1.4,
+      "distance_m": 0.25,
+      "launch_seconds": 3,
+      "seconds": 10
+    },
+    {
+      "name": "onset5",
+      "mass_kg": 5,
+      "speed_m_s": 1.4,
+      "distance_m": 0.25,
+      "launch_seconds": 5,
+      "seconds": 12
+    },
+    {
+      "name": "onset9",
+      "mass_kg": 5,
+      "speed_m_s": 1.4,
+      "distance_m": 0.25,
+      "launch_seconds": 9,
+      "seconds": 16
+    }
+  ],
+  "maximum_cases": 256,
+  "training_updates": 0,
+  "checkpoint_group": "quiet",
+  "decision": "Step23 endpoint comparison: assess all prospectively selected100-update quiet/fixed/varied checkpoints at1/3/5/9seconds,7secondsafterlaunch.8poses,bothsigns/backends. Same original physics/gates/insertion/parity. Report all conditions, rejected included; zero evaluation learning. Compare source selected pair after direct evidence identity validation. No checkpoint selection or Arena replacement in this screen.",
+  "evidence": [
+    "logs/mimickit-training/stand-ball-stage09-quiet-replay-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage09-quiet-replay-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage08-feedback-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage08-feedback-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage12-task-reward-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage12-task-reward-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage15-learning-curve-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage15-learning-curve-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage14-completion-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage16-seed-replication-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage16-seed-replication-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage20-decision-20261007-01/decision.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-source-20261007-01/protocol.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-source-20261007-01/301027-source-two-+1-native/report.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-source-20261007-01/301027-source-two-+1-gpu/report.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-source-20261007-01/301027-source-two-+1-native/body-report.json",
+    "logs/mimickit-training/stand-ball-batch-final-review-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-batch-final-review-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage18-sustained-candidate-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage18-sustained-candidate-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-candidate-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-candidate-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage20-delayed-candidate-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage20-delayed-candidate-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage13-onset-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage13-onset-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-followup21-review-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-followup21-review-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage23-onset-learning-20261007-02/report.json",
+    "logs/mimickit-training/stand-ball-stage23-onset-learning-20261007-02/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage22-onset-candidate-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage22-onset-candidate-20261007-01/final-verification.json"
+  ],
+  "feedback": "live",
+  "checkpoints": {
+    "301027": {
+      "root": "logs/mimickit-training/stand-ball-stage23-onset-learning-20261007-02",
+      "checkpoint": "logs/mimickit-training/stand-ball-stage23-onset-learning-20261007-02/301027/quiet/final/model.pt"
+    },
+    "301028": {
+      "root": "logs/mimickit-training/stand-ball-stage23-onset-learning-20261007-02",
+      "checkpoint": "logs/mimickit-training/stand-ball-stage23-onset-learning-20261007-02/301028/quiet/final/model.pt"
+    }
+  },
+  "direction_degrees": 0,
+  "scope": "Four independent frozen evaluation processes may overlap; separate worlds, RNG and output roots. No learning or wall-clock training comparison."
+}

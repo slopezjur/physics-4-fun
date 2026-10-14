@@ -1,0 +1,30 @@
+{
+  "roots": {
+    "baseline30": "logs/mimickit-training/stand-ball-stage39-baseline-direction-30-20261007-01",
+    "candidate30": "logs/mimickit-training/stand-ball-stage39-candidate-direction-30-20261007-01",
+    "baseline-30": "logs/mimickit-training/stand-ball-stage39-baseline-direction--30-20261007-01",
+    "candidate-30": "logs/mimickit-training/stand-ball-stage39-candidate-direction--30-20261007-01",
+    "baseline90": "logs/mimickit-training/stand-ball-stage39-baseline-direction-90-20261007-01",
+    "candidate90": "logs/mimickit-training/stand-ball-stage39-candidate-direction-90-20261007-01",
+    "candidate0": "logs/mimickit-training/stand-ball-stage39-candidate-direction-0-20261007-01",
+    "baseline0": "logs/mimickit-training/stand-ball-stage35-flight-geometry-20261007-01"
+  },
+  "comparisons": [
+    [
+      "baseline30",
+      "candidate30"
+    ],
+    [
+      "baseline-30",
+      "candidate-30"
+    ],
+    [
+      "baseline90",
+      "candidate90"
+    ],
+    [
+      "baseline0",
+      "candidate0"
+    ]
+  ]
+}

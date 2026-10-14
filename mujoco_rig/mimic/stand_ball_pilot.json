@@ -1,0 +1,22 @@
+{
+  "schema": "stand_ball_matched_pilot_v1",
+  "prior": "logs/mimickit-training/stand-ball-gpu-admission-20261006-01",
+  "seeds": [301027, 301028],
+  "arms": ["quiet", "single_ball"],
+  "envs": 64,
+  "rollout_steps": 64,
+  "updates_per_arm": 300,
+  "maximum_training_seconds_per_arm": 600.0,
+  "training_mass_kg": 5.0,
+  "training_speed_m_s": 1.0,
+  "quiet_fraction": 0.5,
+  "seconds": 12.0,
+  "launch_seconds": 5.0,
+  "launch_distance_m": 0.65,
+  "quiet_retention_seconds": 120.0,
+  "assessment_levels": [[2, 2.0], [5, 1.0]],
+  "checkpoint_interval": 100,
+  "maximum_updates": 1200,
+  "maximum_transitions": 4915200,
+  "maximum_evaluation_cases": 480
+}

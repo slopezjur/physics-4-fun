@@ -1,0 +1,7 @@
+{
+  "roots": {
+    "sustained": "logs/mimickit-training/stand-ball-stage40-strong-sustained-20261007-01",
+    "short": "logs/mimickit-training/stand-ball-stage29-baseline-strength-20261007-01"
+  },
+  "comparisons": []
+}

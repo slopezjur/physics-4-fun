@@ -1,0 +1,45 @@
+{
+  "schema": "frozen_ball_study_v1",
+  "question": "Does the target-dose recovery remain successful through 60 seconds after a five-second launch?",
+  "seeds": [
+    301027,
+    301028
+  ],
+  "actors": [
+    "source"
+  ],
+  "signs": [
+    1,
+    -1
+  ],
+  "conditions": [
+    {
+      "name": "target60",
+      "mass_kg": 5,
+      "speed_m_s": 1.4,
+      "distance_m": 0.25,
+      "seconds": 60,
+      "launch_seconds": 5
+    }
+  ],
+  "maximum_cases": 64,
+  "training_updates": 0,
+  "checkpoint_group": "source",
+  "decision": "Compare both original Stand parents with the fixed Stage 15 update-200 impact pair at 5 kg / 1.4 m/s / 0.25 m, both X signs, eight poses, both backends. Assess 60-second survival, existing early two-second recovery criterion, final two-second validity and all body contacts. Compare each matched case with its sealed 12-second result. Require unchanged backend admission and Chest-first/no-Head first clusters. This does not claim every post-contact frame remains valid. Stage 16 replication outcome is disclosed; no automatic promotion.",
+  "evidence": [
+    "logs/mimickit-training/stand-ball-stage09-quiet-replay-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage09-quiet-replay-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage08-feedback-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage08-feedback-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage12-task-reward-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage12-task-reward-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage15-learning-curve-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage15-learning-curve-20261007-01/final-verification.json"
+  ],
+  "feedback": "live",
+  "direction_degrees": 0
+}

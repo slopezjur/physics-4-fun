@@ -1,0 +1,17 @@
+{
+  "roots": {
+    "old_selected": "logs/mimickit-training/stand-ball-stage22-onset-candidate-20261007-01",
+    "baseline": "logs/mimickit-training/stand-ball-stage28-baseline-timing-20261007-01",
+    "candidate": "logs/mimickit-training/stand-ball-stage28-candidate-timing-20261007-01"
+  },
+  "comparisons": [
+    [
+      "old_selected",
+      "candidate"
+    ],
+    [
+      "baseline",
+      "candidate"
+    ]
+  ]
+}

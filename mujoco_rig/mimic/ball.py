@@ -10,8 +10,8 @@ from .rig import Rig
 
 def set_curriculum_ball_mass(engine, mass):
     """Scale only the projectile mass and inertia in an isolated native world."""
-    if not np.isfinite(mass) or not .1 <= mass <= 8.:
-        raise ValueError("Curriculum ball mass must be within 0.1–8 kg")
+    if not np.isfinite(mass) or not .1 <= mass <= 10.:
+        raise ValueError("Curriculum ball mass must be within 0.1–10 kg")
     model = engine.rig.model
     body = model.body("ball").id
     ratio = mass / model.body_mass[body]

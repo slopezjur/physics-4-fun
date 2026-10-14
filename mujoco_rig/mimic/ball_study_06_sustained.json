@@ -1,0 +1,17 @@
+{
+  "schema": "frozen_ball_study_v1",
+  "question": "Do the source actors retain recovery for 55 seconds after the 5 kg / 1.3 m/s chest hit, or does the 12-second screen hide delayed failure?",
+  "seeds": [301027, 301028],
+  "actors": ["source"],
+  "signs": [1, -1],
+  "conditions": [
+    {"name": "sustained130", "mass_kg": 5, "speed_m_s": 1.3, "distance_m": 0.25, "seconds": 60, "launch_seconds": 5}
+  ],
+  "maximum_cases": 64,
+  "training_updates": 0,
+  "decision": "Require 64/64 recovery, every shot Chest-first without Head, and all backend comparisons passing before claiming sustained recovery at this dose. Retain all delayed failures and do not equate a 12-second pass with 60-second recovery.",
+  "evidence": [
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/final-verification.json"
+  ]
+}

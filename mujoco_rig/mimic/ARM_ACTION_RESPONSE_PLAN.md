@@ -1,0 +1,13 @@
+# Matched upper-arm response diagnostic - 2026-10-08
+
+No learning. Freeze the retained queue-masked seed-451028 auxiliary learner and f832bab8 Stand anchor. Use all eight nominal poses, including the two held-out poses as diagnostics only. Preserve physical limits, zero springs, the actual two-command delay, command fade/slew and nominal goal schedule.
+
+Probe UpperArm_L_ry at nominal frame 90 (ramp), 210 (hold) and 360 (return). At each phase compare the unchanged continuation with four branches: +/-0.005 rad added to this single raw network output for one frame or twelve frames. Continue the normal closed-loop learner for 60 frames after intervention begins. Do not increase intervention amplitude adaptively. Exclude worlds already physically failed before intervention and report later failures separately.
+
+Reach branch states through deterministic replay from reset, never by overwriting a live pose. Canonicalize the empty queue cursor at reset. Assert exact branch-state equality including MuJoCo integration state/warm start, cached contact forces, pending/applied commands, torque, reference, task step/offset/action/COM memory, adapter slew memory and gate history. Save the common state. Verify every unchanged prefix and baseline continuation against the archived nominal qpos/issued trace. Enable only the native engine's existing substep recorder.
+
+Record model output, perturbed raw target, source target, goal, authority/displacement fade, pre-slew desired addition, previous addition, issued target, delayed applied target, substep q/v/torque, physical outcome and separate reward components. Verify command composition and torque limits. Compute both narrow and broad rewards from the same states without learning.
+
+Analyze paired differences on common alive intervals. Check command transmission at the first issue, onset of delayed target/joint changes, movement and goal error at fixed offsets, support/failure changes and signed reward differences. Compare ordinary discounted reward differences with gamma-lambda weighted reward differences; the latter are not actual GAE advantages because no critic/bootstrap terms are included. Relate measured timing to the existing 64-frame collection and gamma=0.995/lambda=0.98 settings without claiming a proven learning cause.
+
+Exactly fifteen batches: three unchanged continuations plus twelve intervention continuations, with eight candidate worlds per batch. No new policy, checkpoint fitting, whole-skill admission test, Arena change, export or build. Use the result to select the next smallest diagnostic or correction, not another unbounded parameter sweep.

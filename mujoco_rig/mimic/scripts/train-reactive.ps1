@@ -71,6 +71,9 @@ $options = [ordered]@{
     'risk-leg-std' = 'RiskLegStd'
     'actor-max-kl' = 'ActorMaxKl'
     'action-bound-weight' = 'ActionBoundWeight'
+    'amp-foot-motion-weight' = 'AMPFootMotionWeight'
+    'amp-disc-learning-rate' = 'AMPDiscLearningRate'
+    'amp-calibration-steps' = 'AMPCalibrationSteps'
 }
 foreach ($entry in $options.GetEnumerator()) {
     if ($preset.ContainsKey($entry.Value)) {
@@ -83,6 +86,14 @@ if ($preset.PreferRecoveredSteps) { $arguments += '--prefer-recovered-steps' }
 if ($preset.TargetSet) { $arguments += @('--target-set', "$($preset.TargetSet)") }
 if ($preset.RiskExplorationGate) { $arguments += @('--risk-exploration-gate', "$($preset.RiskExplorationGate)") }
 if ($preset.ImpactReplayTrace) { $arguments += @('--impact-replay-trace', (Require-MimicPath $preset.ImpactReplayTrace)) }
+foreach ($motion in $preset.AMPDemonstrations) {
+    $arguments += @('--amp-demonstration', (Require-MimicPath $motion))
+}
+if ($preset.AMPDemoWeights) {
+    $arguments += '--amp-demo-weights'
+    $arguments += @($preset.AMPDemoWeights | ForEach-Object { Format-MimicNumber $_ })
+}
+if ($preset.AMPMirrorDemos) { $arguments += '--amp-mirror-demos' }
 if ($DryRun) { @{ executable = $python; arguments = $arguments } | ConvertTo-Json -Depth 4; return }
 New-Item -ItemType Directory -Path (Split-Path $destination -Parent) -Force | Out-Null
 Write-Host "[Mimic] Stationary recovery · $Minutes training minutes · $destination"

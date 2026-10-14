@@ -1,0 +1,80 @@
+{
+  "schema": "chest_learning_screen_v1",
+  "question": "Does three times the baseline learning budget improve recovery at the corrected chest-first dose on both seeds?",
+  "seeds": [
+    301027,
+    301028
+  ],
+  "actors": [
+    "source"
+  ],
+  "arms": [
+    "quiet",
+    "single_ball"
+  ],
+  "envs": 64,
+  "rollout_steps": 64,
+  "updates_per_arm": 300,
+  "maximum_training_seconds_per_arm": 600,
+  "checkpoint_interval": 100,
+  "maximum_updates": 1200,
+  "maximum_transitions": 4915200,
+  "maximum_evaluation_cases": 320,
+  "training_mass_kg": 5,
+  "training_speed_m_s": 1.4,
+  "quiet_fraction": 0.5,
+  "seconds": 12,
+  "launch_seconds": 5,
+  "launch_distance_m": 0.25,
+  "quiet_retention_seconds": 120,
+  "assessment_levels": [
+    [
+      5,
+      1
+    ],
+    [
+      5,
+      1.4
+    ]
+  ],
+  "config_overrides": {},
+  "baseline_impacts": [
+    {
+      "root": "logs/mimickit-training/stand-ball-stage03-geometry-completion-20261006-01",
+      "verification": "verification.json",
+      "rows_root": "logs/mimickit-training/stand-ball-stage03-geometry-20261006-01",
+      "condition": "distance025"
+    },
+    {
+      "root": "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01",
+      "condition": "speed140"
+    }
+  ],
+  "decision": "Change only the Stage 7 update budget from 100 to 300 per arm; retain the original reward mixture and root-velocity scale 1. Evaluate all four endpoints on both impact levels/directions/backends (256 cases). An arm qualifies for fresh 120-second Stand only if both seeds show strict target-dose gain over their source, no direction/level regression, all hits Chest-first without Head, and backend admission. Assess each qualifying arm on both seeds/backends (32 additional cases per qualifying arm, maximum 320 total). Report replicated absolute recipe improvement separately from impact-practice improvement over matched quiet controls. Unassessed Stand is null, never a pass. No automatic promotion.",
+  "reuse": "Verified source 120-second Stand from the earlier pilot and frozen impact baselines from Stages 3 and 5; actor identity must match. These are not new evaluation cases.",
+  "evidence": [
+    "logs/mimickit-training/stand-ball-pilot-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-pilot-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage03-geometry-completion-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage03-geometry-completion-20261006-01/verification.json",
+    "logs/mimickit-training/stand-ball-stage03-geometry-20261006-01/progress.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage06-sustained-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage06-sustained-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage10-momentum-source-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage10-momentum-source-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage10-momentum-quiet-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage10-momentum-quiet-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage10-momentum-single_ball-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage10-momentum-single_ball-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage11-velocity-reward-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage11-velocity-reward-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage13-onset-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage13-onset-20261006-01/final-verification.json"
+  ],
+  "root_velocity_reward_scale": 1,
+  "rationale": "Stages 11 and 12 fail replicated improvement from reward changes. Stage 13 shows that earlier launches change difficulty. Return to the Stage 7 reward and five-second launch, changing only the optimization budget from 100 to 300 updates per arm. Prior historical 300-update training used head-first 0.65 m launches and cannot answer whether longer learning helps at the corrected 0.25 m geometry. Use original full parents and fresh matched optimizers; preserve checkpoints at 100, 200 and 300 for a potential follow-up learning-curve assessment."
+}

@@ -1,0 +1,22 @@
+{
+  "schema": "frozen_ball_study_v1",
+  "question": "Is there a reproducible partly recoverable +X chest-impact dose between the fully recovered 1 m/s and failed 1.5 m/s cases?",
+  "seeds": [301027, 301028],
+  "actors": ["source"],
+  "signs": [1, -1],
+  "conditions": [
+    {"name": "speed110", "mass_kg": 5, "speed_m_s": 1.1, "distance_m": 0.25},
+    {"name": "speed120", "mass_kg": 5, "speed_m_s": 1.2, "distance_m": 0.25},
+    {"name": "speed130", "mass_kg": 5, "speed_m_s": 1.3, "distance_m": 0.25},
+    {"name": "speed140", "mass_kg": 5, "speed_m_s": 1.4, "distance_m": 0.25}
+  ],
+  "maximum_cases": 256,
+  "training_updates": 0,
+  "decision": "Select the lowest speed with 1-7 of 8 +X recoveries on each seed/backend, every shot hitting Chest first without Head, and full backend parity. Preserve -X results as controls; no automatic learning if no level qualifies.",
+  "evidence": [
+    "logs/mimickit-training/stand-ball-stage03-geometry-completion-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage03-geometry-completion-20261006-01/verification.json",
+    "logs/mimickit-training/stand-ball-stage04-dose-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage04-dose-20261006-01/final-verification.json"
+  ]
+}

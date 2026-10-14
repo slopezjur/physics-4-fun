@@ -1,0 +1,34 @@
+{
+  "roots": {
+    "baseline": "logs/mimickit-training/stand-ball-stage22-onset-candidate-20261007-01",
+    "quiet": "logs/mimickit-training/stand-ball-stage23-quiet-evaluation-20261007-01",
+    "fixed": "logs/mimickit-training/stand-ball-stage23-fixed-evaluation-20261007-01",
+    "varied": "logs/mimickit-training/stand-ball-stage23-varied-evaluation-20261007-01"
+  },
+  "comparisons": [
+    [
+      "baseline",
+      "quiet"
+    ],
+    [
+      "baseline",
+      "fixed"
+    ],
+    [
+      "baseline",
+      "varied"
+    ],
+    [
+      "quiet",
+      "fixed"
+    ],
+    [
+      "quiet",
+      "varied"
+    ],
+    [
+      "fixed",
+      "varied"
+    ]
+  ]
+}

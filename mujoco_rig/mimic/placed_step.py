@@ -17,9 +17,11 @@ from .rig import Rig
 from .transfer_calibration import stopped_interpolation
 
 
-def single_step_checks(checks, metrics, measured, requested):
+def single_step_checks(checks, metrics, measured, requested, foot=0):
+    if foot not in (0, 1):
+        raise ValueError('Single-step checks require left or right foot')
     return dict(physical=all(value for key, value in checks.items() if key != "foot_lift"),
-                swing_foot_lift=bool(metrics["foot_lift_range_m"][0] >= .03),
+                swing_foot_lift=bool(metrics["foot_lift_range_m"][foot] >= .03),
                 placement=bool(abs(measured - requested) < .02))
 
 

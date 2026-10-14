@@ -1,0 +1,14 @@
+{
+  "roots": {
+    "baseline_repeated": "logs/mimickit-training/stand-ball-stage40-baseline-repeated-20261007-01",
+    "baseline_late": "logs/mimickit-training/stand-ball-stage40-baseline-late-20261007-01",
+    "candidate_repeated": "logs/mimickit-training/stand-ball-stage40-candidate-repeated-20261007-01",
+    "candidate_late": "logs/mimickit-training/stand-ball-stage40-candidate-late-20261007-01"
+  },
+  "geometry_controls": {
+    "baseline_repeated": "logs/mimickit-training/stand-ball-stage29-baseline-strength-20261007-01",
+    "baseline_late": "logs/mimickit-training/stand-ball-stage29-baseline-strength-20261007-01",
+    "candidate_repeated": "logs/mimickit-training/stand-ball-stage33-varied-evaluation-20261007-01",
+    "candidate_late": "logs/mimickit-training/stand-ball-stage33-varied-evaluation-20261007-01"
+  }
+}

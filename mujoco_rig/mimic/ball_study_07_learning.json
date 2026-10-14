@@ -1,0 +1,49 @@
+{
+  "schema": "matched_chest_pilot_v1",
+  "question": "Does 100 PPO updates of correctly aimed, partly recoverable chest-impact practice improve recovery beyond the same amount of quiet practice on both source seeds?",
+  "seeds": [301027, 301028],
+  "actors": ["source"],
+  "arms": ["quiet", "single_ball"],
+  "envs": 64,
+  "rollout_steps": 64,
+  "updates_per_arm": 100,
+  "maximum_training_seconds_per_arm": 240,
+  "checkpoint_interval": 100,
+  "maximum_updates": 400,
+  "maximum_transitions": 1638400,
+  "maximum_evaluation_cases": 320,
+  "training_mass_kg": 5,
+  "training_speed_m_s": 1.4,
+  "quiet_fraction": 0.5,
+  "seconds": 12,
+  "launch_seconds": 5,
+  "launch_distance_m": 0.25,
+  "quiet_retention_seconds": 120,
+  "assessment_levels": [[5, 1], [5, 1.4]],
+  "config_overrides": {},
+  "baseline_impacts": [
+    {
+      "root": "logs/mimickit-training/stand-ball-stage03-geometry-completion-20261006-01",
+      "verification": "verification.json",
+      "rows_root": "logs/mimickit-training/stand-ball-stage03-geometry-20261006-01",
+      "condition": "distance025"
+    },
+    {
+      "root": "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01",
+      "condition": "speed140"
+    }
+  ],
+  "decision": "Both seeds and backends must retain full-interval 120-second Stand, all shots hit Chest first without Head, admitted backend parity, no direction/level regressions, and strictly more target-dose recoveries than both source and matched quiet continuation. A positive 12-second endpoint requires subsequent sustained-impact validation. No automatic Arena promotion.",
+  "reuse": "Verified source 120-second Stand from the earlier pilot and frozen impact baselines from Stages 3 and 5; actor identity must match. These are not new evaluation cases.",
+  "evidence": [
+    "logs/mimickit-training/stand-ball-pilot-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-pilot-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage03-geometry-completion-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage03-geometry-completion-20261006-01/verification.json",
+    "logs/mimickit-training/stand-ball-stage03-geometry-20261006-01/progress.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage06-sustained-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage06-sustained-20261006-01/final-verification.json"
+  ]
+}

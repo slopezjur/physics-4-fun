@@ -1,0 +1,45 @@
+{
+  "roots": {
+    "s33_quiet": "logs/mimickit-training/stand-ball-stage33-quiet-evaluation-20261007-01",
+    "s41_quiet": "logs/mimickit-training/stand-ball-stage41-quiet-evaluation-20261007-01",
+    "s33_fixed": "logs/mimickit-training/stand-ball-stage33-fixed-evaluation-20261007-01",
+    "s41_fixed": "logs/mimickit-training/stand-ball-stage41-fixed-evaluation-20261007-01",
+    "s33_varied": "logs/mimickit-training/stand-ball-stage33-varied-evaluation-20261007-01",
+    "s41_varied": "logs/mimickit-training/stand-ball-stage41-varied-evaluation-20261007-01",
+    "parent_strength": "logs/mimickit-training/stand-ball-stage29-baseline-strength-20261007-01"
+  },
+  "comparisons": [
+    [
+      "s33_quiet",
+      "s41_quiet"
+    ],
+    [
+      "s33_fixed",
+      "s41_fixed"
+    ],
+    [
+      "s33_varied",
+      "s41_varied"
+    ],
+    [
+      "parent_strength",
+      "s41_quiet"
+    ],
+    [
+      "parent_strength",
+      "s41_fixed"
+    ],
+    [
+      "parent_strength",
+      "s41_varied"
+    ],
+    [
+      "s41_quiet",
+      "s41_fixed"
+    ],
+    [
+      "s41_quiet",
+      "s41_varied"
+    ]
+  ]
+}

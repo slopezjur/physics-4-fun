@@ -38,13 +38,16 @@ class DelayedTargetControl:
     def set_reference(self, q, v):
         self.reference_q, self.reference_v = q, v
 
+    def target_positions(self, action):
+        return (self.reference_q[:, self.q_indices] +
+                action.clamp(-1, 1) * self.residual_radians).clamp(self.lower, self.upper)
+
     def apply(self, action):
         if action.shape != (len(self.ctrl), 30) or not torch.isfinite(action).all():
             raise ValueError("Expected finite [worlds, 30] residual actions")
         self.active.copy_(self.pending[self.cursor])
         slot = self.pending[self.cursor]
-        slot[:, :30] = (self.reference_q[:, self.q_indices] +
-                       action.clamp(-1, 1) * self.residual_radians).clamp(self.lower, self.upper)
+        slot[:, :30] = self.target_positions(action)
         slot[:, 30:60] = self.reference_v[:, self.v_indices]
         slot[:, 60] = 1
         self.cursor = (self.cursor + 1) % len(self.pending)

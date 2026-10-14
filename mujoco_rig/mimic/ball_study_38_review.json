@@ -1,0 +1,7 @@
+{
+  "geometry_control": "logs/mimickit-training/stand-ball-stage29-baseline-strength-20261007-01",
+  "roots": {
+    "repeated": "logs/mimickit-training/stand-ball-stage38-repeated-20261007-01",
+    "late_controls": "logs/mimickit-training/stand-ball-stage38-late-controls-20261007-01"
+  }
+}

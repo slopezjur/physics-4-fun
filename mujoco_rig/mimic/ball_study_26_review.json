@@ -1,0 +1,30 @@
+{
+  "roots": {
+    "baseline": "logs/mimickit-training/stand-ball-stage22-onset-candidate-20261007-01",
+    "continued_quiet": "logs/mimickit-training/stand-ball-stage25-quiet-evaluation-20261007-01",
+    "normalizer_only": "logs/mimickit-training/stand-ball-stage26-normalizer_only-evaluation-20261007-01",
+    "weights_only": "logs/mimickit-training/stand-ball-stage26-weights_only-evaluation-20261007-01"
+  },
+  "comparisons": [
+    [
+      "baseline",
+      "normalizer_only"
+    ],
+    [
+      "baseline",
+      "weights_only"
+    ],
+    [
+      "continued_quiet",
+      "normalizer_only"
+    ],
+    [
+      "continued_quiet",
+      "weights_only"
+    ],
+    [
+      "normalizer_only",
+      "weights_only"
+    ]
+  ]
+}

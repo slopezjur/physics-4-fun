@@ -1,0 +1,53 @@
+{
+  "schema": "frozen_ball_study_v1",
+  "question": "Does equal horizontal launch momentum imply equal delivered chest impulse and recovery when projectile mass and speed change?",
+  "seeds": [
+    301027,
+    301028
+  ],
+  "actors": [
+    "stage07-quiet"
+  ],
+  "signs": [
+    1,
+    -1
+  ],
+  "conditions": [
+    {
+      "name": "light_fast",
+      "mass_kg": 2.5,
+      "speed_m_s": 2.8,
+      "distance_m": 0.25
+    },
+    {
+      "name": "heavy_slow",
+      "mass_kg": 10,
+      "speed_m_s": 0.7,
+      "distance_m": 0.25
+    }
+  ],
+  "maximum_cases": 128,
+  "training_updates": 0,
+  "checkpoint_group": "quiet",
+  "decision": "Compare with this same actor's sealed 5 kg / 1.4 m/s baseline. All launches have horizontal momentum 7 kg m/s but different energy and vertical aiming components. Require all hits and backend admission; report contact bodies, impulses and per-pose recovery. Do not call equal momentum an identical perturbation. No promotion.",
+  "evidence": [
+    "logs/mimickit-training/stand-ball-stage09-quiet-replay-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage09-quiet-replay-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage08-feedback-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage08-feedback-20261006-01/final-verification.json"
+  ],
+  "checkpoints": {
+    "301027": {
+      "root": "logs/mimickit-training/stand-ball-stage07-learning-20261006-01",
+      "checkpoint": "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/301027/quiet/final/model.pt"
+    },
+    "301028": {
+      "root": "logs/mimickit-training/stand-ball-stage07-learning-20261006-01",
+      "checkpoint": "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/301028/quiet/final/model.pt"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="PackedScene" path="res://Scenes/RL/Isaac3/MuJoCo/MimicStandArena.tscn" id="1_base"]
+
+[node name="MimicStandTorqueArena" instance=ExtResource("1_base")]
+ModelPath = "res://logs/mimickit-training/stand-fresh-winner-60min-20261001-01/arena-preview/dummy.xml"
+BundleDirectory = "res://logs/mimickit-training/stand-fresh-winner-60min-20261001-01/arena-preview"
+UseLatestExport = false
+RunIndefinitely = true
+StartPhaseSeconds = 0.0
+
+[node name="Title" parent="Hud/Margin/Controls" index="0"]
+text = "Mimic Stand — spring-free learned torques"
+
+[node name="Help" parent="Hud/Margin/Controls" index="3"]
+text = "R: restart · P: pause\nDirect learned torques · no joint springs or standing-pose servo\nFinal 60-minute policy 6cbe95a5 · standing 0/8"

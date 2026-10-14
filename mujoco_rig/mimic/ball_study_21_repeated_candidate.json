@@ -1,0 +1,86 @@
+{
+  "schema": "frozen_ball_study_v1",
+  "question": "At the admitted target dose, does the selected pair retain repeated recovery, and do earlier hits change outcomes beyond delayed launch timing?",
+  "seeds": [
+    301027,
+    301028
+  ],
+  "actors": [
+    "candidate"
+  ],
+  "signs": [
+    1,
+    -1
+  ],
+  "conditions": [
+    {
+      "name": "two",
+      "mass_kg": 5,
+      "speed_m_s": 1.4,
+      "distance_m": 0.25,
+      "seconds": 32,
+      "launch_seconds": 5,
+      "launch_times_seconds": [
+        5,
+        15
+      ],
+      "alternating": false
+    },
+    {
+      "name": "three",
+      "mass_kg": 5,
+      "speed_m_s": 1.4,
+      "distance_m": 0.25,
+      "seconds": 32,
+      "launch_seconds": 5,
+      "launch_times_seconds": [
+        5,
+        15,
+        25
+      ],
+      "alternating": false
+    }
+  ],
+  "maximum_cases": 128,
+  "training_updates": 0,
+  "checkpoint_group": "candidate",
+  "decision": "Follow-up 21: fixed original Stand parents and fixed Stage 15 update-200 impact pair, two parents/eight starts/both X signs/both backends. 5 kg / 1.4 m/s / 0.25 m, common 32-second horizon. Repeated arms launch at 5/15 or 5/15/25 seconds; matched delayed-only controls launch at 15 or 25. Total 512 cases across four roots, no training. Keep all existing per-encounter recovery, prequalification, survival, controller-preservation, insertion-clearance and backend admission criteria. Report first body per actual encounter, failure to reach a later hit, final-encounter recovery and whole-trial recovery separately. Compare only admitted matching actor/pose/sign/backend cases, with identical initial states and exact native prefixes before the first added hit (1e-10); GPU prefix variation is descriptive. Protect and verify all direct used source reports/checkpoints against their existing seals. If native insertion or backend comparison fails, reject that condition without tolerance changes. No automatic training, checkpoint promotion or Arena replacement.",
+  "evidence": [
+    "logs/mimickit-training/stand-ball-stage09-quiet-replay-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage09-quiet-replay-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage08-feedback-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage08-feedback-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage12-task-reward-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage12-task-reward-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage15-learning-curve-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage15-learning-curve-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage14-completion-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage16-seed-replication-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage16-seed-replication-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-batch-final-review-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-batch-final-review-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage18-sustained-candidate-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage18-sustained-candidate-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-candidate-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-candidate-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage20-delayed-candidate-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage20-delayed-candidate-20261007-01/final-verification.json"
+  ],
+  "feedback": "live",
+  "checkpoints": {
+    "301027": {
+      "root": "logs/mimickit-training/stand-ball-stage14-completion-20261007-01",
+      "checkpoint": "logs/mimickit-training/stand-ball-stage14-completion-20261007-01/301027/single_ball/updates-200/model.pt"
+    },
+    "301028": {
+      "root": "logs/mimickit-training/stand-ball-stage14-completion-20261007-01",
+      "checkpoint": "logs/mimickit-training/stand-ball-stage14-completion-20261007-01/301028/single_ball/updates-200/model.pt"
+    }
+  },
+  "direction_degrees": 0,
+  "scope": "Four independent frozen evaluation processes may overlap; separate worlds, RNG and output roots. No learning or wall-clock training comparison."
+}

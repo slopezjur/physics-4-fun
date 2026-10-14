@@ -68,7 +68,20 @@ def run(args):
             actual_bodies[i].update(task.engine.hit_bodies[i])
             normal_impulse[i] = max(normal_impulse[i], float(task.engine.hit_normal_impulse[i]))
 
-    metrics, _ = evaluate(task, StandPolicy(agent).eval(), cases, record_contacts)
+    actor = StandPolicy(agent).eval()
+    quality = None
+    if getattr(args, "motion_quality", False):
+        from .recovery_quality import RecoveryQuality
+        quality = RecoveryQuality(task, actor)
+
+    def record_step(task, step, active, done):
+        record_contacts(task, step, active, done)
+        if quality is not None:
+            quality.record(task, step, active, done)
+
+    metrics, _ = evaluate(task, quality or actor, cases, record_step)
+    if quality is not None:
+        metrics["motion_quality"] = quality.report()
     for i, case in enumerate(metrics["cases"]):
         case["contacted_bodies"] = [rig.model.body(body).name for body in sorted(actual_bodies[i])]
         case["intended_target_contacted"] = case["target_body"] in case["contacted_bodies"]
@@ -110,4 +123,6 @@ if __name__ == "__main__":
     parser.add_argument("--speed-max", type=float, default=2.)
     parser.add_argument("--target-bodies", nargs="+", choices=ALL_TARGET_BODIES, default=TARGET_BODIES,
                         help="Body targets for this unseen suite; default preserves the original torso cases")
+    parser.add_argument("--motion-quality", action="store_true",
+                        help="Measure native contact slip, motor variation and foot-load switching after hits")
     run(parser.parse_args())

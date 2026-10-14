@@ -5,23 +5,24 @@
 
 [node name="MimicPerturbArena" instance=ExtResource("1_base")]
 script = ExtResource("2_perturb")
-ModelPath = "res://logs/mimickit-training/recovery-loop-candidate-all-target-30min-01/arena-preview/dummy_ball.xml"
-BundleDirectory = "res://logs/mimickit-training/recovery-loop-candidate-all-target-30min-01/arena-preview"
+ModelPath = "res://logs/mimickit-training/perturb-arena-learned-20261008-01/dummy_ball_arena.xml"
+BundleDirectory = "res://logs/mimickit-training/perturb-arena-learned-20261008-01"
 UseLatestExport = false
-BallSpeed = 2.0
+BallSpeed = 4.0
+IndependentBalls = true
 BallTarget = "Random"
 RunIndefinitely = true
-AutoFire = true
+AutoFire = false
 FireInterval = 30.0
 TriggerStepOnImpact = false
 PushStartStep = 66
 Direction = 4
 
 [node name="Title" parent="Hud/Margin/Controls" index="0"]
-text = "Mimic Perturb — latest 30 min candidate preview"
+text = "Mimic Perturb — updated learned recovery preview"
 
 [node name="Help" parent="Hud/Margin/Controls" index="3"]
-text = "R: restart after a fall · B: launch ball now · P: pause\n8 kg every 30 s · candidate 56875c5f · experimental, unadmitted preview\nRandom angles and body targets · Right-drag: look · WASD / Q / E: move"
+text = "R: restart and clear balls · B: launch · P: pause\nArena: 10 kg at 4 m/s · automatic throws off\nRepeated-hit continuation · learned brain f832bab8\nControlled 5 kg / 1.6 m/s: single 8/8 · two hits 7/8\n120 s Stand passed · heavy random hits remain experimental"
 
 [node name="Directions" type="HBoxContainer" parent="Hud/Margin/Controls" index="4"]
 layout_mode = 2
@@ -56,3 +57,26 @@ text = "Random"
 layout_mode = 2
 focus_mode = 0
 text = "Launch ball (B)"
+
+[node name="AutoLaunch" type="HBoxContainer" parent="Hud/Margin/Controls" index="6"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Enabled" type="CheckButton" parent="Hud/Margin/Controls/AutoLaunch"]
+layout_mode = 2
+focus_mode = 0
+button_pressed = false
+text = "Auto launch"
+
+[node name="Every" type="Label" parent="Hud/Margin/Controls/AutoLaunch"]
+layout_mode = 2
+text = "Every"
+
+[node name="Interval" type="SpinBox" parent="Hud/Margin/Controls/AutoLaunch"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+min_value = 1.0
+max_value = 3600.0
+step = 0.5
+value = 30.0
+suffix = "s"

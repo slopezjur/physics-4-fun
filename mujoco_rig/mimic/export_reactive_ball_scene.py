@@ -76,11 +76,28 @@ def run(args):
     reference_hash = sha256(args.reference)
     character_hash = sha256(rig.path)
     ball_hash = sha256(args.ball_model)
+    report_path = args.checkpoint.parent / "report.json"
+    assessment_path = args.checkpoint.parent / "learning_curve.json"
+    pending_validation = False
     if args.experimental:
         if args.checkpoint.name != "model.pt":
             raise ValueError("Experimental preview requires the run's final model.pt")
-        training = json.loads((args.checkpoint.parent / "report.json").read_text())
         protocol = json.loads((args.checkpoint.parent / "protocol.json").read_text())
+        if report_path.exists():
+            training = json.loads(report_path.read_text())
+        elif args.allow_pending_validation:
+            assessment = json.loads(assessment_path.read_text())[-1]
+            update = json.loads((args.checkpoint.parent / "updates.jsonl").read_text().splitlines()[-1])
+            if (assessment["iteration"] != update["iteration"]
+                    or update["training_iteration_wall_seconds"] < protocol["seconds"]
+                    or assessment["metrics"]["quiet_standing_passed"] is not True
+                    or assessment["metrics"]["confirmed_hits"] != 32
+                    or args.checkpoint.stat().st_mtime > assessment_path.stat().st_mtime):
+                raise ValueError("Pending preview requires completed training and final native assessment")
+            training = dict(final=assessment["metrics"])
+            pending_validation = True
+        else:
+            raise ValueError("Experimental preview needs a completed report or explicit pending-validation option")
         experiment = protocol["experiment"]
         if (experiment["ball_model_sha256"] != ball_hash
                 or experiment["reference_sha256"] != reference_hash
@@ -151,7 +168,9 @@ def run(args):
                     unseen_recovered=None if unseen is None else unseen["recovered_hits"],
                     onnx_max_action_error=error, scene_posture=args.posture,
                     contract_sha256=sha256(args.out / "contract.json"),
-                    training_report_sha256=sha256(args.checkpoint.parent / "report.json"))
+                    pending_native_validation=pending_validation,
+                    training_assessment_sha256=sha256(assessment_path) if pending_validation else None,
+                    training_report_sha256=None if pending_validation else sha256(report_path))
     (args.out / "validation.json").write_text(json.dumps(evidence, indent=2))
     if checkpoint_hash != sha256(args.checkpoint):
         raise RuntimeError("Checkpoint changed during export")
@@ -168,6 +187,8 @@ if __name__ == "__main__":
     parser.add_argument("--unseen-report", type=Path)
     parser.add_argument("--experimental", action="store_true",
                         help="Export final model.pt for manual Arena inspection without claiming admission")
+    parser.add_argument("--allow-pending-validation", action="store_true",
+                        help="Experimental preview after completed training/final native assessment while long checks finish")
     parser.add_argument("--posture", type=int, choices=range(8), default=0)
     parser.add_argument("--scene-speed", type=float, default=1.)
     parser.add_argument("--out", type=Path, required=True)

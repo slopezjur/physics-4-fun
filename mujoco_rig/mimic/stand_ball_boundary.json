@@ -1,0 +1,29 @@
+{
+  "schema": "stand_ball_boundary_v1",
+  "prior": "logs/mimickit-training/perturb-continuation-20261006-01/completion/comparison",
+  "ball_template": "logs/mimickit-training/perturb-arena-301028-20261006-01/dummy_ball.xml",
+  "seeds": [301027, 301028],
+  "sources": {
+    "301027": "logs/mimickit-training/perturb-continuation-20261006-01/301027-perturb",
+    "301028": "logs/mimickit-training/perturb-continuation-20261006-01/completion/301028-perturb"
+  },
+  "seconds": 12.0,
+  "launch_seconds": 5.0,
+  "launch_distance_m": 0.65,
+  "mass_kg": [1.0, 2.0, 5.0, 10.0],
+  "speed_m_s": [1.0, 2.0, 4.0],
+  "future_training_design": {
+    "status": "blocked_on_native_boundary_and_gpu_adapter_admission",
+    "envs": 64,
+    "rollout_steps": 64,
+    "updates_per_arm": 300,
+    "maximum_training_seconds_per_arm": 600,
+    "quiet_fraction": 0.5,
+    "arms": ["quiet", "single_ball"],
+    "quiet_retention_seconds": 120,
+    "reward": "reference_v9",
+    "initial_state_foot_load_atol": 0.000001,
+    "repeated_hits": "Only after replicated single-hit gain and retained Stand; begin with two hits separated by 6 seconds, then assess 4 seconds and 3 seconds separately",
+    "promotion": "Both seeds must improve over their source and matched quiet continuation on both backends, with no loss of quiet Stand or easier-hit recovery"
+  }
+}

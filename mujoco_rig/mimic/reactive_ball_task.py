@@ -15,7 +15,8 @@ from .ball_protocol import TARGET_BODIES as ALL_TARGET_BODIES
 from .continuous_stand_task import ContinuousStandTask
 from .recovery_reward import RecoveryReward
 from .capture_reward import CaptureRecoveryReward, capture_distance, rotate_xyzw
-from .step_reward import StepRecoveryReward, TransferRecoveryReward, swing_quality
+from .step_reward import (StepRecoveryReward, TransferRecoveryReward, PlacementRecoveryReward,
+                          PeakPlacementRecoveryReward, swing_quality)
 from .perturb import RECOVERY
 from .stand_foundation_task import FootAnchoredStandTask
 
@@ -27,8 +28,8 @@ TARGET_SETS = {"torso": TARGET_BODIES, "torso_head": TARGET_BODIES + ("Head",),
 
 def write_ball_variant(source: Path, out: Path, mass_kg: float, *, radius_m=None):
     """Change only projectile mass/optional sphere radius in an isolated plant copy."""
-    if not np.isfinite(mass_kg) or not .1 <= mass_kg <= 8.:
-        raise ValueError("Projectile mass must be within 0.1–8 kg")
+    if not np.isfinite(mass_kg) or not .1 <= mass_kg <= 10.:
+        raise ValueError("Projectile mass must be within 0.1–10 kg")
     if radius_m is not None and (not np.isfinite(radius_m) or not .04 <= radius_m <= .2):
         raise ValueError("Projectile radius must be within 0.04–0.2 m")
     if source.resolve() == out.resolve():
@@ -52,7 +53,7 @@ class ReactiveBallTask(FootAnchoredStandTask):
                  speed_min=1., speed_max=2., quiet_fraction=.25, seed=270927,
                  foot_anchor_sigma_m=.005, episode_seconds=8., second_shot_fraction=0.,
                  recovery_mode="settling_v2", forward_fraction=0., recovery_reset_fraction=0.,
-                 target_set="torso"):
+                 target_set="torso", recovery_motor_radians=None):
         if target_set not in TARGET_SETS:
             raise ValueError("Unknown projectile target curriculum")
         if not (1. <= speed_min <= speed_max <= 8. and 0. <= quiet_fraction < 1.
@@ -67,10 +68,15 @@ class ReactiveBallTask(FootAnchoredStandTask):
         self.forward_fraction = float(forward_fraction)
         self.recovery_reset_fraction = float(recovery_reset_fraction)
         self.recovery_resets = None
-        if recovery_mode not in ("settling_v2", "capture_v3", "step_v4", "step_v5"):
+        if recovery_mode not in ("settling_v2", "capture_v3", "step_v4", "step_v5", "step_v6", "step_v7"):
             raise ValueError("Unknown recovery objective")
         self.recovery_mode = recovery_mode
-        self.recovery_reward = (TransferRecoveryReward() if recovery_mode == "step_v5" else
+        self.recovery_motor_radians = recovery_motor_radians
+        self.placement = self.sole_slip = None
+        self.recovery_signals = None
+        self.recovery_reward = (PeakPlacementRecoveryReward() if recovery_mode == "step_v7" else
+                                PlacementRecoveryReward() if recovery_mode == "step_v6" else
+                                TransferRecoveryReward() if recovery_mode == "step_v5" else
                                 StepRecoveryReward() if recovery_mode == "step_v4" else
                                 CaptureRecoveryReward() if recovery_mode == "capture_v3" else
                                 RecoveryReward(sustained_settling_weight=.25))
@@ -83,6 +89,10 @@ class ReactiveBallTask(FootAnchoredStandTask):
 
         def engine_factory(character, worlds, where, control_factory):
             engine = BallNativeEngine if where == "cpu" else BallNewtonEngine
+            if recovery_motor_radians is not None:
+                from functools import partial
+                from .recovery_motor import RecoveryTargetControl
+                control_factory = partial(RecoveryTargetControl, maximum_radians=recovery_motor_radians)
             return engine(character, worlds, where, control_factory, self.ball_path)
 
         super().__init__(rig, reference, num_envs, device, seed=seed,
@@ -104,7 +114,20 @@ class ReactiveBallTask(FootAnchoredStandTask):
         reference_q, _ = self.sample_reference(self.offset)
         reference_positions, _ = self.mapper.from_native_qpos(reference_q)
         self.sole_reference_height = reference_positions[:, self.allowed_ground][:, [0, 2, 1, 3], 2].reshape(num_envs, 2, 2)
+        if recovery_mode in ("step_v6", "step_v7"):
+            from .support_motion import UsefulPlacement, SoleSlip
+            from .recovery_signals import RecoverySignals
+            self.leg_indices = torch.tensor([[rig.model.jnt_qposadr[rig.model.joint(name).id]
+                for name in [f'Thigh_{side}_{axis}' for axis in ('rx','ry','rz')]+[f'Shin_{side}_rx']]
+                for side in ('L','R')],device=device)
+            self.placement = UsefulPlacement(self.support_points(), self.engine.native_qpos()[:,self.leg_indices], self.dt,
+                                             peak_articulation=recovery_mode == 'step_v7')
+            self.sole_slip = SoleSlip(rig,device,self.dt)
+            self.recovery_signals = RecoverySignals(device)
         self.reset()
+
+    def support_points(self):
+        return self.engine.get_body_pos(0)[:, self.allowed_ground][:, [0, 2, 1, 3]].reshape(-1, 2, 2, 3)
 
     def load_recovery_resets(self, path):
         from .baseline import sha256
@@ -216,10 +239,15 @@ class ReactiveBallTask(FootAnchoredStandTask):
             self._restore_recovery_resets(ids)
         if self.previous_com is not None:
             self.previous_com[ids] = self.center_of_mass()[ids]
+        if self.placement is not None:
+            self.placement.reset(ids,self.support_points(),self.engine.native_qpos()[:,self.leg_indices])
+            self.sole_slip.reset(ids,self.engine.get_body_pos(0),self.engine.get_body_rot(0))
         return self.observations(), {}
 
     def step(self, action):
-        if self.recovery_mode in ("capture_v3", "step_v4", "step_v5"):
+        if self.recovery_motor_radians is not None:
+            self.engine.policy_control.observe(self.observations())
+        if self.recovery_mode in ("capture_v3", "step_v4", "step_v5", "step_v6", "step_v7"):
             self.previous_com = self.center_of_mass()
         for steps, enabled, bodies, directions, speeds in (
                 (self.shot_steps, self.shot_enabled, self.shot_target_body,
@@ -261,19 +289,29 @@ class ReactiveBallTask(FootAnchoredStandTask):
                    & self.engine.hit & self.shot_enabled)
         self.settled_steps = torch.where(settled, self.settled_steps + 1, 0)
         imitation = self.reference_reward(track_root=False)
-        if self.recovery_mode in ("capture_v3", "step_v4", "step_v5"):
+        if self.recovery_mode in ("capture_v3", "step_v4", "step_v5", "step_v6", "step_v7"):
             com = self.center_of_mass()
             com_velocity = (com - self.previous_com) / self.dt if self.previous_com is not None else velocity
             error = capture_distance(com, com_velocity, self.engine.get_body_pos(0)[:, self.feet], feet,
                                      gravity=float(-self.rig.model.opt.gravity[2]))
             reward_args = (imitation, q[:, 2], target[:, 2], up_z, velocity, angular_velocity, error)
-            if self.recovery_mode in ("step_v4", "step_v5"):
+            if self.recovery_mode in ("step_v4", "step_v5", "step_v6", "step_v7"):
                 points = self.engine.get_body_pos(0)[:, self.allowed_ground][:, [0, 2, 1, 3]].reshape(-1, 2, 2, 3)
                 swing = swing_quality(com, com_velocity, points, self.sole_reference_height, feet,
                                       gravity=float(-self.rig.model.opt.gravity[2]),
                                       preparation_weight=.3 if self.recovery_mode == "step_v5" else 0.)
-                recovered = (self.recovery_reward(*reward_args, swing, feet) if self.recovery_mode == "step_v5"
-                             else self.recovery_reward(*reward_args, swing))
+                if self.recovery_mode in ('step_v6','step_v7'):
+                    hit = self.engine.hit & self.shot_enabled
+                    event = self.placement.update(points,q[:,self.leg_indices],feet,com,com_velocity,error,hit)
+                    slip,speed = self.sole_slip.update(self.engine.get_body_pos(0),self.engine.get_body_rot(0),
+                                                     loads[:,[0,2,1,3]])
+                    recovered = self.recovery_reward(*reward_args,swing,feet,placement=event,slip=slip)
+                    self._diagnostics['useful_placement_events'] = (event*hit).mean()
+                    self._diagnostics['loaded_sole_slip_proxy_m_s'] = (speed*hit).mean()
+                    self.recovery_signals.record(hit,self.placement.last_diagnostics,speed)
+                else:
+                    recovered = (self.recovery_reward(*reward_args, swing, feet) if self.recovery_mode == "step_v5"
+                                 else self.recovery_reward(*reward_args, swing))
                 self._diagnostics["swing_quality"] = swing.mean()
             else:
                 recovered = self.recovery_reward(*reward_args)

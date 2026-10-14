@@ -64,3 +64,32 @@ class TransferRecoveryReward(StepRecoveryReward):
                              - (angular_velocity / 2.).square().sum(-1))
         bilateral = (loads.amin(-1) / 30.).clamp(0, 1)
         return value - (1-self.imitation_weight) * posture * .2 * (1-risk) * settling * (1-bilateral)
+
+
+@dataclass(frozen=True)
+class PlacementRecoveryReward(TransferRecoveryReward):
+    def contract(self):
+        from .support_motion import UsefulPlacement
+        result = super().contract()
+        result.update(schema='ball_step_recovery_v6', preparation_weight=0.,
+            preparation='No sustained grounded-foot transfer credit',
+            placement=UsefulPlacement.contract(), placement_event_weight=.25,
+            loaded_slip_proxy_weight=.04, slip_deadband_m_s=.02,
+            slip_scale_m_s=.2, maximum_slip_cost=.04)
+        return result
+
+    def __call__(self, *args, placement, slip):
+        value = super().__call__(*args)
+        height,target_height,up_z = args[1:4]
+        posture = torch.exp(-((height-target_height)/.15).square()
+                            -((1-up_z.clamp(-1,1))/.2).square())
+        return value + .25*posture*placement - .04*slip
+
+
+@dataclass(frozen=True)
+class PeakPlacementRecoveryReward(PlacementRecoveryReward):
+    def contract(self):
+        from .support_motion import UsefulPlacement
+        result = super().contract()
+        result.update(schema='ball_step_recovery_v7',placement=UsefulPlacement.contract(peak_articulation=True))
+        return result

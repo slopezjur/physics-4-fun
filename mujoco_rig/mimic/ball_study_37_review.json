@@ -1,0 +1,9 @@
+{
+  "roots": {
+    "direction30": "logs/mimickit-training/stand-ball-stage37-direction-30-20261007-01",
+    "direction-30": "logs/mimickit-training/stand-ball-stage37-direction--30-20261007-01",
+    "direction90": "logs/mimickit-training/stand-ball-stage37-direction-90-20261007-01",
+    "x_control": "logs/mimickit-training/stand-ball-stage35-flight-geometry-20261007-01"
+  },
+  "comparisons": []
+}

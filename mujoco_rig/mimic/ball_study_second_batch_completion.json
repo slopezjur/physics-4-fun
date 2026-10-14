@@ -1,0 +1,322 @@
+{
+  "experiments": [
+    {
+      "step": 1,
+      "global_stage": 22,
+      "evaluations": [
+        "logs/mimickit-training/stand-ball-stage22-onset-candidate-20261007-01"
+      ],
+      "new_cases": 192,
+      "reviews": [
+        "logs/mimickit-training/stand-ball-stage22-review-20261007-01"
+      ],
+      "learning": [],
+      "updates": 0
+    },
+    {
+      "step": 2,
+      "global_stage": 23,
+      "evaluations": [
+        "logs/mimickit-training/stand-ball-stage23-quiet-evaluation-20261007-01",
+        "logs/mimickit-training/stand-ball-stage23-fixed-evaluation-20261007-01",
+        "logs/mimickit-training/stand-ball-stage23-varied-evaluation-20261007-01"
+      ],
+      "new_cases": 768,
+      "reviews": [
+        "logs/mimickit-training/stand-ball-stage23-training-review-20261007-01",
+        "logs/mimickit-training/stand-ball-stage23-endpoint-review-20261007-01"
+      ],
+      "learning": [
+        "logs/mimickit-training/stand-ball-stage23-onset-learning-20261007-02"
+      ],
+      "updates": 600
+    },
+    {
+      "step": 3,
+      "global_stage": 24,
+      "evaluations": [
+        "logs/mimickit-training/stand-ball-stage24-quiet-retention-20261007-01",
+        "logs/mimickit-training/stand-ball-stage24-fixed-retention-20261007-01",
+        "logs/mimickit-training/stand-ball-stage24-varied-retention-20261007-01"
+      ],
+      "new_cases": 96,
+      "reviews": [
+        "logs/mimickit-training/stand-ball-stage24-review-20261007-01"
+      ],
+      "learning": [],
+      "updates": 0
+    },
+    {
+      "step": 4,
+      "global_stage": 25,
+      "evaluations": [
+        "logs/mimickit-training/stand-ball-stage25-quiet-evaluation-20261007-01",
+        "logs/mimickit-training/stand-ball-stage25-fixed-evaluation-20261007-01",
+        "logs/mimickit-training/stand-ball-stage25-varied-evaluation-20261007-01"
+      ],
+      "new_cases": 768,
+      "reviews": [
+        "logs/mimickit-training/stand-ball-stage25-training-review-20261007-01",
+        "logs/mimickit-training/stand-ball-stage25-endpoint-review-20261007-01"
+      ],
+      "learning": [
+        "logs/mimickit-training/stand-ball-stage25-small-rate-learning-20261007-01"
+      ],
+      "updates": 600
+    },
+    {
+      "step": 5,
+      "global_stage": 26,
+      "evaluations": [
+        "logs/mimickit-training/stand-ball-stage26-normalizer_only-evaluation-20261007-01",
+        "logs/mimickit-training/stand-ball-stage26-weights_only-evaluation-20261007-01"
+      ],
+      "new_cases": 256,
+      "reviews": [
+        "logs/mimickit-training/stand-ball-stage26-review-20261007-01"
+      ],
+      "learning": [],
+      "updates": 0
+    },
+    {
+      "step": 6,
+      "global_stage": 27,
+      "evaluations": [
+        "logs/mimickit-training/stand-ball-stage27-quiet-evaluation-20261007-01",
+        "logs/mimickit-training/stand-ball-stage27-fixed-evaluation-20261007-01",
+        "logs/mimickit-training/stand-ball-stage27-varied-evaluation-20261007-01"
+      ],
+      "new_cases": 384,
+      "reviews": [
+        "logs/mimickit-training/stand-ball-stage27-training-review-20261007-01",
+        "logs/mimickit-training/stand-ball-stage27-endpoint-review-20261007-01"
+      ],
+      "learning": [
+        "logs/mimickit-training/stand-ball-stage27-dense-learning-20261007-01"
+      ],
+      "updates": 600
+    },
+    {
+      "step": 7,
+      "global_stage": 28,
+      "evaluations": [
+        "logs/mimickit-training/stand-ball-stage28-baseline-timing-20261007-01",
+        "logs/mimickit-training/stand-ball-stage28-candidate-timing-20261007-01"
+      ],
+      "new_cases": 512,
+      "reviews": [
+        "logs/mimickit-training/stand-ball-stage28-review-20261007-01"
+      ],
+      "learning": [],
+      "updates": 0
+    },
+    {
+      "step": 8,
+      "global_stage": 29,
+      "evaluations": [
+        "logs/mimickit-training/stand-ball-stage29-baseline-strength-20261007-01",
+        "logs/mimickit-training/stand-ball-stage29-candidate-strength-20261007-01"
+      ],
+      "new_cases": 256,
+      "reviews": [
+        "logs/mimickit-training/stand-ball-stage29-review-20261007-01"
+      ],
+      "learning": [],
+      "updates": 0
+    },
+    {
+      "step": 9,
+      "global_stage": 30,
+      "evaluations": [
+        "logs/mimickit-training/stand-ball-stage30-quiet-evaluation-20261007-01",
+        "logs/mimickit-training/stand-ball-stage30-fixed-evaluation-20261007-01",
+        "logs/mimickit-training/stand-ball-stage30-varied-evaluation-20261007-01"
+      ],
+      "new_cases": 384,
+      "reviews": [
+        "logs/mimickit-training/stand-ball-stage30-training-review-20261007-01",
+        "logs/mimickit-training/stand-ball-stage30-endpoint-review-20261007-01"
+      ],
+      "learning": [
+        "logs/mimickit-training/stand-ball-stage30-stronger-learning-20261007-01"
+      ],
+      "updates": 600
+    },
+    {
+      "step": 10,
+      "global_stage": 31,
+      "evaluations": [
+        "logs/mimickit-training/stand-ball-stage31-quiet-evaluation-20261007-01",
+        "logs/mimickit-training/stand-ball-stage31-fixed-evaluation-20261007-01",
+        "logs/mimickit-training/stand-ball-stage31-varied-evaluation-20261007-01"
+      ],
+      "new_cases": 384,
+      "reviews": [
+        "logs/mimickit-training/stand-ball-stage31-training-review-20261007-01",
+        "logs/mimickit-training/stand-ball-stage31-endpoint-review-20261007-01"
+      ],
+      "learning": [
+        "logs/mimickit-training/stand-ball-stage31-rehearsal-learning-20261007-01"
+      ],
+      "updates": 600
+    },
+    {
+      "step": 11,
+      "global_stage": 32,
+      "evaluations": [
+        "logs/mimickit-training/stand-ball-stage32-strong-timing-20261007-01"
+      ],
+      "new_cases": 384,
+      "reviews": [
+        "logs/mimickit-training/stand-ball-stage32-review-20261007-01"
+      ],
+      "learning": [],
+      "updates": 0
+    },
+    {
+      "step": 12,
+      "global_stage": 33,
+      "evaluations": [
+        "logs/mimickit-training/stand-ball-stage33-quiet-evaluation-20261007-01",
+        "logs/mimickit-training/stand-ball-stage33-fixed-evaluation-20261007-01",
+        "logs/mimickit-training/stand-ball-stage33-varied-evaluation-20261007-01"
+      ],
+      "new_cases": 384,
+      "reviews": [
+        "logs/mimickit-training/stand-ball-stage33-training-review-20261007-01",
+        "logs/mimickit-training/stand-ball-stage33-endpoint-review-20261007-01"
+      ],
+      "learning": [
+        "logs/mimickit-training/stand-ball-stage33-focused-learning-20261007-02"
+      ],
+      "updates": 600
+    },
+    {
+      "step": 13,
+      "global_stage": 34,
+      "evaluations": [
+        "logs/mimickit-training/stand-ball-stage34-held-feedback-20261007-01"
+      ],
+      "new_cases": 128,
+      "reviews": [
+        "logs/mimickit-training/stand-ball-stage34-review-20261007-01"
+      ],
+      "learning": [],
+      "updates": 0
+    },
+    {
+      "step": 14,
+      "global_stage": 35,
+      "evaluations": [
+        "logs/mimickit-training/stand-ball-stage35-flight-geometry-20261007-01"
+      ],
+      "new_cases": 128,
+      "reviews": [
+        "logs/mimickit-training/stand-ball-stage35-review-20261007-01"
+      ],
+      "learning": [],
+      "updates": 0
+    },
+    {
+      "step": 15,
+      "global_stage": 36,
+      "evaluations": [
+        "logs/mimickit-training/stand-ball-stage36-mass-speed-20261007-01"
+      ],
+      "new_cases": 128,
+      "reviews": [
+        "logs/mimickit-training/stand-ball-stage36-review-20261007-01"
+      ],
+      "learning": [],
+      "updates": 0
+    },
+    {
+      "step": 16,
+      "global_stage": 37,
+      "evaluations": [
+        "logs/mimickit-training/stand-ball-stage37-varied-retention-20261007-01"
+      ],
+      "new_cases": 32,
+      "reviews": [],
+      "learning": [],
+      "updates": 0
+    },
+    {
+      "step": 17,
+      "global_stage": 38,
+      "evaluations": [
+        "logs/mimickit-training/stand-ball-stage38-candidate-mild-timing-20261007-01",
+        "logs/mimickit-training/stand-ball-stage38-candidate-strong-timing-20261007-01"
+      ],
+      "new_cases": 512,
+      "reviews": [
+        "logs/mimickit-training/stand-ball-stage38-candidate-review-20261007-01"
+      ],
+      "learning": [],
+      "updates": 0
+    },
+    {
+      "step": 18,
+      "global_stage": 39,
+      "evaluations": [
+        "logs/mimickit-training/stand-ball-stage39-baseline-direction-30-20261007-01",
+        "logs/mimickit-training/stand-ball-stage39-baseline-direction--30-20261007-01",
+        "logs/mimickit-training/stand-ball-stage39-baseline-direction-90-20261007-01",
+        "logs/mimickit-training/stand-ball-stage39-candidate-direction-0-20261007-01",
+        "logs/mimickit-training/stand-ball-stage39-candidate-direction-30-20261007-01",
+        "logs/mimickit-training/stand-ball-stage39-candidate-direction--30-20261007-01",
+        "logs/mimickit-training/stand-ball-stage39-candidate-direction-90-20261007-01"
+      ],
+      "new_cases": 448,
+      "reviews": [
+        "logs/mimickit-training/stand-ball-stage39-candidate-review-20261007-01"
+      ],
+      "learning": [],
+      "updates": 0
+    },
+    {
+      "step": 19,
+      "global_stage": 40,
+      "evaluations": [
+        "logs/mimickit-training/stand-ball-stage40-baseline-repeated-20261007-01",
+        "logs/mimickit-training/stand-ball-stage40-baseline-late-20261007-01",
+        "logs/mimickit-training/stand-ball-stage40-candidate-repeated-20261007-01",
+        "logs/mimickit-training/stand-ball-stage40-candidate-late-20261007-01"
+      ],
+      "new_cases": 256,
+      "reviews": [
+        "logs/mimickit-training/stand-ball-stage40-candidate-review-20261007-01"
+      ],
+      "learning": [],
+      "updates": 0
+    },
+    {
+      "step": 20,
+      "global_stage": 41,
+      "evaluations": [
+        "logs/mimickit-training/stand-ball-stage41-quiet-evaluation-20261007-01",
+        "logs/mimickit-training/stand-ball-stage41-fixed-evaluation-20261007-01",
+        "logs/mimickit-training/stand-ball-stage41-varied-evaluation-20261007-01"
+      ],
+      "new_cases": 384,
+      "reviews": [
+        "logs/mimickit-training/stand-ball-stage41-training-review-20261007-01",
+        "logs/mimickit-training/stand-ball-stage41-endpoint-review-20261007-01"
+      ],
+      "learning": [
+        "logs/mimickit-training/stand-ball-stage41-focused-replication-20261007-01"
+      ],
+      "updates": 600
+    }
+  ],
+  "excluded_learning_roots": [
+    "logs/mimickit-training/stand-ball-stage23-onset-learning-20261007-01",
+    "logs/mimickit-training/stand-ball-stage33-focused-learning-20261007-01"
+  ],
+  "primary_review": "logs/mimickit-training/stand-ball-stage33-endpoint-review-20261007-01",
+  "timing_review": "logs/mimickit-training/stand-ball-stage38-candidate-review-20261007-01",
+  "direction_review": "logs/mimickit-training/stand-ball-stage39-candidate-review-20261007-01",
+  "repeated_review": "logs/mimickit-training/stand-ball-stage40-candidate-review-20261007-01",
+  "retention_root": "logs/mimickit-training/stand-ball-stage37-varied-retention-20261007-01",
+  "replicate_varied_root": "logs/mimickit-training/stand-ball-stage41-varied-evaluation-20261007-01"
+}

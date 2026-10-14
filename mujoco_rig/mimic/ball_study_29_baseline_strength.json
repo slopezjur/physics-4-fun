@@ -1,0 +1,86 @@
+{
+  "schema": "frozen_ball_study_v1",
+  "question": "Does the dense-varied pair improve the controlled chest-impact strength boundary?",
+  "seeds": [
+    301027,
+    301028
+  ],
+  "actors": [
+    "baseline"
+  ],
+  "signs": [
+    1,
+    -1
+  ],
+  "conditions": [
+    {
+      "name": "speed150",
+      "mass_kg": 5,
+      "speed_m_s": 1.5,
+      "distance_m": 0.25,
+      "launch_seconds": 5,
+      "seconds": 12
+    },
+    {
+      "name": "speed160",
+      "mass_kg": 5,
+      "speed_m_s": 1.6,
+      "distance_m": 0.25,
+      "launch_seconds": 5,
+      "seconds": 12
+    }
+  ],
+  "maximum_cases": 128,
+  "training_updates": 0,
+  "checkpoint_group": "baseline",
+  "decision": "Step29: prior selected versus dense-varied pair,5kg at1.5/1.6m/s,.25m distance,5secondlaunch and12secondhorizon.256new frozen cases total:bothparents,signs,backends,8poses. Keep every physical/body/insertion/parity gate; report rejected conditions without tolerance changes. Identify an admitted partially recoverable stronger dose only if both parents have1-7/8+X recoveries for the same actor group. No promotion or stronger learning automatically follows.",
+  "evidence": [
+    "logs/mimickit-training/stand-ball-stage09-quiet-replay-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage09-quiet-replay-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage08-feedback-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage08-feedback-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage12-task-reward-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage12-task-reward-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage15-learning-curve-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage15-learning-curve-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage14-completion-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage16-seed-replication-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage16-seed-replication-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage20-decision-20261007-01/decision.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-source-20261007-01/protocol.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-source-20261007-01/301027-source-two-+1-native/report.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-source-20261007-01/301027-source-two-+1-gpu/report.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-source-20261007-01/301027-source-two-+1-native/body-report.json",
+    "logs/mimickit-training/stand-ball-batch-final-review-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-batch-final-review-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage18-sustained-candidate-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage18-sustained-candidate-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-candidate-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage19-repeated-candidate-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage20-delayed-candidate-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage20-delayed-candidate-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage13-onset-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage13-onset-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-followup21-review-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-followup21-review-20261007-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage27-endpoint-review-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage27-endpoint-review-20261007-01/final-verification.json"
+  ],
+  "feedback": "live",
+  "checkpoints": {
+    "301027": {
+      "root": "logs/mimickit-training/stand-ball-stage14-completion-20261007-01",
+      "checkpoint": "logs/mimickit-training/stand-ball-stage14-completion-20261007-01/301027/single_ball/updates-200/model.pt"
+    },
+    "301028": {
+      "root": "logs/mimickit-training/stand-ball-stage14-completion-20261007-01",
+      "checkpoint": "logs/mimickit-training/stand-ball-stage14-completion-20261007-01/301028/single_ball/updates-200/model.pt"
+    }
+  },
+  "direction_degrees": 0,
+  "scope": "May overlap the independent frozen timing sweep; separate worlds, no learning or timing benchmark."
+}

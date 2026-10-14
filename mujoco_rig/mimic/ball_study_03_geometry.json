@@ -1,0 +1,20 @@
+{
+  "schema": "frozen_ball_study_v1",
+  "question": "Do shorter trajectories produce actual chest-first contact at unchanged mass and horizontal speed?",
+  "seeds": [301027, 301028],
+  "actors": ["source"],
+  "signs": [1, -1],
+  "conditions": [
+    {"name": "distance025", "mass_kg": 5, "speed_m_s": 1, "distance_m": 0.25},
+    {"name": "distance035", "mass_kg": 5, "speed_m_s": 1, "distance_m": 0.35}
+  ],
+  "maximum_cases": 128,
+  "training_updates": 0,
+  "decision": "Prefer the shorter distance only if every native first cluster contacts Chest without Head, every shot hits, and backend parity passes; otherwise choose no corrected chest condition.",
+  "evidence": [
+    "logs/mimickit-training/stand-ball-first-contact-20261006-02/report.json",
+    "logs/mimickit-training/stand-ball-first-contact-20261006-02/final-verification.json",
+    "logs/mimickit-training/stand-ball-contact-map-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-contact-map-20261006-01/final-verification.json"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "schema": "stand_to_perturb_pilot_v1",
+  "prior": "logs/mimickit-training/stand-generalization-20-301028-curriculum-20261006-01",
+  "seeds": [301027, 301028],
+  "envs": 64,
+  "updates": 300,
+  "maximum_training_seconds_per_arm": 600.0,
+  "episode_seconds": 12.0,
+  "quiet_retention_seconds": 120.0,
+  "training_force_n": 60.0,
+  "pulse_onset_seconds": 5.0,
+  "pulse_duration_seconds": 0.1,
+  "assessment_forces_n": [30, 60, 90],
+  "sources": {
+    "301027": {
+      "root": "logs/mimickit-training/stand-push-learning-301027-quiet-20261006-01",
+      "admission": "logs/mimickit-training/stand-generalization-16-301027-quiet-20261006-01"
+    },
+    "301028": {
+      "root": "logs/mimickit-training/stand-push-learning-301028-quiet-20261006-01",
+      "admission": "logs/mimickit-training/stand-generalization-16-301028-quiet-20261006-01"
+    }
+  }
+}

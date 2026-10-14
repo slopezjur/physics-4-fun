@@ -1,0 +1,36 @@
+{
+  "schema": "chest_normalizer_swap_v1",
+  "question": "Does changed observation normalization or changed actor weights explain quiet-continuation recovery regression?",
+  "seeds": [
+    301027,
+    301028
+  ],
+  "parent": {
+    "301027": {
+      "root": "logs/mimickit-training/stand-ball-stage14-completion-20261007-01",
+      "checkpoint": "logs/mimickit-training/stand-ball-stage14-completion-20261007-01/301027/single_ball/updates-200/model.pt"
+    },
+    "301028": {
+      "root": "logs/mimickit-training/stand-ball-stage14-completion-20261007-01",
+      "checkpoint": "logs/mimickit-training/stand-ball-stage14-completion-20261007-01/301028/single_ball/updates-200/model.pt"
+    }
+  },
+  "continued": {
+    "301027": {
+      "root": "logs/mimickit-training/stand-ball-stage25-small-rate-learning-20261007-01",
+      "checkpoint": "logs/mimickit-training/stand-ball-stage25-small-rate-learning-20261007-01/301027/quiet/final/model.pt"
+    },
+    "301028": {
+      "root": "logs/mimickit-training/stand-ball-stage25-small-rate-learning-20261007-01",
+      "checkpoint": "logs/mimickit-training/stand-ball-stage25-small-rate-learning-20261007-01/301028/quiet/final/model.pt"
+    }
+  },
+  "parent_policy_hashes": {
+    "301027": "08c7ae1149711dfd19bc6b3625c30e43ba789fa1bd6248018622a643712719a8",
+    "301028": "e6ef2b5142b1e9aceb7754177798298c9763e0adb916e883560d60b52c4b6ea5"
+  },
+  "training_updates": 0,
+  "evaluation_cases": 0,
+  "evaluation_only": true,
+  "decision": "Prepare two component interventions per parent: parent weights with continued observation normalization; continued actor/mean weights with parent normalization. Action normalization must match exactly. All non-policy learner state stays from the parent; do not train or promote these diagnostic hybrids. Subsequent frozen evaluations at1/5second launches,7postlaunch seconds, bothsigns/backends and8poses:256new cases. Compare against sealed parent and continued-quiet endpoints with exactly matched starts. Check prequalification as well as physical recovery; a hybrid failing pre-hit standing cannot establish a recovery-only effect."
+}

@@ -1,0 +1,7 @@
+{
+  "roots": {
+    "flight_geometry": "logs/mimickit-training/stand-ball-stage35-flight-geometry-20261007-01",
+    "live_strength": "logs/mimickit-training/stand-ball-stage29-baseline-strength-20261007-01"
+  },
+  "comparisons": []
+}

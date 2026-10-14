@@ -1,0 +1,11 @@
+# Bounded PPO update-size comparison - 2026-10-08
+
+Compare actor learning rates 1e-5 and 3e-6 with independent seeds 501028 and 511028, always starting from the retained queue-masked seed-451028 actor and fresh optimizers. Each of four runs receives 32 batches of 64 frames across 12 training worlds: 24,576 transitions. Preserve exploration std 0.005 rad, rewards, physical adapter, anchor, holdouts, critic settings, three epochs and minibatch 256. No further rate sweep or longer run in this protocol.
+
+Preserve the old experiment's sealed files. The successor collector uses the evaluator's fixed double-precision hold goal, exact hold window and final return-frame count for success. Confirm deterministic command/qpos parity against the original reference before learning. Replay saved successful teacher and failed learner traces through the corrected gate before learning.
+
+Retain the existing sampled minibatch KL stopping rule in both arms to isolate learning rate. Add observation-only analytic Gaussian KL on every eligible state in the complete collection batch after each actor update: sum squared mean changes / (2 * 0.005^2), averaged over states. This measures divergence on collected states, not a universal trust-region guarantee. Do not use this added diagnostic to stop, reject or undo steps in this comparison.
+
+Log weighted tracking, COM, foot-retention, support, failure replacement and terminal success contributions separately by quiet, ramp, hold, return and settle phase, excluding inactive holdout worlds. Assert their sum equals the actual reward. Record the fraction of hold samples with tracking/COM contributions below 1% of their maxima. Diagnostics must not alter random sampling or optimization.
+
+Evaluate all four final mean policies on eight nominal cases and sixteen 30-second quiet cases. Evaluate varied timing only if complete-skill success improves and supported-hold/return counts are at least the original 4/8. Recompute gates from saved traces, verify quiet identity and check input/output hashes. Compare the new high-rate control with the preceding pilot for exact reproducibility. Report per-pose regressions and avoid promoting on aggregate support alone. No Arena update, export, C# build, teacher fitting, lifting or hits.

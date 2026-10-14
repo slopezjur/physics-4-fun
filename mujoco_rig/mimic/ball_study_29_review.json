@@ -1,0 +1,12 @@
+{
+  "roots": {
+    "baseline": "logs/mimickit-training/stand-ball-stage29-baseline-strength-20261007-01",
+    "candidate": "logs/mimickit-training/stand-ball-stage29-candidate-strength-20261007-01"
+  },
+  "comparisons": [
+    [
+      "baseline",
+      "candidate"
+    ]
+  ]
+}

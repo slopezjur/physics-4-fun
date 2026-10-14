@@ -1,0 +1,77 @@
+{
+  "schema": "chest_checkpoint_screen_v1",
+  "question": "Does recovery improve transiently at 100 or 200 updates before the longer run endpoint?",
+  "seeds": [
+    301027,
+    301028
+  ],
+  "actors": [
+    "source"
+  ],
+  "arms": [
+    "quiet",
+    "single_ball"
+  ],
+  "checkpoints": [
+    100,
+    200
+  ],
+  "checkpoint_root": "logs/mimickit-training/stand-ball-stage14-completion-20261007-01",
+  "seconds": 12,
+  "launch_seconds": 5,
+  "launch_distance_m": 0.25,
+  "assessment_levels": [
+    [
+      5,
+      1
+    ],
+    [
+      5,
+      1.4
+    ]
+  ],
+  "training_speed_m_s": 1.4,
+  "quiet_retention_seconds": 120,
+  "maximum_evaluation_cases": 640,
+  "training_updates": 0,
+  "baseline_impacts": [
+    {
+      "root": "logs/mimickit-training/stand-ball-stage03-geometry-completion-20261006-01",
+      "verification": "verification.json",
+      "rows_root": "logs/mimickit-training/stand-ball-stage03-geometry-20261006-01",
+      "condition": "distance025"
+    },
+    {
+      "root": "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01",
+      "condition": "speed140"
+    }
+  ],
+  "evidence": [
+    "logs/mimickit-training/stand-ball-pilot-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-pilot-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage03-geometry-completion-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage03-geometry-completion-20261006-01/verification.json",
+    "logs/mimickit-training/stand-ball-stage03-geometry-20261006-01/progress.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage05-refinement-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage06-sustained-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage06-sustained-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage10-momentum-source-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage10-momentum-source-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage10-momentum-quiet-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage10-momentum-quiet-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage10-momentum-single_ball-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage10-momentum-single_ball-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage07-learning-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage11-velocity-reward-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage11-velocity-reward-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage13-onset-20261006-01/report.json",
+    "logs/mimickit-training/stand-ball-stage13-onset-20261006-01/final-verification.json",
+    "logs/mimickit-training/stand-ball-stage14-completion-20261007-01/report.json",
+    "logs/mimickit-training/stand-ball-stage14-completion-20261007-01/final-verification.json"
+  ],
+  "decision": "Verify every checkpoint and AMP sidecar against the Stage 14 output seal. Evaluate matched quiet/ball checkpoints at 100 and 200 updates on both seeds, both impact levels/signs/backends/eight poses: 512 new cases. Only a checkpoint arm with replicated strict absolute gain over source, no direction/level regression and admitted Chest-first/no-Head/backend checks receives 120-second Stand (up to 128 additional cases). Separately require ball to beat matched quiet for impact-practice attribution. Retention not measured stays null. Compare with Stage 14 endpoint at 300 updates; no automatic promotion."
+}
+
+

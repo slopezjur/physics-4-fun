@@ -1,0 +1,49 @@
+{
+  "roots": {
+    "baseline": "logs/mimickit-training/stand-ball-stage22-onset-candidate-20261007-01",
+    "previous_quiet": "logs/mimickit-training/stand-ball-stage23-quiet-evaluation-20261007-01",
+    "quiet": "logs/mimickit-training/stand-ball-stage25-quiet-evaluation-20261007-01",
+    "previous_fixed": "logs/mimickit-training/stand-ball-stage23-fixed-evaluation-20261007-01",
+    "fixed": "logs/mimickit-training/stand-ball-stage25-fixed-evaluation-20261007-01",
+    "previous_varied": "logs/mimickit-training/stand-ball-stage23-varied-evaluation-20261007-01",
+    "varied": "logs/mimickit-training/stand-ball-stage25-varied-evaluation-20261007-01"
+  },
+  "comparisons": [
+    [
+      "baseline",
+      "quiet"
+    ],
+    [
+      "baseline",
+      "fixed"
+    ],
+    [
+      "baseline",
+      "varied"
+    ],
+    [
+      "previous_quiet",
+      "quiet"
+    ],
+    [
+      "previous_fixed",
+      "fixed"
+    ],
+    [
+      "previous_varied",
+      "varied"
+    ],
+    [
+      "quiet",
+      "fixed"
+    ],
+    [
+      "quiet",
+      "varied"
+    ],
+    [
+      "fixed",
+      "varied"
+    ]
+  ]
+}

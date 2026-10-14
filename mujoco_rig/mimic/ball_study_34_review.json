@@ -1,0 +1,12 @@
+{
+  "roots": {
+    "held_feedback": "logs/mimickit-training/stand-ball-stage34-held-feedback-20261007-01",
+    "live_strength": "logs/mimickit-training/stand-ball-stage29-baseline-strength-20261007-01"
+  },
+  "comparisons": [
+    [
+      "live_strength",
+      "held_feedback"
+    ]
+  ]
+}
